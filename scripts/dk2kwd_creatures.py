@@ -14,10 +14,21 @@ angerInHand are signed (Mistress: slapping removes 5000 anger), not the template
 bytes whose name is the NUL-terminated first 64; `get` returns their raw bytes and
 `resource_name` / `anim_name` their names.
 
+The 20 bytes after the name (`art_tail` / `set_art_tail`, an ArtTail; resource.bt's ArtResource,
+offsets after the name): flags u32 @+0 (ArtResourceFlag: 0x1 IN_USE, 0x8 HAS_START_ANIMATION,
+0x10 HAS_END_ANIMATION, 0x80 DOESNT_LOOP, 0x200 DOESNT_USE_PROGRESSIVE_MESH, ...), a 12-byte union
+@+4 read in its animation view (frames u32 @+4, fps u32 @+8, startDist u16 @+12, endDist u16
+@+14), type u8 @+16 (5 MESH, 6 ANIMATING_MESH, 0 NONE, ...), startAf @+17, endAf @+18 and
+sometimesOne @+19. In a mesh slot (type 5) the union is the mesh view instead: scale u32 @+4
+(4096 = 1.0), then u16 frames @+8 and three u16 left-overs; ArtTail shows those bytes in the
+animation view's fields (frames = scale, fps = the u16 pair at +8). Evidence: the template, and the
+46 editor creatures' 1220 non-empty slots against their files (Task 8a report, item C).
+
 LICENCE: GPL-3.0.
 """
 import struct
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from scripts.dk2kwd_blocks import Block, rebuilt_block
 
@@ -25,6 +36,13 @@ RECORD_SIZE = 5449
 RECORD_SIZE_WITH_TAIL = 5537
 RESOURCE_SIZE = 84
 RESOURCE_NAME_SIZE = 64
+ART_TAIL_SIZE = RESOURCE_SIZE - RESOURCE_NAME_SIZE  # 20
+ART_FLAG_IN_USE = 0x1
+ART_FLAG_HAS_START_ANIMATION = 0x8   # the game also loads <name>Start.kmf
+ART_FLAG_HAS_END_ANIMATION = 0x10    # the game also loads <name>End.kmf
+ART_TYPE_NONE = 0
+ART_TYPE_MESH = 5
+ART_TYPE_ANIMATING_MESH = 6
 FIXED_ONE = 4096  # float32 / float16 fixed-point scale
 
 _ART = f"{RESOURCE_SIZE}s"
@@ -188,6 +206,30 @@ def anim_slot(slot: str) -> str:
     return _SLOT_BY_SHORT[_short(slot)]
 
 
+class ArtTail(NamedTuple):
+    """The 20 bytes after a resource's name, in the animation view (see the module docstring)."""
+    flags: int
+    frames: int
+    fps: int
+    start_dist: int
+    end_dist: int
+    type: int
+    start_af: int
+    end_af: int
+    sometimes_one: int
+
+
+_ART_TAIL_FMT = "<IIIHHBBBB"
+assert struct.calcsize(_ART_TAIL_FMT) == ART_TAIL_SIZE
+
+
+def _check_art_tail(tail: ArtTail) -> None:
+    for name, code, value in zip(ArtTail._fields, _ART_TAIL_FMT[1:], tail):
+        top = 2 ** (8 * struct.calcsize("<" + code)) - 1
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= top:
+            raise ValueError(f"art tail {name}={value!r} is not an integer in 0..{top}")
+
+
 def _put_text(raw: bytearray, offset: int, size: int, text: str) -> None:
     data = text.encode("ascii")
     if len(data) >= size:
@@ -243,6 +285,22 @@ class Creature:
         if field not in _ALL_RESOURCES:
             raise KeyError(f"{field} is not a resource")
         _put_text(self.raw, FIELDS[field].offset, RESOURCE_NAME_SIZE, name)
+
+    def _resource_offset(self, field: str) -> int:
+        if field not in _ALL_RESOURCES:
+            raise KeyError(f"{field} is not a resource")
+        return FIELDS[field].offset + RESOURCE_NAME_SIZE
+
+    def art_tail(self, field: str) -> ArtTail:
+        """The 20 bytes after a resource's name (flags, frames, fps, ..., type; see ArtTail)."""
+        return ArtTail(*struct.unpack_from(_ART_TAIL_FMT, self.raw, self._resource_offset(field)))
+
+    def set_art_tail(self, field: str, tail: ArtTail) -> None:
+        """Write a resource's 20-byte tail; its name is kept. ValueError for a value out of range."""
+        offset = self._resource_offset(field)
+        tail = ArtTail(*tail)
+        _check_art_tail(tail)
+        struct.pack_into(_ART_TAIL_FMT, self.raw, offset, *tail)
 
     def anim_name(self, slot: str) -> str:
         return self.resource_name(anim_slot(slot))

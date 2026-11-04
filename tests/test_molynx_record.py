@@ -7,9 +7,10 @@ from scripts.dk2kwd_creatures import (
     ANIM_SLOTS, FIELDS, RECORD_SIZE, RESOURCE_NAME_SIZE, Creature, anim_slot, read_creatures,
 )
 from scripts.dk2paths import EDITOR_DIR, MAPS_DIR, have
+from molynx_files import ANIM_INFO, FILE_WRAPS
 from scripts.molynx_record import (
-    CLIPS, MULTIPLIERS, POSE_STEMS, SLOT_CLIPS, build_molynx, review_list, slot_assignment,
-    stems_used,
+    CLIPS, MULTIPLIERS, POSE_STEMS, SLOT_CLIPS, SOURCE_WRAP, build_molynx, file_plan, review_list,
+    slot_assignment, stems_used,
 )
 
 CREATURES = 0xAA
@@ -43,6 +44,88 @@ BILE_EMPTY_SLOTS = {
     "animExtra43Resource", "animExtra44Resource", "animExtra45Resource", "animExtra46Resource",
     "animExtra47Resource", "animWalk2Resource",
 }
+
+# The real Bile Demon: slot -> (file stem, its 20-byte tail before, after). Before: the editor
+# record. After, by the stage-2 rule: flags lose 0x8 / 0x10; frames = file frames (- 1 when the file
+# loops); fps 30; startDist / endDist / sometimesOne kept from an animation slot, zeroed for a mesh
+# slot that becomes an animation; type 6; startAf = endAf = 0. Pose slots keep their tail.
+TAILS = {
+    "animWalkResource": ("walk", "19000000280000001e0000006e08560606282800",
+                         "010000002e0000001e0000006e08560606000000"),
+    "animDraggedPoseResource": ("DraggedPose", "00000000001000000100000068049e0005000000",
+                                "00000000001000000100000068049e0005000000"),
+    "animRecoilHffResource": ("getting_hit", "000000002e0000001e0000000000000006000000",
+                              "00000000110000001e0000000000000006000000"),
+    "animMelee1Resource": ("attack", "000000005a0000001e0000000000000006000000",
+                           "00000000290000001e0000000000000006000000"),
+    "animMagicResource": ("getting_hit", "00000000410000001e0000000000000006000000",
+                          "00000000110000001e0000000000000006000000"),
+    "animDieResource": ("die", "010000004f0000001e0000000000000006000000",
+                        "010000001f0000001e0000000000000006000000"),
+    "animHappyResource": ("happy", "00000000820000001e0000000000000006000000",
+                          "000000003b0000001e0000000000000006000000"),
+    "animAngryResource": ("angry", "000000002d0000001e0000000000000006000000",
+                          "00000000170000001e0000000000000006000000"),
+    "animStunnedPoseResource": ("staggering", "00000000001000000100000068049e0005000000",
+                                "000000005f0000001e0000000000000006000000"),
+    "animSwingResource": ("being_picked_up", "000000003c0000001e0000000000000006000000",
+                          "000000003c0000001e0000000000000006000000"),
+    "animSleepResource": ("sleeping", "00000000780000000f0000000000000006000000",
+                          "00000000880000001e0000000000000006000000"),
+    "animEatResource": ("eating", "01000000500000001e0000000000000006000000",
+                        "01000000530000001e0000000000000006000000"),
+    "animTortureResource": ("getting_hit", "01000000640000001e0000000000000006000000",
+                            "01000000110000001e0000000000000006000000"),
+    "animDrinkResource": ("eating", "00000000960000001e0000000000000006000000",
+                          "00000000530000001e0000000000000006000000"),
+    "animIdle1Resource": ("stand", "00000000be0000001e0000000000000006000000",
+                          "000000003d0000001e0000000000000006000000"),
+    "animRecoilHfbResource": ("being_slapped", "000000002e0000001e0000000000000006000000",
+                              "00000000230000001e0000000000000006000000"),
+    "animBuildingResource": ("manufacturing", "18000000210000001e00000000000000062d2000",
+                             "00000000210000001e0000000000000006000000"),
+    "animPrayResource": ("praying", "180000003c0000001e0000000000000006383700",
+                         "00000000780000001e0000000000000006000000"),
+    "animFallbackResource": ("knockback", "01000000210000001e0000000000000006000000",
+                             "010000003d0000001e0000000000000006000000"),
+    "animElecResource": ("getting_hit_loop", "0000000000100000010000006804c80005000000",
+                         "00000000110000001e0000000000000006000000"),
+    "animElectrocuteResource": ("getting_hit", "010000000a0000001e0000000000000006000000",
+                                "01000000110000001e0000000000000006000000"),
+    "animGetUpResource": ("waking_up", "010000003f0000001e0000000000000006000000",
+                          "010000002e0000001e0000000000000006000000"),
+    "animDanceResource": ("celebrating", "010000005f0000001e0000000000000006000000",
+                          "010000005e0000001e0000000000000006000000"),
+    "animEntranceResource": ("walk_once", "00000000930000001e0000000000000006000000",
+                             "000000002f0000001e0000000000000006000000"),
+    "animIdle2Resource": ("fidgeting", "00000000650000001e0000000000000006000000",
+                          "000000003f0000001e0000000000000006000000"),
+    "drunkIdle": ("fidgeting", "01000000780000001e0000000000000006000001",
+                  "010000003f0000001e0000000000000006000001"),
+    "animWalkbackResource": ("walk", "190000001a0000001e000000a103000006120c00",
+                             "010000002e0000001e000000a103000006000000"),
+    "animPoseFrameResource": ("PoseFrame", "0100000000100000000000006804f40005c90601",
+                              "0100000000100000000000006804f40005c90601"),
+    "animDiePoseResource": ("DiePose", "0100000000100000000000006804ec0005c9fe00",
+                            "0100000000100000000000006804ec0005c9fe00"),
+}
+# resource.bt: the tail's sub-fields by offset after the 64-byte name.
+TAIL_FIELDS = {0: "flags", 1: "flags", 2: "flags", 3: "flags", 4: "frames", 5: "frames",
+               6: "frames", 7: "frames", 8: "fps", 9: "fps", 10: "fps", 11: "fps",
+               12: "startDist", 13: "startDist", 14: "endDist", 15: "endDist", 16: "type",
+               17: "startAf", 18: "endAf", 19: "sometimesOne"}
+
+
+def build(bile, stage, order=ORDER, text_ids=None, **kw):
+    """build_molynx with the real files' anim_info and wrap flags."""
+    kw.setdefault("file_wraps", FILE_WRAPS)
+    return build_molynx(bile, stage, order, text_ids, kw.pop("anim_info", ANIM_INFO), **kw)
+
+
+def tail_hex(creature, field):
+    offset = FIELDS[field].offset + RESOURCE_NAME_SIZE
+    return bytes(creature.raw[offset:offset + 20]).hex()
+
 
 needs_data = pytest.mark.skipif(not have(EDITOR_DIR) or not have(MAPS_DIR),
                                 reason="DK2 editor data not present")
@@ -175,7 +258,7 @@ def test_stage_must_be_1_2_or_3(bile, stage):
 @pytest.mark.parametrize("stage", [1, 2, 3])
 def test_build_does_not_mutate_the_bile_demon_and_keeps_the_size(bile, stage):
     before = bytes(bile.raw)
-    molynx = build_molynx(bile, stage, ORDER, TEXT_IDS)
+    molynx = build(bile, stage, text_ids=TEXT_IDS)
     assert bytes(bile.raw) == before
     assert molynx is not bile and molynx.raw is not bile.raw
     assert len(molynx.raw) == len(bile.raw)
@@ -200,42 +283,223 @@ def test_stage1_ignores_text_ids(bile):
     assert bytes(build_molynx(bile, 1, ORDER, TEXT_IDS).raw) == bytes(build_molynx(bile, 1, ORDER).raw)
 
 
+def _changed_tail_fields(a: Creature, b: Creature) -> set[tuple[str, str]]:
+    """(resource field, part) of every differing byte: part is "name" or a tail sub-field."""
+    out = set()
+    for offset in changed_offsets(a, b):
+        field = _FIELD_AT[offset]
+        at = offset - FIELDS[field].offset
+        out.add((field, "name" if at < RESOURCE_NAME_SIZE else TAIL_FIELDS[at - RESOURCE_NAME_SIZE]))
+    return out
+
+
 @needs_data
-def test_stage2_adds_only_animation_slot_names(bile):
-    stage1, stage2 = build_molynx(bile, 1, ORDER), build_molynx(bile, 2, ORDER)
+def test_stage2_differs_only_in_slot_names_and_the_tails_of_animation_slots(bile):
+    stage1, stage2 = build_molynx(bile, 1, ORDER), build(bile, 2)
     expected = expected_slot_names(bile)
     assert len(expected) == 29  # 48 slots - unk_1 - the 18 the Bile Demon leaves empty
+    assert set(TAILS) == set(expected)
     assert changed_fields(stage1, stage2) == set(expected)
     assert changed_fields(bile, stage2) == STAGE1_FIELDS | set(expected)
-    for field, name in expected.items():
-        assert stage2.resource_name(field) == name
-        assert len(name.encode("ascii")) <= RESOURCE_NAME_SIZE
-    # Only the 64-byte name area changes; the 20 bytes after it are the Bile Demon's.
-    for offset in changed_offsets(stage1, stage2):
-        field = FIELDS[_FIELD_AT[offset]]
-        assert offset - field.offset < RESOURCE_NAME_SIZE
+    changed = _changed_tail_fields(stage1, stage2)
+    assert {field for field, part in changed if part == "name"} == set(expected)
+    tails = {(field, part) for field, part in changed if part != "name"}
+    poses = {"animPoseFrameResource", "animDiePoseResource", "animDraggedPoseResource"}
+    assert not {field for field, _ in tails} & poses  # pose tails stay the Bile Demon's
+    assert {part for _, part in tails} <= set(TAIL_FIELDS.values())
+    # Pinned per slot: walk loses Start/End and its start/end frames, its frames become 46 ...
+    assert ("animWalkResource", "flags") in tails and ("animWalkResource", "startAf") in tails
+    assert ("animWalkResource", "startDist") not in tails  # kept: walk was an animation
+    assert {("animElecResource", p) for p in ("frames", "fps", "startDist", "endDist", "type")} <= tails
     assert bytes(stage2.raw[RECORD_SIZE:]) == bytes(bile.raw[RECORD_SIZE:])
 
 
 @needs_data
+def test_stage2_tails_for_the_real_bile_demon(bile):
+    stage2 = build(bile, 2)
+    for field, (stem, before, after) in TAILS.items():
+        assert tail_hex(bile, field) == before, field
+        assert tail_hex(stage2, field) == after, field
+        assert stage2.resource_name(field) == "Molynx-" + stem, field
+
+
+@needs_data
+def test_stage2_tail_rule_written_out(bile):
+    """The same rule as TAILS, spelled out field by field against the record's own values."""
+    stage2 = build(bile, 2)
+    for field, (stem, _, _) in TAILS.items():
+        old, new = bile.art_tail(field), stage2.art_tail(field)
+        if stem in POSE_STEMS:
+            assert new == old and old.type == 5, field
+            continue
+        info = ANIM_INFO[stem]
+        assert new.flags == old.flags & ~0x18, field
+        assert new.frames == info["frames"] - (1 if info["wrap"] else 0), field
+        assert (new.fps, new.type, new.start_af, new.end_af) == (30, 6, 0, 0), field
+        if old.type == 6:
+            assert (new.start_dist, new.end_dist, new.sometimes_one) == (
+                old.start_dist, old.end_dist, old.sometimes_one), field
+        else:
+            assert old.type == 5 and field in ("animStunnedPoseResource", "animElecResource")
+            assert (new.start_dist, new.end_dist, new.sometimes_one) == (0, 0, 0), field
+
+
+@needs_data
 def test_stage2_slot_names_for_the_real_bile_demon(bile):
-    stage2 = build_molynx(bile, 2, ORDER)
+    stage2 = build(bile, 2)
     got = {slot: stage2.anim_name(slot) for slot in
            ("walk", "draggedPose", "poseFrame", "diePose", "swing", "idle1", "idle2", "drunkIdle",
-            "entrance", "walkback", "magic", "building", "stunnedPose", "recoilHfb")}
+            "entrance", "walkback", "magic", "building", "stunnedPose", "recoilHfb", "elec",
+            "recoilHff")}
     assert got == {
         "walk": "Molynx-walk", "draggedPose": "Molynx-DraggedPose", "poseFrame": "Molynx-PoseFrame",
         "diePose": "Molynx-DiePose", "swing": "Molynx-being_picked_up", "idle1": "Molynx-stand",
-        "idle2": "Molynx-fidgeting", "drunkIdle": "Molynx-fidgeting", "entrance": "Molynx-walk",
+        "idle2": "Molynx-fidgeting", "drunkIdle": "Molynx-fidgeting", "entrance": "Molynx-walk_once",
         "walkback": "Molynx-walk", "magic": "Molynx-getting_hit", "building": "Molynx-manufacturing",
         "stunnedPose": "Molynx-staggering", "recoilHfb": "Molynx-being_slapped",
+        "elec": "Molynx-getting_hit_loop", "recoilHff": "Molynx-getting_hit",
     }
+
+
+# ---- the file plan: which file each slot names and whether it loops ------------------------------
+
+SOURCE_WRAPS = {  # the clip library's own flags (test_molynx_assets checks them on the source)
+    "die": False, "victory_celebration": False, "getting_hit": False, "being_slapped": False,
+    "waking_up": False, "knockback": False, "sleeping": False,
+}
+
+
+def test_source_wrap_is_the_clip_librarys():
+    assert SOURCE_WRAP == {clip: SOURCE_WRAPS.get(clip, True) for clip in CLIP_LIBRARY}
+
+
+@needs_data
+def test_file_plan_for_the_real_bile_demon(bile):
+    plan = file_plan(bile, FILE_WRAPS)
+    assert plan.slots == {field: stem for field, (stem, _, _) in TAILS.items()}
+    # walk loops in walk / walkback and is opened for entrance; getting_hit stays a one-shot and
+    # loops (a static pose never ends) for elec; every other stem is needed one way only.
+    assert plan.wraps == {
+        "walk": True, "walk_once": False, "getting_hit": False, "getting_hit_loop": True,
+        "stand": False, "fidgeting": False, "eating": False, "happy": False, "attack": False,
+        "angry": False, "celebrating": False, "die": False, "being_slapped": False,
+        "knockback": False, "waking_up": False, "sleeping": True, "being_picked_up": True,
+        "manufacturing": True, "praying": True, "staggering": True,
+    }
+    assert stems_used(bile, plan) == set(plan.slots.values()) == set(plan.wraps) | set(POSE_STEMS)
+    for stem in stems_used(bile, plan):
+        assert len(("Molynx-" + stem).encode("ascii")) < RESOURCE_NAME_SIZE
+    assert all(ANIM_INFO[stem]["wrap"] == wrap for stem, wrap in plan.wraps.items())
+
+
+@needs_data
+def test_file_plan_case_of_file_names_does_not_matter(bile):
+    upper = {name.upper(): wrap for name, wrap in FILE_WRAPS.items()}
+    assert file_plan(bile, upper) == file_plan(bile, FILE_WRAPS)
+
+
+@needs_data
+def test_a_stem_needed_both_ways_keeps_its_source_flag_and_the_other_slots_take_a_variant(bile):
+    # fidgeting loops in the source; make drunkIdle's file loop while idle2's does not.
+    plan = file_plan(bile, {**FILE_WRAPS, "bil-drunkidle": True})
+    assert plan.slots["drunkIdle"] == "fidgeting" and plan.wraps["fidgeting"] is True
+    assert plan.slots["animIdle2Resource"] == "fidgeting_once"
+    assert plan.wraps["fidgeting_once"] is False
+
+
+@needs_data
+def test_a_stem_needed_one_way_has_no_variant(bile):
+    plan = file_plan(bile, FILE_WRAPS)
+    assert SOURCE_WRAP["stand"] is True and plan.wraps["stand"] is False  # opened, same name
+    assert SOURCE_WRAP["sleeping"] is False and plan.wraps["sleeping"] is True  # closed
+    assert not any(s.startswith(("stand_", "sleeping_")) for s in plan.wraps)
+
+
+@needs_data
+def test_file_plan_refuses_unknown_files_and_mismatched_kinds(bile):
+    missing = dict(FILE_WRAPS)
+    del missing["bile_demon-walk"]
+    with pytest.raises(ValueError, match="Bile_Demon-Walk"):
+        file_plan(bile, missing)
+    with pytest.raises(ValueError, match="animWalkResource"):
+        file_plan(bile, {**FILE_WRAPS, "bile_demon-walk": None})  # type 6 slot, mesh file
+    with pytest.raises(ValueError, match="animElecResource"):
+        file_plan(bile, {**FILE_WRAPS, "bil-elec": False})  # type 5 slot, animation file
+
+
+@needs_data
+def test_a_pose_slot_that_is_not_a_mesh_is_refused(bile):
+    tail = bile.art_tail("animDraggedPoseResource")
+    bile.set_art_tail("animDraggedPoseResource", tail._replace(type=6))
+    with pytest.raises(ValueError, match="animDraggedPoseResource"):
+        file_plan(bile, FILE_WRAPS)
+
+
+@needs_data
+def test_a_named_slot_of_type_none_is_renamed_but_keeps_its_tail(bile):
+    # 63 shipped maps name Bile_Demon-Dejected_Pose in a slot whose tail is all zero (type NONE).
+    bile.set_anim_name("dejectedPose", "Bile_Demon-Dejected_Pose")
+    plan = file_plan(bile, FILE_WRAPS)
+    assert plan.slots["animDejectedPoseResource"] == "staggering"
+    stage2 = build(bile, 2)
+    assert stage2.anim_name("dejectedPose") == "Molynx-staggering"
+    assert tail_hex(stage2, "animDejectedPoseResource") == "00" * 20
+
+
+# ---- anim_info and file_wraps are required from stage 2 -----------------------------------------
+
+@needs_data
+@pytest.mark.parametrize("stage", [2, 3])
+def test_stage_2_and_3_need_anim_info_and_file_wraps(bile, stage):
+    with pytest.raises(ValueError, match="anim_info"):
+        build_molynx(bile, stage, ORDER, TEXT_IDS, file_wraps=FILE_WRAPS)
+    with pytest.raises(ValueError, match="file_wraps"):
+        build_molynx(bile, stage, ORDER, TEXT_IDS, ANIM_INFO)
+
+
+@needs_data
+def test_stage1_ignores_anim_info_and_file_wraps(bile):
+    plain = bytes(build_molynx(bile, 1, ORDER).raw)
+    assert bytes(build_molynx(bile, 1, ORDER, None, {"x": 1}, file_wraps={}).raw) == plain
+
+
+@needs_data
+def test_anim_info_must_cover_every_used_file_and_extra_entries_are_fine(bile):
+    for stem in ("walk_once", "getting_hit_loop", "stand"):
+        short = {k: v for k, v in ANIM_INFO.items() if k != stem}
+        with pytest.raises(ValueError, match=stem):
+            build(bile, 2, anim_info=short)
+    extra = {**ANIM_INFO, "dancing_extra": {"frames": 5, "fps": 30, "wrap": True}}
+    assert build(bile, 2, anim_info=extra).raw == build(bile, 2).raw
+
+
+@needs_data
+@pytest.mark.parametrize("change", [
+    {"wrap": True},          # stand must not loop: its slot (idle1) ends
+    {"fps": 15},             # every file is 30 fps
+    {"frames": 1},           # the game has no 1-frame animation
+    {"frames": 2 ** 32},     # does not fit the u32
+])
+def test_anim_info_that_contradicts_the_plan_is_refused(bile, change):
+    bad = {**ANIM_INFO, "stand": {**ANIM_INFO["stand"], **change}}
+    with pytest.raises(ValueError, match="stand"):
+        build(bile, 2, anim_info=bad)
+
+
+@needs_data
+def test_frames_follow_the_files_loop_flag(bile):
+    info = {**ANIM_INFO, "walk": {"frames": 100, "fps": 30, "wrap": True},
+            "stand": {"frames": 100, "fps": 30, "wrap": False}}
+    stage2 = build(bile, 2, anim_info=info)
+    assert stage2.art_tail("animWalkResource").frames == 99
+    assert stage2.art_tail("animWalkbackResource").frames == 99
+    assert stage2.art_tail("animIdle1Resource").frames == 100
 
 
 @needs_data
 def test_empty_bile_slots_stay_empty_and_unk_1_is_untouched(bile):
     for stage in (2, 3):
-        molynx = build_molynx(bile, stage, ORDER, TEXT_IDS)
+        molynx = build(bile, stage, text_ids=TEXT_IDS)
         for field in BILE_EMPTY_SLOTS:
             assert molynx.resource_name(field) == ""
         unk = FIELDS["unk_1"]
@@ -248,7 +512,7 @@ def test_slots_not_in_the_table_take_stand_when_non_empty(bile):
     bile.set_anim_name("unused15", "Bile-Odd1")
     bile.set_anim_name("extra43", "Bile-Odd2")
     bile.set_anim_name("run", "Bile-Run")  # empty in the real record, in the table as running
-    stage2 = build_molynx(bile, 2, ORDER)
+    stage2 = build(bile, 2)
     assert stage2.anim_name("unused15") == "Molynx-stand"
     assert stage2.anim_name("extra43") == "Molynx-stand"
     assert stage2.anim_name("run") == "Molynx-running"
@@ -277,10 +541,10 @@ def test_slot_assignment_and_stems_used(bile):
 
 @needs_data
 def test_stage3_adds_only_stats_portrait_resources_and_text_ids(bile):
-    stage2, stage3 = build_molynx(bile, 2, ORDER), build_molynx(bile, 3, ORDER, TEXT_IDS)
+    stage2, stage3 = build(bile, 2), build(bile, 3, text_ids=TEXT_IDS)
     changed = changed_fields(stage2, stage3)
     assert changed == STAT_FIELDS | PORTRAIT_FIELDS | set(TEXT_FIELDS.values())
-    # The change from the Bile Demon is stage 1 + the slot names + that.
+    # The change from the Bile Demon is stage 1 + the slot names and tails + that.
     assert changed_fields(bile, stage3) == (
         STAGE1_FIELDS | set(expected_slot_names(bile)) | STAT_FIELDS | PORTRAIT_FIELDS
         | set(TEXT_FIELDS.values()))
@@ -293,7 +557,7 @@ def test_stage3_adds_only_stats_portrait_resources_and_text_ids(bile):
 
 @needs_data
 def test_stage3_portrait_resources(bile):
-    stage3 = build_molynx(bile, 3, ORDER, TEXT_IDS)
+    stage3 = build(bile, 3, text_ids=TEXT_IDS)
     assert stage3.resource_name("icon1Resource") == r"gui\creatures\evil\molynx"
     assert stage3.resource_name("portraitResource") == r"gui\creatures\evil\molynx-bg"
     # RULING A: the second icon (CreatureIcons#N) is the Bile Demon's.
@@ -304,7 +568,7 @@ def test_stage3_portrait_resources(bile):
 
 @needs_data
 def test_stage3_stats_are_the_scaled_bile_values_capped_at_the_field_maximum(bile):
-    stage3 = build_molynx(bile, 3, ORDER, TEXT_IDS)
+    stage3 = build(bile, 3, text_ids=TEXT_IDS)
     for name, multiplier in MULTIPLIERS.items():
         fmt = FIELDS[name].fmt
         bits = 8 * struct.calcsize(fmt)
@@ -320,14 +584,14 @@ def test_stage3_stats_are_the_scaled_bile_values_capped_at_the_field_maximum(bil
 def test_stat_cap_is_the_field_maximum_not_a_fixed_65535(bile):
     bile.set("hp", 60000)       # u16: 60000 * 1.6 = 96000 -> capped at 65535
     bile.set("mass", 2 ** 31 - 10)  # int32: capped at 2**31 - 1, not 65535
-    stage3 = build_molynx(bile, 3, ORDER, TEXT_IDS)
+    stage3 = build(bile, 3, text_ids=TEXT_IDS)
     assert stage3.get("hp") == 65535
     assert stage3.get("mass") == 2 ** 31 - 1
 
 
 @needs_data
 def test_stage3_text_ids(bile):
-    stage3 = build_molynx(bile, 3, ORDER, TEXT_IDS)
+    stage3 = build(bile, 3, text_ids=TEXT_IDS)
     for key, field in TEXT_FIELDS.items():
         assert stage3.get(field) == TEXT_IDS[key]
         assert bile.get(field) != TEXT_IDS[key]
@@ -335,7 +599,7 @@ def test_stage3_text_ids(bile):
 
 @needs_data
 def test_stage3_without_text_ids_keeps_the_bile_demons(bile):
-    stage2, stage3 = build_molynx(bile, 2, ORDER), build_molynx(bile, 3, ORDER)
+    stage2, stage3 = build(bile, 2), build(bile, 3)
     assert changed_fields(stage2, stage3) == STAT_FIELDS | PORTRAIT_FIELDS
     for field in TEXT_FIELDS.values():
         assert stage3.get(field) == bile.get(field)
@@ -349,7 +613,7 @@ def test_stage3_without_text_ids_keeps_the_bile_demons(bile):
 ])
 def test_bad_text_ids_are_rejected(bile, bad):
     with pytest.raises(ValueError):
-        build_molynx(bile, 3, ORDER, bad)
+        build(bile, 3, text_ids=bad)
 
 
 @needs_data

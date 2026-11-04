@@ -95,14 +95,16 @@ def _resource_toml(name: str, stage: int, maps: list[str]) -> bytes:
     return ("\r\n".join(lines) + "\r\n").encode("ascii")
 
 
-def _map_files(name: str, stage: int, text_ids: dict[str, int] | None) -> dict[str, bytes]:
+def _map_files(name: str, stage: int, text_ids: dict[str, int] | None, anim_info: dict | None,
+               file_wraps: dict | None) -> dict[str, bytes]:
     """The seven files of map `name` as they go into the folder (relative path -> bytes)."""
     source = map_source_dir(name)
     files = {f"{MAPS_PATH}/{name}{suffix}": (source / (name + suffix)).read_bytes()
              for suffix in MAP_SUFFIXES}
     globals_path, things_path = f"{MAPS_PATH}/{name}Globals.kld", f"{MAPS_PATH}/{name}Things.kld"
     globals_kld = files[globals_path]
-    files[globals_path] = splice_creatures(globals_kld, [molynx_for_map(globals_kld, stage, text_ids)])
+    files[globals_path] = splice_creatures(globals_kld, [molynx_for_map(
+        globals_kld, stage, text_ids, anim_info=anim_info, file_wraps=file_wraps)])
     things_kld = files[things_path]
     files[things_path] = retarget_creature_thing(things_kld, first_player_bile_thing(things_kld),
                                                  CREATURE_ID)
@@ -110,10 +112,12 @@ def _map_files(name: str, stage: int, text_ids: dict[str, int] | None) -> dict[s
 
 
 def build_mod(stage: int, out_dir: Path, name: str = "Molynx", maps: list[str] | None = None,
-              text_ids: dict[str, int] | None = None) -> Path:
+              text_ids: dict[str, int] | None = None, *, anim_info: dict | None = None,
+              file_wraps: dict | None = None) -> Path:
     """Create `out_dir/<name>/` (see the module docstring) and return its path.
 
-    `stage` is 1, 2 or 3 (molynx_record); stage 3 needs `text_ids`. `maps` defaults to `test_maps()`.
+    `stage` is 1, 2 or 3 (molynx_record); stage 3 needs `text_ids`; stages 2 and 3 need
+    `anim_info` and `file_wraps` (passed to `build_molynx`). `maps` defaults to `test_maps()`.
     ValueError for a bad stage, folder name, map list or record; FileExistsError when
     `out_dir/<name>` already exists (nothing is deleted or overwritten); FileNotFoundError for a map
     that has no complete set of seven files. Nothing is created unless the whole build succeeded.
@@ -130,7 +134,7 @@ def build_mod(stage: int, out_dir: Path, name: str = "Molynx", maps: list[str] |
 
     files = {"resource.toml": _resource_toml(name, stage, maps)}
     for map_name in maps:
-        files.update(_map_files(map_name, stage, text_ids))
+        files.update(_map_files(map_name, stage, text_ids, anim_info, file_wraps))
 
     target.mkdir(parents=True)  # not exist_ok: never reuse a folder
     for relative, data in files.items():

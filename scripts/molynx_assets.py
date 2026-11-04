@@ -5,6 +5,7 @@ Behemoth dressed by custom_character.build_character, with the 21 DK2 clips reta
 behemoth_anims.build_all), turns every clip into a game animation and writes
 
   Molynx-<clip>.kmf      the 25 clips of molynx_record.CLIPS (animation files)
+  Molynx-<clip>_once.kmf / _loop.kmf  variants the slots need (Bile Demon: walk_once, getting_hit_loop)
   Molynx-PoseFrame.kmf   `stand` frame 0          (static mesh files, like the Bile Demon's poses)
   Molynx-DiePose.kmf     `die` last frame
   Molynx-DraggedPose.kmf `being_picked_up` frame 0
@@ -58,9 +59,28 @@ frame 0, as all 209 looping game files do. A loop "already closes" (`loop_closes
 frame is within LOOP_GAP = 0.3 x the median frame-to-frame step of frame 0: that last frame is
 REPLACED by the copy (frame count unchanged; the 9 retargeted loops that close exactly and
 fidgeting, staggering, interacting_with_objects at 0.16 / 0.22 / 0.21 of a step), so the loop has
-no near-duplicate frame; any other loop gets the copy appended. Wrap flags are the clip's own. `plan.info` gives each clip's file frame count, fps and wrap for
-the stage-2 record (the Bile Demon's record has frames = file frames - 1 for looping files, e.g.
-walk 41 -> 40, and = file frames otherwise, e.g. idle1 190).
+no near-duplicate frame; any other loop gets the copy appended. `plan.info` gives each clip's own
+frame count, fps and wrap.
+
+Loop flags per slot. The engine's idle / job logic keys on a file looping or ending, so a file's
+wrap flag is the one its slots need (molynx_record.file_plan, the single source of truth shared
+with the record; `required_wraps(bile)` here reads the Bile Demon's own files): `export_molynx_
+assets(wraps=...)` (default required_wraps of the editor's Bile Demon) writes each listed file
+with that flag, including the `<clip>_once` / `<clip>_loop` variants; clips not listed keep their
+own flag. `file_clip` changes a clip's flag:
+  - opening a loop keeps its frames (same count; it still ends on its copy of frame 0) and clears
+    wrap. Evidence: 182 of the game's 936 non-looping files end on a copy of frame 0, among them 52
+    of its 83 idle files and the Bile Demon's own idle1, idle2 and happy (the very slots that open
+    stand, fidgeting and happy), so an idle that ends where it began is the game's own practice and
+    lets idle follow idle without a jump; the record counts that last frame (non-looping: frames =
+    file frames);
+  - closing a clip that does not loop resamples its source as a loop (the rule above: the copy of
+    frame 0 replaces a nearly closing last frame, else is appended). The step from the last source
+    frame back to frame 0 is then played as one frame, a visible snap when the clip ends far from
+    where it began (sleeping: 37 median steps, getting_hit: 5.8).
+The returned `info` gives the FINAL frames, fps and wrap of every animation file written; the
+stage-2 record turns it into each slot's frames (file frames - 1 for looping files, as the Bile
+Demon's record does: walk 41 -> 40; = file frames otherwise: idle1 190).
 
 Size (a known risk, kept on purpose). Fully keyed files are large: the biggest GEOM is 136,344
 keyframe positions (Molynx-victory_celebration: 552 rows x 247, its 246 frames plus the block
@@ -121,9 +141,10 @@ from scripts.behemoth_anims import FLIP  # DK2 is left-handed, the character rig
 from scripts.dk2kmf import Kmf, Material, Mesh, Sprite, Vertex, evaluate_anim_frame, parse_kmf
 from scripts.dk2kmf_write import encode_anim, write_kmf
 from scripts.dk2kwd_blocks import read_blocks
-from scripts.dk2kwd_creatures import Creature, read_creatures
+from scripts.dk2kwd_creatures import ART_TYPE_NONE, Creature, read_creatures
 from scripts.dk2paths import BEHEMOTH_DIR, EDITOR_DIR, GAME_DIR, MESHES_DIR
-from scripts.molynx_record import CLIPS, POSE_STEMS, PREFIX
+from scripts.molynx_record import (CLIPS, POSE_STEMS, PREFIX, SOURCE_WRAP, clip_of, file_plan,
+                                   slot_assignment)
 
 PORTRAIT_SRC = Path("/mnt/user-data/attachments/76eb4112-412f-58e4-a30a-b275f992be89/"
                     "8582356e-image.png")
@@ -165,6 +186,26 @@ def game_mesh_path(name: str, meshes_dir: Path = MESHES_DIR) -> Path:
         if path.name.lower() == want:
             return path
     raise FileNotFoundError(f"{name}.kmf is not in {meshes_dir}")
+
+
+def bile_file_wraps(biles, meshes_dir: Path = MESHES_DIR) -> dict:
+    """{file name, lower case: its wrap flag, None for a static mesh} of every file the Molynx
+    slots of these Bile Demon records replace (a slot of type NONE is not loaded and is skipped)."""
+    out = {}
+    for bile in biles:
+        for slot in slot_assignment(bile):
+            name = bile.resource_name(slot)
+            if bile.art_tail(slot).type == ART_TYPE_NONE or name.lower() in out:
+                continue
+            model = parse_kmf(game_mesh_path(name, meshes_dir).read_bytes())
+            out[name.lower()] = bool(model.anim.wrap) if model.kind == "anim" else None
+    return out
+
+
+def required_wraps(bile: Creature, meshes_dir: Path = MESHES_DIR) -> dict:
+    """{file stem: wrap flag} of every Molynx animation file the slots of `bile` name, variants
+    included (molynx_record.file_plan on the Bile Demon's own files)."""
+    return dict(file_plan(bile, bile_file_wraps([bile], meshes_dir)).wraps)
 
 
 def texture_cache(game_dir: Path = GAME_DIR):
@@ -356,6 +397,8 @@ def plan_molynx(height_ratio: float = 1.15, source=None, *, unit_dir: Path = BEH
     body = np.concatenate([p for p, s in zip(raw, sprites) if s.texture == BODY_TEXTURE]) * plan.scale
     plan.offset = np.array([-body[:, 0].mean(), -body[:, 1].mean(), -allp[:, 2].max() * plan.scale])
 
+    if {name: bool(data[name]["wrap"]) for name in CLIPS} != SOURCE_WRAP:
+        raise ValueError("the clip library's loop flags are not molynx_record.SOURCE_WRAP")
     for name in CLIPS:
         clip = data[name]
         frames = _resample(clip["frames"], clip["fps"], clip["wrap"])
@@ -438,8 +481,42 @@ def _check_rows(rows: np.ndarray, frame: list) -> None:
             raise AssertionError("vertices sharing a row differ")
 
 
-def clip_kmf(plan: MolynxPlan, stem: str, reduce: bool = False) -> Kmf:
-    clip = plan.clips[stem]
+def file_clip(plan: MolynxPlan, stem: str, wrap: bool) -> Clip:
+    """The frames of file `stem` (a clip or its _once / _loop variant) with loop flag `wrap`:
+    the clip itself, its loop opened (same frames) or its source resampled as a loop (see the
+    module docstring)."""
+    clip, forced = clip_of(stem)
+    if clip not in plan.clips:
+        raise ValueError(f"{stem} is not a clip or a clip variant")
+    if forced is not None and forced != wrap:
+        raise ValueError(f"{stem} must {'' if forced else 'not '}loop")
+    base = plan.clips[clip]
+    if base.wrap == wrap:
+        return base
+    if not wrap:
+        return Clip(base.frames, False)
+    data, _ = plan.source
+    frames = _resample(data[clip]["frames"], data[clip]["fps"], True)
+    return Clip([plan.to_sprites(plan.to_kmf(f)) for f in frames], True)
+
+
+def _file_wraps(plan: MolynxPlan, wraps: dict) -> dict:
+    """{file stem: wrap} of every animation file to write: each clip (its own flag unless `wraps`
+    names it) and the variants `wraps` names. ValueError for anything else."""
+    for stem, wrap in wraps.items():
+        clip, forced = clip_of(stem)
+        if clip not in CLIPS:
+            raise ValueError(f"wraps names {stem!r}, which is not a clip or a clip variant")
+        if not isinstance(wrap, bool) or (forced is not None and forced != wrap):
+            raise ValueError(f"wraps gives {stem!r} the loop flag {wrap!r}")
+    files = {clip: plan.clips[clip].wrap for clip in CLIPS}
+    files.update(wraps)
+    return files
+
+
+def clip_kmf(plan: MolynxPlan, stem: str, reduce: bool = False, wrap: bool | None = None) -> Kmf:
+    """The animation file `stem` (a clip, or a variant with `wrap`); `wrap` None = the clip's own."""
+    clip = plan.clips[stem] if wrap is None else file_clip(plan, stem, wrap)
     rows = _rows(clip.frames)
     sprites = _sprites(plan, clip.frames[0], rows, mesh=False)
     controls = b"".join(np.array([(v << 16) | s, ident], "<u4").tobytes()
@@ -543,29 +620,38 @@ def _preview(images: list[tuple[str, Image.Image]]) -> Image.Image:
 def export_molynx_assets(out_dir: Path, height_ratio: float = 1.15,
                          portrait_src: Path | None = PORTRAIT_SRC, *, plan: MolynxPlan | None = None,
                          body_size: int = MAX_TEXTURE, reduce: bool = False,
-                         editor_dir: Path = EDITOR_DIR, game_dir: Path = GAME_DIR) -> dict:
-    """Write Molynx's 28 .kmf files, 2 textures and (with `portrait_src`) 2 portraits plus a
-    preview into `out_dir`, which must not exist or be empty (nothing is ever deleted). Every
-    input is checked before the first file is written. `reduce=True` keeps only the keyframes each
-    vertex needs (the fallback if the fully keyed files prove too big for the game).
+                         editor_dir: Path = EDITOR_DIR, game_dir: Path = GAME_DIR,
+                         meshes_dir: Path = MESHES_DIR, wraps: dict | None = None) -> dict:
+    """Write Molynx's .kmf files (the 25 clips, the variants `wraps` names and the 3 poses), 2
+    textures and (with `portrait_src`) 2 portraits plus a preview into `out_dir`, which must not
+    exist or be empty (nothing is ever deleted). Every input is checked before the first file is
+    written. `wraps` ({file stem: loop flag}, default `required_wraps` of the editor's Bile Demon)
+    sets the loop flag of the files it names (see the module docstring). `reduce=True` keeps only
+    the keyframes each vertex needs (the fallback if the fully keyed files prove too big).
     -> {"meshes": {stem: path}, "textures": {name: path}, "portraits": {name: path},
-        "preview": path | None, "info": {clip: {frames, fps, wrap}}, "scale": float,
-        "target_height": float}"""
+        "preview": path | None, "info": {file stem: {frames, fps, wrap}} (final files),
+        "scale": float, "target_height": float}"""
     out_dir = Path(out_dir)
     if out_dir.exists() and (not out_dir.is_dir() or any(out_dir.iterdir())):
         raise FileExistsError(f"{out_dir} exists and is not an empty folder")
     if portrait_src is not None and not Path(portrait_src).is_file():
         raise FileNotFoundError(f"portrait source {portrait_src} not found")
     if plan is None:
-        plan = plan_molynx(height_ratio, editor_dir=editor_dir, game_dir=game_dir)
+        plan = plan_molynx(height_ratio, meshes_dir=meshes_dir, editor_dir=editor_dir,
+                           game_dir=game_dir)
     elif plan.height_ratio != height_ratio:
         raise ValueError(f"the plan was made for height_ratio {plan.height_ratio}, "
                          f"not {height_ratio}")
+    if wraps is None:
+        wraps = required_wraps(bile_demon_record(editor_dir), meshes_dir)
+    files = _file_wraps(plan, wraps)
     out_dir.mkdir(parents=True, exist_ok=True)
-    meshes = {}
-    for stem in CLIPS:
+    meshes, info = {}, {}
+    for stem, wrap in files.items():
+        model = clip_kmf(plan, stem, reduce, wrap)
         meshes[stem] = out_dir / f"{PREFIX}{stem}.kmf"
-        meshes[stem].write_bytes(write_kmf(clip_kmf(plan, stem, reduce)))
+        meshes[stem].write_bytes(write_kmf(model))
+        info[stem] = {"frames": model.anim.frame_count, "fps": GAME_FPS, "wrap": wrap}
     for stem in POSE_STEMS:
         meshes[stem] = out_dir / f"{PREFIX}{stem}.kmf"
         meshes[stem].write_bytes(write_kmf(pose_kmf(plan, stem)))
@@ -587,4 +673,4 @@ def export_molynx_assets(out_dir: Path, height_ratio: float = 1.15,
         _preview([("Molynx -bg", bg), ("Molynx", icon), ("Bile Demon -bg", bile_bg),
                   ("Bile Demon", bile_icon)]).save(preview)
     return {"meshes": meshes, "textures": textures, "portraits": portraits, "preview": preview,
-            "info": dict(plan.info), "scale": plan.scale, "target_height": plan.target_height}
+            "info": info, "scale": plan.scale, "target_height": plan.target_height}

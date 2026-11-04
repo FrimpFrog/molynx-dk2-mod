@@ -2,7 +2,8 @@ import struct
 
 import pytest
 
-from scripts.dk2kld_splice import molynx_for_map, splice_creatures
+from molynx_files import ANIM_INFO, FILE_WRAPS
+from scripts.dk2kld_splice import molynx_for_map as _molynx_for_map, splice_creatures
 from scripts.dk2kwd_blocks import HEADER_SIZE, Block, read_blocks, write_blocks
 from scripts.dk2kwd_creatures import Creature, creatures_block, read_creatures
 from scripts.dk2paths import MAPS_DIR, QUUZ_MAPS_DIR, have
@@ -20,6 +21,14 @@ FIXTURES = {
     "44x5537": ("Level10Globals.kld", 44, 5537),
     "46x5449": ("06coopGlobals.kld", 46, 5449),
 }
+
+FILES = {"anim_info": ANIM_INFO, "file_wraps": FILE_WRAPS}
+
+
+def molynx_for_map(data: bytes, stage: int, text_ids=None):
+    """molynx_for_map with the exported files' info (needed from stage 2)."""
+    return _molynx_for_map(data, stage, text_ids, **FILES)
+
 
 needs_maps = pytest.mark.skipif(not have(MAPS_DIR), reason="DK2 editor maps not present")
 
@@ -298,7 +307,7 @@ def test_molynx_is_the_maps_bile_demon_run_through_build_molynx(fixture, stage):
     molynx = molynx_for_map(data, stage, TEXT_IDS)
     bile, top = _bile_and_max_order(data)
     assert top == count  # orderInEditor runs 1..N in every shipped map, so max + 1 is "last"
-    expected = build_molynx(bile, stage, top + 1, TEXT_IDS)
+    expected = build_molynx(bile, stage, top + 1, TEXT_IDS, ANIM_INFO, file_wraps=FILE_WRAPS)
     assert molynx.raw == expected.raw
     assert len(molynx.raw) == size
     assert molynx.get("name") == "Molynx"
@@ -327,6 +336,14 @@ def test_molynx_for_map_does_not_touch_the_map(fixture, stage):
     snapshot = bytes(data)
     molynx_for_map(data, stage, TEXT_IDS)
     assert data == snapshot
+
+
+@pytest.mark.parametrize("stage", [2, 3])
+def test_stage_2_and_3_need_the_files_info(fixture, stage):
+    with pytest.raises(ValueError, match="anim_info"):
+        _molynx_for_map(fixture[0], stage, TEXT_IDS, file_wraps=FILE_WRAPS)
+    with pytest.raises(ValueError, match="file_wraps"):
+        _molynx_for_map(fixture[0], stage, TEXT_IDS, anim_info=ANIM_INFO)
 
 
 def test_a_bad_stage_is_refused(fixture):

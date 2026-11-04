@@ -13,10 +13,12 @@ from PIL import Image
 from scripts.dk2kmf import evaluate_anim_frame, mesh_points, parse_kmf
 from scripts.dk2kmf_write import anim_invariants, write_kmf
 from scripts.dk2kwd_creatures import ANIM_SLOTS
-from scripts.dk2paths import (BEHEMOTH_DIR, CHARACTER_PICKLE, EDITOR_DIR, GAME_DIR, MESHES_DIR,
-                              have)
-from scripts.molynx_record import CLIPS, POSE_STEMS, PREFIX, build_molynx, stems_used
+from scripts.dk2paths import (BEHEMOTH_DIR, CHARACTER_PICKLE, EDITOR_DIR, GAME_DIR, MAPS_DIR,
+                              MESHES_DIR, QUUZ_MAPS_DIR, have)
+from scripts.molynx_record import (CLIPS, POSE_STEMS, PREFIX, SOURCE_WRAP, build_molynx, clip_of,
+                                   file_plan, slot_assignment, stems_used)
 import scripts.molynx_assets as assets
+from molynx_files import ANIM_INFO, FILE_WRAPS
 
 needs_data = pytest.mark.skipif(
     not (have(MESHES_DIR) and have(EDITOR_DIR) and have(GAME_DIR / "EngineTextures.dir")
@@ -25,7 +27,18 @@ needs_data = pytest.mark.skipif(
 needs_portrait = pytest.mark.skipif(not have(assets.PORTRAIT_SRC),
                                     reason="the user's portrait image is not present")
 
-STEMS = list(CLIPS) + list(POSE_STEMS)
+VARIANTS = ["walk_once", "getting_hit_loop"]  # what the real Bile Demon's slots need (see below)
+STEMS = list(CLIPS) + VARIANTS + list(POSE_STEMS)
+ANIMS = list(CLIPS) + VARIANTS
+# The loop flag each used file must have: its slots' Bile Demon files (walk / walkback loop,
+# entrance does not -> walk_once; elec is a static mesh -> a looping getting_hit_loop).
+REQUIRED = {
+    "walk": True, "walk_once": False, "getting_hit": False, "getting_hit_loop": True,
+    "stand": False, "fidgeting": False, "eating": False, "happy": False, "attack": False,
+    "angry": False, "celebrating": False, "die": False, "being_slapped": False,
+    "knockback": False, "waking_up": False, "sleeping": True, "being_picked_up": True,
+    "manufacturing": True, "praying": True, "staggering": True,
+}
 RATIO = 1.15
 GAME_FPS = 30
 
@@ -101,9 +114,10 @@ def test_exports_every_clip_and_pose_as_its_own_kmf(export):
 @needs_data
 def test_file_stems_cover_every_stage_2_slot_name_exactly(export, bile):
     stems = {p.stem for p in export["result"]["meshes"].values()}
-    molynx = build_molynx(bile, 2, 47)
+    file_wraps = assets.bile_file_wraps([bile])
+    molynx = build_molynx(bile, 2, 47, None, export["result"]["info"], file_wraps=file_wraps)
     written = {molynx.resource_name(slot) for slot in ANIM_SLOTS if slot != "unk_1"} - {""}
-    assert written == {PREFIX + s for s in stems_used(bile)}
+    assert written == {PREFIX + s for s in stems_used(bile, file_plan(bile, file_wraps))}
     assert written <= stems  # exact case
     for stem in stems:
         assert len(stem.encode("ascii")) <= 63  # 64-byte resource name with its NUL
@@ -122,7 +136,7 @@ def test_every_file_parses_completely_and_writes_back_identically(export):
 
 @needs_data
 def test_clips_are_animations_that_pass_the_format_invariants(export):
-    for stem in CLIPS:
+    for stem in ANIMS:
         model = export["models"][stem]
         assert model.kind == "anim", stem
         assert model.anim.name == f"{PREFIX}{stem}"
@@ -132,7 +146,7 @@ def test_clips_are_animations_that_pass_the_format_invariants(export):
 
 @needs_data
 def test_every_frame_is_keyed_like_the_bile_demons_files(export):
-    for stem in CLIPS:
+    for stem in ANIMS:
         anim = export["models"][stem].anim
         assert len(anim.geom_xyz) - 1 == anim.index_count * (
             anim.frame_count + (anim.frame_count - 1) // 128), stem
@@ -162,9 +176,9 @@ def _close(got, want, bound):
 @needs_data
 def test_decoded_frames_match_the_transformed_source_frames(export):
     plan = export["plan"]
-    for stem in CLIPS:
+    for stem in ANIMS:
         anim = export["models"][stem].anim
-        want = plan.clips[stem].frames
+        want = assets.file_clip(plan, stem, anim.wrap).frames
         assert anim.frame_count == len(want), stem
         bound = anim.scale / 511 * 1.01
         for f in range(anim.frame_count):
@@ -221,7 +235,7 @@ def test_clips_are_resampled_to_the_game_rate(export):
 
 @needs_data
 def test_wrap_clips_end_on_a_copy_of_their_first_frame(export):
-    for stem in CLIPS:
+    for stem in ANIMS:
         anim = export["models"][stem].anim
         if not anim.wrap:
             continue
@@ -244,9 +258,9 @@ def test_loops_have_no_near_duplicate_frame_at_the_loop_point(export):
     bound is 0.2 of the median step: interacting_with_objects, whose source eases its last steps
     (0.15 of a step), ends on a 0.23 step after the replacement (appending would leave 0.21)."""
     data, _ = export["plan"].source
-    for stem in CLIPS:
-        src, anim = data[stem], export["models"][stem].anim
-        if not src["wrap"]:
+    for stem in ANIMS:
+        src, anim = data[clip_of(stem)[0]], export["models"][stem].anim
+        if not anim.wrap:
             continue
         gap = _median_gap(src["frames"])
         n = len(src["frames"])
@@ -477,6 +491,10 @@ def test_texture_limit_is_the_games_largest_texture():
 
 RESAMPLED = ["stand", "walk", "attack", "die", "celebrating", "victory_celebration", "sleeping",
              "training", "fighting_another_creature"]
+# Files whose loop flag is not their source clip's: opened loops keep the loop's frames (timed as a
+# loop, ending on the copy of frame 0); closed ones are resampled as a loop.
+FLIPPED = ["stand", "fidgeting", "eating", "happy", "attack", "angry", "celebrating", "sleeping",
+           "walk_once", "getting_hit_loop"]
 
 
 def _axes(p):
@@ -523,10 +541,14 @@ def test_resampled_clips_decode_to_a_plain_interpolation_of_the_source(export, b
         return [_axes(p) * scale + offset for p in sprites(frame)]
 
     for stem in RESAMPLED:
-        src = data[stem]
-        frames, fps, wrap = src["frames"], src["fps"], src["wrap"]
-        assert fps != GAME_FPS, stem
+        assert data[stem]["fps"] != GAME_FPS, stem
+    for stem in FLIPPED:
+        assert export["models"][stem].anim.wrap != data[clip_of(stem)[0]]["wrap"], stem
+    for stem in dict.fromkeys(RESAMPLED + FLIPPED):
+        src = data[clip_of(stem)[0]]
+        frames, fps = src["frames"], src["fps"]
         anim = export["models"][stem].anim
+        wrap = src["wrap"] or anim.wrap  # timed as a loop
         count = anim.frame_count
         n = len(frames)
         if wrap:
@@ -549,7 +571,112 @@ def test_resampled_clips_decode_to_a_plain_interpolation_of_the_source(export, b
         first = max(float(np.abs(g - w).max())
                     for g, w in zip(evaluate_anim_frame(anim, 0), kmf(frames[0])))
         assert first <= bound, stem
+        if not anim.wrap:  # an opened loop still ends on its copy of frame 0 (times[-1] = 0)
+            assert times[-1] == (0.0 if src["wrap"] else n - 1), stem
         if not wrap:
             last = max(float(np.abs(g - w).max())
                        for g, w in zip(evaluate_anim_frame(anim, count - 1), kmf(frames[-1])))
             assert last <= bound, stem
+
+
+# ---------------------------------------------------------------- loop flags per slot
+
+@needs_data
+def test_bile_file_wraps_are_the_bile_demons_files(bile):
+    got = assets.bile_file_wraps([bile])
+    for slot in slot_assignment(bile):
+        name = bile.resource_name(slot)
+        model = parse_kmf(assets.game_mesh_path(name).read_bytes())
+        assert got[name.lower()] == (model.anim.wrap if model.kind == "anim" else None), slot
+    # pinned: the 8a report's examples
+    assert got["bile_demon-walk"] is True and got["bil-walkback"] is True
+    assert got["biledemon-idle1"] is False and got["bil-entrance"] is False
+    assert got["biledemon-bed(sleeping)"] is True and got["bil-elec"] is None
+
+
+@needs_data
+def test_required_wraps_for_the_real_bile_demon(bile):
+    assert assets.required_wraps(bile) == REQUIRED
+    assert set(REQUIRED) | set(POSE_STEMS) == stems_used(bile, file_plan(bile, assets.bile_file_wraps([bile])))
+
+
+@needs_data
+def test_source_wrap_is_the_sources_flag(export):
+    data, _ = export["plan"].source
+    assert {clip: data[clip]["wrap"] for clip in CLIPS} == SOURCE_WRAP
+
+
+@needs_data
+def test_default_export_writes_the_required_loop_flags(export):
+    """The fixture's export uses the default wraps (required_wraps of the Bile Demon)."""
+    models, info = export["models"], export["result"]["info"]
+    for stem, wrap in REQUIRED.items():
+        assert models[stem].anim.wrap is wrap, stem
+    for clip in set(CLIPS) - set(REQUIRED):  # unused clips keep their own flag
+        assert models[clip].anim.wrap is SOURCE_WRAP[clip], clip
+
+
+@needs_data
+def test_info_reports_the_final_files(export):
+    models, info = export["models"], export["result"]["info"]
+    assert sorted(info) == sorted(ANIMS)
+    assert info == ANIM_INFO  # the record tests' pinned info is the real export's
+    for stem in ANIMS:
+        anim = models[stem].anim
+        assert info[stem] == {"frames": anim.frame_count, "fps": GAME_FPS, "wrap": anim.wrap}, stem
+
+
+@needs_data
+def test_opened_loops_keep_the_loops_frames(export):
+    plan, models = export["plan"], export["models"]
+    for stem in ("stand", "fidgeting", "eating", "happy", "attack", "angry", "celebrating",
+                 "walk_once"):
+        clip = clip_of(stem)[0]
+        loop = plan.clips[clip]
+        assert loop.wrap and not models[stem].anim.wrap, stem
+        assert models[stem].anim.frame_count == len(loop.frames), stem
+        assert export["result"]["info"][stem]["frames"] == plan.info[clip]["frames"], stem
+
+
+@needs_data
+def test_closed_loops_end_on_frame_0_with_one_more_frame(export):
+    """sleeping and getting_hit do not close in the source: the copy of frame 0 is appended."""
+    info, plan = export["result"]["info"], export["plan"]
+    assert (info["sleeping"]["frames"], plan.info["sleeping"]["frames"]) == (137, 136)
+    assert (info["getting_hit_loop"]["frames"], info["getting_hit"]["frames"]) == (18, 17)
+    hit, loop = export["models"]["getting_hit"].anim, export["models"]["getting_hit_loop"].anim
+    for f in range(hit.frame_count):
+        for a, b in zip(evaluate_anim_frame(hit, f), evaluate_anim_frame(loop, f)):
+            assert np.abs(a - b).max() <= max(hit.scale, loop.scale) / 511 * 2.02, f
+
+
+@needs_data
+@pytest.mark.parametrize("wraps", [{"walk_twice": True}, {"walk_once": True}, {"walk_loop": False},
+                                   {"PoseFrame": True}, {"walk": 1}])
+def test_bad_wraps_are_refused_before_anything_is_written(export, tmp_path, wraps):
+    with pytest.raises(ValueError):
+        assets.export_molynx_assets(tmp_path / "out", RATIO, plan=export["plan"], portrait_src=None,
+                                    wraps=wraps)
+    assert not (tmp_path / "out").exists()
+
+
+@needs_data
+def test_empty_wraps_keep_every_clips_own_flag(export, tmp_path):
+    result = assets.export_molynx_assets(tmp_path / "out", RATIO, plan=export["plan"],
+                                         portrait_src=None, wraps={})
+    assert sorted(result["info"]) == sorted(CLIPS)
+    assert result["info"] == export["plan"].info
+
+
+@needs_data
+@pytest.mark.skipif(not have(MAPS_DIR), reason="DK2 editor maps not present")
+def test_pinned_file_wraps_are_the_files_of_every_shipped_bile_demon(bile):
+    from scripts.dk2kwd_blocks import read_blocks
+    from scripts.dk2kwd_creatures import read_creatures
+    biles = [bile]
+    for folder in (MAPS_DIR, QUUZ_MAPS_DIR):
+        for path in sorted(folder.glob("*Globals.kld")) if have(folder) else []:
+            block = next(b for b in read_blocks(path.read_bytes()) if b.signature == 0xAA)
+            biles += [c for c in read_creatures(block) if c.get("creatureId") == 3]
+    assert len(biles) > 240
+    assert assets.bile_file_wraps(biles) == FILE_WRAPS

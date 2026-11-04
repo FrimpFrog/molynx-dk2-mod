@@ -146,11 +146,13 @@ def splice_creatures(globals_kld: bytes, extra: list[Creature]) -> bytes:
     return write_blocks(blocks)
 
 
-def molynx_for_map(globals_kld: bytes, stage: int, text_ids: dict[str, int] | None = None) -> Creature:
+def molynx_for_map(globals_kld: bytes, stage: int, text_ids: dict[str, int] | None = None, *,
+                   anim_info: dict | None = None, file_wraps: dict | None = None) -> Creature:
     """The Molynx record for this map: its Bile Demon, in the map's record size, through `build_molynx`.
 
-    `stage` (1, 2 or 3) and `text_ids` (used at stage 3 only) are `build_molynx`'s; orderInEditor is
-    the map's largest plus one (see the module docstring). ValueError if the map has no Creatures
+    `stage` (1, 2 or 3), `text_ids` (used at stage 3 only), `anim_info` and `file_wraps` (both
+    needed from stage 2: the exported files' info and the Bile Demon files' loop flags) are
+    `build_molynx`'s; orderInEditor is the map's largest plus one (see the module docstring). ValueError if the map has no Creatures
     block (or several), no creature named "Bile Demon" with creatureId 3 (or several), or bad input.
     """
     blocks = read_blocks(globals_kld)
@@ -161,7 +163,7 @@ def molynx_for_map(globals_kld: bytes, stage: int, text_ids: dict[str, int] | No
         raise ValueError(f"expected one {BILE_DEMON_NAME!r} with creatureId {BILE_DEMON_ID} in the "
                          f"map, found {len(biles)}")
     order = max(c.get("orderInEditor") for c in creatures) + 1
-    return build_molynx(biles[0], stage, order, text_ids)
+    return build_molynx(biles[0], stage, order, text_ids, anim_info, file_wraps=file_wraps)
 
 
 # ---- Things -------------------------------------------------------------------------------------

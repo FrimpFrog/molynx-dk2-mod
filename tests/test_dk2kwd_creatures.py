@@ -324,3 +324,85 @@ def test_record_sizes_checked():
         Creature(bytearray(5448))
     with pytest.raises(KeyError):
         _blank(5449).get("unk_40")  # only the 5537-byte records have the tail
+
+
+# ---- the 20 bytes after a resource's name (ArtResource tail, Level/resource.bt) ------------------
+
+from scripts.dk2kwd_creatures import (  # noqa: E402
+    ART_FLAG_HAS_END_ANIMATION, ART_FLAG_HAS_START_ANIMATION, ART_FLAG_IN_USE, ART_TAIL_SIZE,
+    ART_TYPE_ANIMATING_MESH, ART_TYPE_MESH, ART_TYPE_NONE, ArtTail,
+)
+
+# resource.bt: flags u32 @+0, anim.frames u32 @+4, anim.fps u32 @+8, anim.startDist u16 @+12,
+# anim.endDist u16 @+14, type u8 @+16, startAf @+17, endAf @+18, sometimesOne @+19 (after the name).
+BILE_WALK_TAIL = bytes.fromhex("19000000" "28000000" "1e000000" "6e08" "5606" "06" "28" "28" "00")
+
+
+def _bile(source):
+    _, creatures, _ = source
+    assert creatures[2].get("name") == "Bile Demon"
+    return Creature(creatures[2].raw)
+
+
+def test_art_tail_constants_follow_the_template():
+    assert ART_TAIL_SIZE == 20
+    assert (ART_FLAG_IN_USE, ART_FLAG_HAS_START_ANIMATION, ART_FLAG_HAS_END_ANIMATION) == (0x1, 0x8, 0x10)
+    assert (ART_TYPE_NONE, ART_TYPE_MESH, ART_TYPE_ANIMATING_MESH) == (0, 5, 6)
+    assert ArtTail._fields == ("flags", "frames", "fps", "start_dist", "end_dist", "type",
+                               "start_af", "end_af", "sometimes_one")
+
+
+def test_art_tail_reads_the_bile_demons_walk(source):
+    bile = _bile(source)
+    offset = FIELDS["animWalkResource"].offset
+    assert bytes(bile.raw[offset + 64:offset + 84]) == BILE_WALK_TAIL  # pinned independently
+    assert bile.art_tail("animWalkResource") == ArtTail(
+        flags=0x19, frames=40, fps=30, start_dist=2158, end_dist=1622, type=6, start_af=40,
+        end_af=40, sometimes_one=0)
+    assert bile.art_tail("animIdle1Resource") == ArtTail(0, 190, 30, 0, 0, 6, 0, 0, 0)
+    assert bile.art_tail("animSleepResource").fps == 15
+    pose = bile.art_tail("animPoseFrameResource")  # a mesh: +4 is the scale, 4096 = 1.0
+    assert (pose.flags, pose.frames, pose.type, pose.sometimes_one) == (1, 4096, 5, 1)
+
+
+def test_set_art_tail_writes_exactly_the_20_bytes_and_keeps_the_name(source):
+    bile = _bile(source)
+    before = bytes(bile.raw)
+    offset = FIELDS["animWalkResource"].offset
+    bile.set_art_tail("animWalkResource", ArtTail(0x01, 46, 30, 2158, 1622, 6, 0, 0, 0))
+    assert bytes(bile.raw[offset + 64:offset + 84]) == bytes.fromhex(
+        "01000000" "2e000000" "1e000000" "6e08" "5606" "06" "00" "00" "00")
+    assert bile.resource_name("animWalkResource") == "Bile_Demon-Walk"
+    changed = [i for i, (a, b) in enumerate(zip(before, bile.raw)) if a != b]
+    assert changed and all(offset + 64 <= i < offset + 84 for i in changed)
+
+
+def test_art_tail_round_trips_on_every_resource(source):
+    _, creatures, _ = source
+    from scripts.dk2kwd_creatures import _ALL_RESOURCES
+    for creature in creatures:
+        copy = Creature(creature.raw)
+        for field in _ALL_RESOURCES:
+            copy.set_art_tail(field, copy.art_tail(field))
+        assert copy.raw == creature.raw
+
+
+def test_art_tail_needs_a_resource_field(source):
+    bile = _bile(source)
+    with pytest.raises(KeyError):
+        bile.art_tail("hp")
+    with pytest.raises(KeyError):
+        bile.set_art_tail("hp", ArtTail(0, 0, 0, 0, 0, 0, 0, 0, 0))
+
+
+@pytest.mark.parametrize("field,value", [
+    ("flags", -1), ("flags", 2 ** 32), ("frames", 2 ** 32), ("fps", -1), ("start_dist", 65536),
+    ("end_dist", -1), ("type", 256), ("start_af", -1), ("end_af", 256), ("sometimes_one", 256),
+])
+def test_set_art_tail_range_checks_raise_value_error(source, field, value):
+    bile = _bile(source)
+    before = bytes(bile.raw)
+    tail = ArtTail(0, 0, 0, 0, 0, 0, 0, 0, 0)._replace(**{field: value})
+    with pytest.raises(ValueError, match=field):
+        bile.set_art_tail("animWalkResource", tail)
+    assert bytes(bile.raw) == before
