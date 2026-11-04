@@ -54,7 +54,30 @@ STAGE2_MESHES = sorted(f"Molynx-{stem}.kmf" for stem in (
 STAGE2_TEXTURES = ["Molynx_Body.png", "Molynx_Mace.png"]
 UNUSED_CLIPS = ["running", "victory_celebration", "training", "fighting_another_creature",
                 "patrolling", "guarding", "interacting_with_objects"]
-TAIL_AT = {"flags": (0, 4), "frames": (4, 4), "fps": (8, 4), "type": (16, 1)}  # tail sub-fields
+TAIL_AT = {"flags": (0, 4), "frames": (4, 4), "fps": (8, 4), "startDist": (12, 2),
+           "endDist": (14, 2), "type": (16, 1), "startAf": (17, 1), "endAf": (18, 1),
+           "sometimesOne": (19, 1)}  # the 20 bytes after a slot's name: (offset, size)
+# slot-table.md (plan Task 8), copied here independently of the record module and the audit, plus
+# the loop-variant rulings (entrance -> walk_once, elec -> getting_hit_loop); other slots: stand.
+SLOT_TABLE = """walk->walk, run->running, draggedPose->DraggedPose, recoilHff->getting_hit,
+recoilHfb->being_slapped, melee1/melee2/special->attack, die->die, diePose->DiePose, happy->happy,
+angry->angry, swing->being_picked_up, sleep->sleeping, eat/eatCorpse/drink->eating,
+building->manufacturing, pray->praying, fallback->knockback, getUp->waking_up, dance->celebrating,
+drunk/drunk2/stunnedPose/dejectedPose->staggering, idle1->stand, idle2/drunkIdle->fidgeting,
+poseFrame->PoseFrame, walk2->patrolling, entrance/walkback->walk,
+research/loot->interacting_with_objects, magic/torture/elec/electrocute->getting_hit"""
+VARIANTS = {"entrance": "walk_once", "elec": "getting_hit_loop"}
+
+
+def expected_slot_files() -> dict[str, str]:
+    """Record field -> stem, from SLOT_TABLE and VARIANTS."""
+    out = {}
+    for item in " ".join(SLOT_TABLE.split()).split(", "):
+        shorts, stem = item.split("->")
+        for short in shorts.split("/"):
+            field = short if short == "drunkIdle" else f"anim{short[0].upper()}{short[1:]}Resource"
+            out[field] = VARIANTS.get(short, stem)
+    return out
 
 
 # ---- helpers ------------------------------------------------------------------------------------
@@ -1158,7 +1181,7 @@ def test_stage2_a_mesh_that_does_not_parse_to_its_end_fails(mod2, damage):
 
 @needs_data
 @needs_assets
-def test_stage2_a_slot_left_as_the_bile_demons_matches_no_stage(mod2):
+def test_stage2_a_slot_left_as_the_bile_demons_is_named_with_its_bytes(mod2):
     """The whole 84-byte slot restored: rule (b) names the slot and its bytes, nothing else fails."""
     bile = source_bile("Siege")
     start = FIELDS["animWalkResource"].offset
@@ -1399,3 +1422,169 @@ def test_stage3_text_ids_are_part_of_the_record(tmp_path, assets_dir):
     assert molynx.get("nameStringId") == 3001 and molynx.get("weaknessStringId") == 3005
     assert molynx.resource_name("icon1Resource") == r"gui\creatures\evil\molynx"
     assert molynx.get("hp") > source_bile(SECOND).get("hp")
+
+
+# ---- fix round 1: which file each slot names, every tail sub-field, file_wraps, the bundle -------
+
+@needs_data
+@needs_assets
+def test_stage2_every_slot_names_the_file_of_the_slot_table_on_both_maps(stage2_full):
+    table = expected_slot_files()
+    assert set(table) <= set(ANIM_SLOTS)
+    for name in MAPS:
+        molynx, bile = record_47(stage2_full, name), source_bile(name)
+        for slot in ANIM_SLOTS:
+            if slot == "unk_1":
+                continue
+            want = f"Molynx-{table.get(slot, 'stand')}" if bile.resource_name(slot) else ""
+            assert molynx.resource_name(slot) == want, (name, slot)
+
+
+@needs_data
+@needs_assets
+def test_the_audits_slot_table_is_the_design_table():
+    assert audit_module.SLOT_FILES == expected_slot_files()
+    assert audit_module.DEFAULT_FILE == "stand"
+
+
+def _swap(mod: Path, a: str, b: str, size: int) -> None:
+    """Swap the first `size` bytes (64: the names, 84: the whole resources) of two slots."""
+    oa, ob = FIELDS[a].offset, FIELDS[b].offset
+
+    def edit(creatures):
+        raw = creatures[-1].raw
+        raw[oa:oa + size], raw[ob:ob + size] = bytes(raw[ob:ob + size]), bytes(raw[oa:oa + size])
+        return creatures
+    edit_creatures(mod, "Siege", edit)
+
+
+@needs_data
+@needs_assets
+def test_stage2_swapped_names_of_two_slots_fail_naming_both(mod2):
+    """happy and angry both end (like the Bile Demon's files), so only the table can tell them apart."""
+    _swap(mod2, "animHappyResource", "animAngryResource", 64)
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (b) Siege:")
+    happy, angry = FIELDS["animHappyResource"].offset, FIELDS["animAngryResource"].offset
+    assert (f"animHappyResource name (record 47 bytes {happy}-{happy + 63}) is 'Molynx-angry', "
+            "expected 'Molynx-happy'") in line
+    assert (f"animAngryResource name (record 47 bytes {angry}-{angry + 63}) is 'Molynx-happy', "
+            "expected 'Molynx-angry'") in line
+
+
+@needs_data
+@needs_assets
+def test_stage2_swapped_whole_resources_of_two_slots_fail(mod2):
+    _swap(mod2, "animHappyResource", "animAngryResource", 84)
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (b) Siege:")
+    assert "animHappyResource name" in line and "expected 'Molynx-happy'" in line
+    assert "animAngryResource name" in line and "expected 'Molynx-angry'" in line
+    assert f"animHappyResource frames ({tail_range('animHappyResource', 'frames')}) is 23, expected 59" in line
+
+
+@needs_data
+@needs_assets
+@pytest.mark.parametrize("slot,sub,value,expected", [
+    ("animWalkResource", "startDist", 2159, 2158),      # kept from the Bile Demon's walk
+    ("animWalkResource", "endDist", 0, 1622),
+    ("animWalkResource", "startAf", 40, 0),             # no Start file
+    ("animWalkResource", "endAf", 40, 0),               # no End file
+    ("drunkIdle", "sometimesOne", 0, 1),                # kept
+    ("animIdle1Resource", "sometimesOne", 1, 0),
+    ("animStunnedPoseResource", "startDist", 1128, 0),  # a mesh slot became an animation: zeroed
+    ("animStunnedPoseResource", "endDist", 158, 0),
+    ("animElecResource", "endDist", 200, 0),
+    ("animElecResource", "sometimesOne", 1, 0),
+])
+def test_stage2_every_tail_sub_field_is_checked(mod2, slot, sub, value, expected):
+    set_tail(mod2, "Siege", slot, sub, value)
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (b) Siege:")
+    assert f"{slot} {sub} ({tail_range(slot, sub)}) is {value}, expected {expected}" in line
+    assert line.count(f"{slot} ") == 1
+
+
+@needs_data
+@needs_assets
+@pytest.mark.parametrize("bad", [[("bile_demon-walk", True)], "bile_demon-walk"])
+def test_stage2_file_wraps_that_is_not_a_mapping_is_a_value_error(assets_dir, tmp_path, bad):
+    _refused(tmp_path, assets_dir, "file_wraps", file_wraps=bad)
+
+
+@needs_data
+def test_resource_toml_descriptions_say_which_folder_to_use(stage1_dir):
+    one = tomllib.loads((stage1_dir / "resource.toml").read_text())["resource"]["description"]
+    assert one.startswith("Molynx test A fallback (slot only). Use this only if the folder Molynx fails.")
+    assert "Enable only one Molynx folder at a time." in one
+
+
+@needs_data
+@needs_assets
+def test_stage2_resource_toml_description_says_use_this_first(stage2_full):
+    two = tomllib.loads((stage2_full / "resource.toml").read_text())["resource"]["description"]
+    assert two.startswith("Molynx test A (his own look). Use this first.")
+    assert "Enable only one Molynx folder at a time." in two
+
+
+def _synthetic_mods(root: Path) -> Path:
+    for name in ("Molynx", "Molynx_slot_only"):
+        (root / name / "Data" / "editor" / "maps").mkdir(parents=True)
+        (root / name / "resource.toml").write_bytes(b"[resource]\r\n")
+        (root / name / "Data" / "editor" / "maps" / "Siege.kwd").write_bytes(name.encode())
+    (root / "Molynx" / "Data" / "Meshes").mkdir()
+    (root / "Molynx" / "Data" / "Meshes" / "Molynx-walk.kmf").write_bytes(b"walk")
+    return root
+
+
+def test_bundle_is_sorted_with_fixed_times_and_modes(tmp_path):
+    import zipfile
+    from scripts.make_molynx_bundle import make_bundle
+    mods = _synthetic_mods(tmp_path / "mods")
+    guide = tmp_path / "guide.md"
+    guide.write_text("# guide\n")
+    out = tmp_path / "a.zip"
+    names = make_bundle(mods, guide, out)
+    expected = ["Molynx/Data/Meshes/Molynx-walk.kmf", "Molynx/Data/editor/maps/Siege.kwd",
+                "Molynx/resource.toml", "Molynx_slot_only/Data/editor/maps/Siege.kwd",
+                "Molynx_slot_only/resource.toml", "Molynx_test_guide.md"]
+    assert names == expected
+    with zipfile.ZipFile(out) as z:
+        infos = z.infolist()
+        assert [i.filename for i in infos] == expected
+        assert all(i.date_time == (2026, 11, 5, 0, 0, 0) for i in infos)
+        assert all(i.external_attr >> 16 == 0o644 for i in infos)
+        assert all(i.compress_type == zipfile.ZIP_DEFLATED for i in infos)
+        assert z.read("Molynx_test_guide.md") == b"# guide\n"
+        assert z.read("Molynx_slot_only/Data/editor/maps/Siege.kwd") == b"Molynx_slot_only"
+    again = tmp_path / "b.zip"
+    make_bundle(mods, guide, again)
+    assert out.read_bytes() == again.read_bytes()
+    with pytest.raises(FileExistsError):
+        make_bundle(mods, guide, out)
+
+
+@pytest.mark.parametrize("stray", ["Molynx/readme.txt", "Molynx/Data/.DS_Store",
+                                   "Molynx_slot_only/Data/editor/maps/Siege.kwd~",
+                                   "Molynx/Other/x.kmf", "Molynx_slot_only/notes.md"])
+def test_bundle_refuses_stray_files_and_writes_nothing(tmp_path, stray):
+    from scripts.make_molynx_bundle import make_bundle
+    mods = _synthetic_mods(tmp_path / "mods")
+    (mods / stray).parent.mkdir(parents=True, exist_ok=True)
+    (mods / stray).write_bytes(b"x")
+    guide = tmp_path / "guide.md"
+    guide.write_text("g")
+    with pytest.raises(ValueError):
+        make_bundle(mods, guide, tmp_path / "a.zip")
+    assert not (tmp_path / "a.zip").exists()
+
+
+def test_bundle_refuses_a_missing_folder(tmp_path):
+    from scripts.make_molynx_bundle import make_bundle
+    mods = _synthetic_mods(tmp_path / "mods")
+    shutil.rmtree(mods / "Molynx_slot_only")
+    guide = tmp_path / "guide.md"
+    guide.write_text("g")
+    with pytest.raises(ValueError, match="Molynx_slot_only"):
+        make_bundle(mods, guide, tmp_path / "a.zip")
+    assert not (tmp_path / "a.zip").exists()

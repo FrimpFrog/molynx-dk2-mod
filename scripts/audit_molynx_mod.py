@@ -49,7 +49,8 @@ Rules, each one PASS or FAIL line per map (per folder for g and h):
 The stages (written independently of the builder, from the Molynx design):
   1  record 47 = Bile Demon with name "Molynx", creatureId 47, orderInEditor = the source's largest + 1.
   2  + every animation slot that is non-empty in the Bile Demon (not unk_1) renamed `Molynx-<stem>`
-     (64-byte name, NUL padded); empty slots stay empty. The 20 bytes after the name (`TAIL`) of a
+     (64-byte name, NUL padded) with the stem of SLOT_FILES (a literal table; "stand" for a slot
+     not in it); empty slots stay empty. The 20 bytes after the name (`TAIL`) of a
      renamed slot that plays one of Molynx's animation files follow the stage-2 rule, written out in
      `_expected_tail`: flags = the Bile Demon's without 0x8 / 0x10 (no Start / End files), frames =
      the file's frame count (minus 1 when the file loops), fps 30, type 6, startAf = endAf = 0,
@@ -115,6 +116,31 @@ MAX_SPRITE = 255                  # vertices and triangles per sprite (corners a
 MAX_TEXTURE = 128                 # no texture in the game's cache is larger (0 of 1911)
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # Slots whose Molynx file may end where the Bile Demon's file loops: slot -> (file, why).
+# Which Molynx file each animation slot names (stage 2), written out here from the design's slot
+# table (slot-table.md, plan Task 8) and the rulings on loop variants: entrance needs a walk that
+# ends (walk_once) and elec, a static pose in the Bile Demon, a getting_hit that loops
+# (getting_hit_loop). A slot not listed takes "stand"; a slot empty in the Bile Demon stays empty.
+SLOT_FILES = {
+    "animWalkResource": "walk", "animRunResource": "running",
+    "animDraggedPoseResource": "DraggedPose", "animRecoilHffResource": "getting_hit",
+    "animRecoilHfbResource": "being_slapped", "animMelee1Resource": "attack",
+    "animMelee2Resource": "attack", "animSpecialResource": "attack", "animDieResource": "die",
+    "animDiePoseResource": "DiePose", "animHappyResource": "happy", "animAngryResource": "angry",
+    "animSwingResource": "being_picked_up", "animSleepResource": "sleeping",
+    "animEatResource": "eating", "animEatCorpseResource": "eating", "animDrinkResource": "eating",
+    "animBuildingResource": "manufacturing", "animPrayResource": "praying",
+    "animFallbackResource": "knockback", "animGetUpResource": "waking_up",
+    "animDanceResource": "celebrating", "animDrunkResource": "staggering",
+    "animDrunk2Resource": "staggering", "animStunnedPoseResource": "staggering",
+    "animDejectedPoseResource": "staggering", "animIdle1Resource": "stand",
+    "animIdle2Resource": "fidgeting", "drunkIdle": "fidgeting",
+    "animPoseFrameResource": "PoseFrame", "animWalk2Resource": "patrolling",
+    "animEntranceResource": "walk_once", "animWalkbackResource": "walk",
+    "animResearchResource": "interacting_with_objects", "animLootResource": "interacting_with_objects",
+    "animMagicResource": "getting_hit", "animTortureResource": "getting_hit",
+    "animElecResource": "getting_hit_loop", "animElectrocuteResource": "getting_hit",
+}
+DEFAULT_FILE = "stand"
 WRAP_EXCEPTIONS = {
     "animSleepResource": ("Molynx-sleeping", "a one-way clip (he lies down and stays down), so it "
                           "plays once and is not looped"),
@@ -192,7 +218,11 @@ def _game_mesh(file_name: str) -> bytes | None:
 
 def _file_kind(data: bytes) -> tuple[str, int, bool | None]:
     """(kind, frames, loops) of a KMF file: ("anim", n, wrap) or ("mesh", 0, None)."""
-    model = parse_kmf(data)
+    return _model_kind(parse_kmf(data))
+
+
+def _model_kind(model) -> tuple[str, int, bool | None]:
+    """(kind, frames, loops) of a parsed KMF: ("anim", n, wrap) or ("mesh", 0, None)."""
     if model.kind == "anim":
         return "anim", model.anim.frame_count, bool(model.anim.wrap)
     if model.kind == "mesh":
@@ -242,11 +272,7 @@ class _Files:
     def kind(self, name: str) -> tuple[str, int, bool | None] | None:
         """(kind, frames, loops) of the folder's file `name`, None when it cannot be read."""
         model, _problem = self.parsed(name)
-        if model is None:
-            return None
-        if model.kind == "anim":
-            return "anim", model.anim.frame_count, bool(model.anim.wrap)
-        return "mesh", 0, None
+        return None if model is None else _model_kind(model)
 
 
 def _png_size(data: bytes) -> tuple[int, int]:
@@ -374,15 +400,16 @@ def _value_problems(molynx: Creature, bile: Creature, stage: int, order: int,
             if raw == _resource_bytes(bile, slot):
                 continue  # left as the Bile Demon's: already named as a missing stage-2 field
             start = FIELDS[slot].offset
-            if not name.startswith(MOLYNX_PREFIX) or len(name) == len(MOLYNX_PREFIX):
+            expected = MOLYNX_PREFIX + SLOT_FILES.get(slot, DEFAULT_FILE)
+            if name != expected:
                 problems.append(f"{slot} name (record 47 bytes {start}-{start + RESOURCE_NAME_SIZE - 1}) "
-                                f"is {name!r}, expected a name starting with {MOLYNX_PREFIX!r}")
+                                f"is {name!r}, expected {expected!r}")
             elif raw[len(name):RESOURCE_NAME_SIZE].strip(b"\0"):
                 problems.append(f"{slot} name (record 47 bytes {start}-{start + RESOURCE_NAME_SIZE - 1}) "
                                 "has bytes after its NUL")
             bile_tail = _tail(_resource_bytes(bile, slot))
-            file = files.kind(name) if name and name != bile.resource_name(slot) else None
-            problems += _tail_problems(slot, name, _tail(raw), bile_tail, file)
+            file = files.kind(expected)  # the tail describes the file the slot must name
+            problems += _tail_problems(slot, expected, _tail(raw), bile_tail, file)
             what = _expected_tail(bile_tail, file)[1]
             if file is None and bile_tail["type"] != TYPE_NONE:
                 counts["unchecked"] += 1

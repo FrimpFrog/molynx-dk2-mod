@@ -69,31 +69,32 @@ The zip holds two folders. Use **only one at a time**:
    - **Pray** - in a temple he prays.
    - **Work** - in a workshop he works.
    - **Moods** - when he is happy or angry he shows it.
+   - **Dance** - if he dances, it is his own dance.
    - **His creature panel opens** - click his picture or open his panel; the game does not crash.
 
-   **Fail** is: a crash or freeze (while loading, or at one of the points above), Molynx invisible,
-   white or grey, or a Bile Demon where Molynx should be. If every creature is a normal one, the
-   folder is probably not first in the list (step 2).
+   **Fail** is: a crash or freeze (while loading, or at one of the points above), or Molynx
+   invisible, white or grey. If he looks like a plain Bile Demon, the folder is probably not first
+   in the list (step 2).
 
 5. **Send me:**
    - `<DK2>\flame\latest.log`. Copy it **right after you close the game**; the next start
      overwrites it.
    - A screenshot or two (Molynx on screen, if you can).
-   - The exact moment of any crash: while loading, on the map, when picking him up, when he went to
-     sleep, and so on.
+   - The exact moment of any crash (while loading, when picking him up, when he went to sleep, ...).
    - If a new file appeared in `<DK2>\flame\CrashInfo\`, send the newest one too.
 
-6. **If the game fails or crashes on start:** open `config.toml` again and take `Molynx;` out of the
-   `alt-resources` line. Copy the folder `Molynx_slot_only` from the zip into
+6. **If anything fails** (a crash on start or later, for example when he sleeps): first copy
+   `flame\latest.log` (the next start overwrites it). Then take `Molynx;` out of the
+   `alt-resources` line, copy the folder `Molynx_slot_only` from the zip into
    `<DK2>\flame\resources\` and put it **first** instead:
 
    ```
    alt-resources = "Molynx_slot_only;Quuz_AudioFix;LevelFixes;Quuz_UniqueBatTex;Quuz_FullHD;Quuz_HD;Quuz_LevelFixes"
    ```
 
-   Try the same map again. In this folder Molynx is an exact copy of the Bile Demon: same look, same
-   name. Tell me whether the map starts and plays. This tells me whether the trouble is the 47th
-   creature itself or his model and animations.
+   Play the same map again. Here Molynx is an exact copy of the Bile Demon (same look, same name).
+   Send me the new `latest.log` too, and tell me whether this one works. That shows whether the
+   trouble is the 47th creature itself or his model and animations.
 
 7. **If a file-checksum error appears,** open `config.toml`, find `NoFileChecksum = false` (in the
    `[dk2]` part), make it `NoFileChecksum = true`, save, and try again. Tell me you did.

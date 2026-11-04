@@ -52,6 +52,7 @@ import os
 import re
 import struct
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from scripts.dk2kld_splice import (BILE_DEMON_ID, BILE_DEMON_NAME, MAP_SUFFIXES, first_player_bile_thing,
@@ -73,11 +74,13 @@ STAGE1_FOLDER = "Molynx_slot_only"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 _DESCRIPTIONS = {
-    1: ("Molynx test 1 (slot only). Adds a 47th creature named Molynx that is an exact copy of the "
-        "Bile Demon, and puts one Molynx on the maps {maps}. Only the map files of those maps are "
-        "included; nothing else in the game is changed. Enable only one Molynx folder at a time."),
-    2: ("Molynx test 2 (looks). The 47th creature Molynx with his own model and animations, on the "
-        "maps {maps}. Enable only one Molynx folder at a time."),
+    1: ("Molynx test A fallback (slot only). Use this only if the folder Molynx fails. Adds a "
+        "47th creature that is an exact copy of the Bile Demon, same look and same name, and puts "
+        "him on the maps {maps}. Only the map files of those maps are included; nothing else in "
+        "the game is changed. Enable only one Molynx folder at a time."),
+    2: ("Molynx test A (his own look). Use this first. Adds Molynx, a 47th creature with his own "
+        "model and animations, and puts him on the maps {maps}. Enable only one Molynx folder at "
+        "a time."),
     3: ("Molynx, the 47th creature, with his own looks, stats, icon and texts, on the maps {maps}. "
         "Enable only one Molynx folder at a time."),
 }
@@ -182,6 +185,8 @@ def _files_for(bile: Creature, assets: _Assets, anim_info: dict | None,
     and checked against its file plan; a given `anim_info` / `file_wraps` must agree with them."""
     wraps = bile_file_wraps([bile])
     if file_wraps is not None:
+        if not isinstance(file_wraps, Mapping):
+            raise ValueError(f"file_wraps must be a mapping, not {type(file_wraps).__name__}")
         given = {k.lower(): v for k, v in file_wraps.items()}
         wrong = sorted(k for k, v in wraps.items() if k not in given or given[k] != v)
         if wrong:
@@ -201,8 +206,8 @@ def _files_for(bile: Creature, assets: _Assets, anim_info: dict | None,
                              f"the file plan needs the opposite")
         info[stem] = {"frames": model.anim.frame_count, "fps": GAME_FPS, "wrap": bool(model.anim.wrap)}
     if anim_info is not None:
-        if not isinstance(anim_info, dict):
-            raise ValueError(f"anim_info must be a dict, not {type(anim_info).__name__}")
+        if not isinstance(anim_info, Mapping):
+            raise ValueError(f"anim_info must be a mapping, not {type(anim_info).__name__}")
         wrong = sorted(stem for stem in info if anim_info.get(stem) != info[stem])
         if wrong:
             raise ValueError(f"anim_info disagrees with the exported files on {wrong}")
