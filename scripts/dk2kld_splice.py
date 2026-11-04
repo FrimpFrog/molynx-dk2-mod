@@ -66,6 +66,16 @@ those maps have one in QUUZ_MAPS_DIR. The result is "Siege" (in QUUZ_MAPS_DIR), 
 level flags of the Quuz Siege.kwd (u16 at byte 56 + 25484) set IS_MULTIPLAYER_LEVEL but not
 IS_SKIRMISH_LEVEL, while the editor-folder Siege.kwd sets both.
 
+The second test map (`pick_skirmish_test_map`). A map the Skirmish list may not offer is a wasted test
+round, so a second map is shipped whose source `.kwd` has IS_SKIRMISH_LEVEL set: the best map by the
+same ordering and criteria as `pick_test_map`, other than that one. The level flags are the bit
+struct LevelFlag of the template ufdada/dk2-tools Formats/Level/level_struct.bt, read little-endian
+from the least significant bit: bit 2 UNK_1 (always on), 3 ALWAYS_IMPRISON_ENEMIES, 4 ONE_SHOT_HORNY,
+5 IS_SECRET_LEVEL, 6 IS_SPECIAL_LEVEL, 7 SHOW_HERO_KILLS, 8 AUTO_OBJECTIVE_BOX, 9 HEART_MAKES_GEM,
+10 IS_MULTIPLAYER_LEVEL, 11 IS_SKIRMISH_LEVEL, 12 FREEZE_OPTIONS, 13 IS_MY_PET_DUNGEON_LEVEL. This
+reading matches the data: the Quuz Siege.kwd holds 0x404 (bits 10 and 2), the editor Siege.kwd and
+13coop.kwd 0xC04 (bits 11, 10 and 2); over the 283 `.kwd` files of MAPS_DIR bit 11 is set in 109.
+
 LICENCE: GPL-3.0.
 """
 import struct
@@ -267,8 +277,24 @@ def _globals_shape(globals_kld: bytes) -> tuple[int, int]:
     return block.item_count, len(_records(block)[0].raw)
 
 
-def pick_test_map() -> str:
-    """The map Molynx is tested on (see the module docstring for the criteria); ValueError if none."""
+# The level flags: a u16 inside the .kwd's level header (see the module docstring for the bits).
+LEVEL_FLAGS_AT = 56 + 25484
+IS_MULTIPLAYER_LEVEL = 1 << 10
+IS_SKIRMISH_LEVEL = 1 << 11
+
+
+def level_flags(kwd: bytes) -> int:
+    """The level flags (u16) of a map's `.kwd` file; ValueError if the file is too short."""
+    if len(kwd) < LEVEL_FLAGS_AT + 2:
+        raise ValueError(f"a .kwd of {len(kwd)} bytes is too short for the level flags "
+                         f"at byte {LEVEL_FLAGS_AT}")
+    (flags,) = struct.unpack_from("<H", kwd, LEVEL_FLAGS_AT)
+    return flags
+
+
+def _test_map_candidates() -> list[tuple[bool, int, str]]:
+    """(not in both folders, total bytes of the seven files, name) of every map that meets the
+    test-map criteria in the module docstring; the smallest tuple is the preferred map."""
     names = {p.stem for folder in (QUUZ_MAPS_DIR, MAPS_DIR) for p in folder.glob("*.kwd")
              if _complete(folder, p.stem)}
     candidates = []
@@ -283,6 +309,27 @@ def pick_test_map() -> str:
         size = sum((folder / (name + suffix)).stat().st_size for suffix in MAP_SUFFIXES)
         in_both = all((d / (name + ".kwd")).is_file() for d in (QUUZ_MAPS_DIR, MAPS_DIR))
         candidates.append((not in_both, size, name))
+    return candidates
+
+
+def pick_test_map() -> str:
+    """The map Molynx is tested on (see the module docstring for the criteria); ValueError if none."""
+    candidates = _test_map_candidates()
     if not candidates:
         raise ValueError("no map meets the test-map criteria")
     return min(candidates)[2]
+
+
+def pick_skirmish_test_map() -> str:
+    """The second test map: the best candidate other than `pick_test_map()` whose source `.kwd`
+    has IS_SKIRMISH_LEVEL set (see the module docstring); ValueError if none."""
+    candidates = _test_map_candidates()
+    if not candidates:
+        raise ValueError("no map meets the test-map criteria")
+    first = min(candidates)[2]
+    skirmish = [c for c in candidates
+                if c[2] != first
+                and level_flags((map_source_dir(c[2]) / (c[2] + ".kwd")).read_bytes()) & IS_SKIRMISH_LEVEL]
+    if not skirmish:
+        raise ValueError("no second map meets the test-map criteria and has the skirmish flag")
+    return min(skirmish)[2]
