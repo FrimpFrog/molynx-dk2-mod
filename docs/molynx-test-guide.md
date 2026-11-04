@@ -32,20 +32,20 @@ loads on top of the game. Remove it and the game is as before.
    (You can do the same in the Flame start window: double-click `Molynx_slot_only` so it moves to
    *Enabled*, then drag it to the top.)
 
-3. **Start the test map.** The two test maps are **Siege** and **13coop**. Start with Siege.
+3. **Start the test map.** The two test maps are **Siege** and **Dead Walking**. Start with Siege.
    - Quickest: in `config.toml`, in the `[dk2]` part, find the line `Level = ""` and make it
      `Level = "Siege"`. Start the game as usual. It should go straight into the map.
+     (I have not been able to run this myself, so it may just show the menu.)
    - Or pick the map **Siege** in the Skirmish list. On your install it may not be listed
      (your Quuz copy is not marked as a skirmish map), which is why there is a second map.
-   - If Siege does not start (for example you only get the menu), use **13coop** the same way:
-     `Level = "13coop"`. Do not look for 13coop in the list, use the `Level` line.
+   - If Siege does not start (for example you only get the menu), use **Dead Walking** the same
+     way: `Level = "Dead Walking"`. This map is a normal skirmish map, so it is also in the
+     Skirmish list. If the list shows it under another name, use the `Level` line.
 
 4. **Look at these things** (about 5 minutes is enough):
    - The map loads and you can play.
-   - One of the creatures that start on the map is called **Molynx**. Hold the mouse over the
-     creatures or open their panels. He looks like a Bile Demon. On Siege he is on Keeper 1's
-     side (usually you). On 13coop he belongs to Keeper 4, so he may be on an enemy's side. If you
-     cannot find him there, say so; it is not a crash.
+   - One of the creatures that start in **your** dungeon (Keeper 1) is called **Molynx**. Hold the
+     mouse over your creatures or open their panels. He looks like a Bile Demon.
    - He **walks** around.
    - You can **pick him up** and **drop** him.
    - His **creature panel opens**.

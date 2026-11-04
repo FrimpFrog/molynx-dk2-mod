@@ -28,7 +28,8 @@ CREATURES = 0xAA
 SKIRMISH_FLAG = 1 << 11
 MULTIPLAYER_FLAG = 1 << 10
 FOLDER = "Molynx_slot_only"
-MAPS = ["Siege", "13coop"]
+SECOND = "Dead Walking"  # the skirmish map whose first keeper Bile Demon is Keeper 1's
+MAPS = ["Siege", SECOND]
 TEXT_IDS = {"name": 3001, "tooltip": 3002, "general": 3003, "strength": 3004, "weakness": 3005}
 
 
@@ -127,16 +128,16 @@ def mod2(stage2_dir, tmp_path):
 @needs_data
 def test_test_maps_are_pinned():
     assert pick_test_map() == "Siege"
-    assert pick_skirmish_test_map() == "13coop"
+    assert pick_skirmish_test_map() == SECOND
     assert builder.test_maps() == MAPS
 
 
 @needs_data
 def test_the_users_siege_copy_has_no_skirmish_flag_but_the_second_map_does():
     # Why a second test map exists: the Quuz Siege.kwd (the copy the game loads) is a multiplayer
-    # map but not a skirmish map, so it may not show in the Skirmish list; 13coop does.
+    # map but not a skirmish map, so it may not show in the Skirmish list; the second map does.
     siege = (map_source_dir("Siege") / "Siege.kwd").read_bytes()
-    second = (map_source_dir("13coop") / "13coop.kwd").read_bytes()
+    second = (map_source_dir(SECOND) / f"{SECOND}.kwd").read_bytes()
     assert level_flags(siege) == 0x404
     assert level_flags(siege) & MULTIPLAYER_FLAG and not level_flags(siege) & SKIRMISH_FLAG
     assert level_flags(second) == 0xC04
@@ -151,8 +152,21 @@ def test_level_flags_are_the_u16_at_byte_25540():
         level_flags(data[:1000])
 
 
-@needs_data
-def test_skirmish_pick_recomputed_independently():
+def _first_keeper_bile_owner(things: bytes) -> int | None:
+    """Owner of the first type-200 creature thing with creatureId 3 owned by a keeper (3..7), or None;
+    a plain walk of the Things records, independent of the module under test."""
+    pos = HEADER_SIZE
+    while pos < len(things):
+        kind, size = struct.unpack_from("<II", things, pos)
+        if kind == 200 and things[pos + 34] == 3 and 3 <= things[pos + 35] <= 7:
+            return things[pos + 35]
+        pos += 8 + size
+    return None
+
+
+def _candidates_recomputed():
+    """(not in both, total bytes, name, level flags, owner of the first keeper Bile Demon) of the 46x5537
+    maps that have a keeper's Bile Demon, recomputed here from the files."""
     def complete(folder):
         return {p.stem for p in folder.glob("*.kwd")
                 if all((folder / (p.stem + s)).is_file() for s in MAP_SUFFIXES)}
@@ -165,20 +179,36 @@ def test_skirmish_pick_recomputed_independently():
         (creatures,) = [b for b in read_blocks(paths[6].read_bytes()) if b.signature == CREATURES]
         if (creatures.item_count, len(creatures.content) // creatures.item_count) != (46, 5537):
             continue
-        data, pos, bile = paths[2].read_bytes(), HEADER_SIZE, False
-        while pos < len(data):
-            kind, size = struct.unpack_from("<II", data, pos)
-            bile = bile or (kind == 200 and data[pos + 34] == 3 and 3 <= data[pos + 35] <= 7)
-            pos += 8 + size
-        if not bile:
+        owner = _first_keeper_bile_owner(paths[2].read_bytes())
+        if owner is None:
             continue
         both = all((d / (name + ".kwd")).is_file() for d in (QUUZ_MAPS_DIR, MAPS_DIR))
         flags = struct.unpack_from("<H", paths[0].read_bytes(), 56 + 25484)[0]
-        rows.append((not both, sum(p.stat().st_size for p in paths), name, flags))
+        rows.append((not both, sum(p.stat().st_size for p in paths), name, flags, owner))
+    return rows
+
+
+@needs_data
+def test_skirmish_pick_recomputed_independently():
+    rows = _candidates_recomputed()
     assert len(rows) == 41
     others = [r for r in rows if r[2] != pick_test_map() and r[3] & SKIRMISH_FLAG]
-    assert min(others)[2] == pick_skirmish_test_map() == "13coop"
-    assert min(others)[1] == 734_662
+    assert len(others) == 30
+    # the smallest skirmish map alone would be 13coop, but its first keeper Bile Demon is Keeper 4's
+    assert min(others)[2] == "13coop" and min(others)[4] == 6
+    # the second map must also put Molynx in the dungeon of Keeper 1 (player 3), the human's
+    keeper_1 = [r for r in others if r[4] == 3]
+    assert [r[2] for r in keeper_1] == [SECOND], "Dead Walking is the only such skirmish map"
+    assert min(keeper_1)[2] == pick_skirmish_test_map() == SECOND
+    assert min(keeper_1)[1] == 745_684
+    assert (map_source_dir(SECOND) / f"{SECOND}.kwd").parent == MAPS_DIR
+
+
+@needs_data
+def test_the_first_test_map_is_not_changed_by_the_owner_criterion():
+    rows = _candidates_recomputed()
+    assert min(rows)[2] == pick_test_map() == "Siege"
+    assert [r[4] for r in rows if r[2] == "Siege"] == [3]
 
 
 # ---- build_mod: refusals ------------------------------------------------------------------------
@@ -260,6 +290,19 @@ def test_stage1_record_47_is_the_bile_demon_with_three_fields_changed(stage1_dir
         assert diff, "Molynx must differ from the Bile Demon"
         assert molynx.get("name") == "Molynx" and molynx.get("creatureId") == 47
         assert molynx.get("orderInEditor") == 47
+
+
+@needs_data
+def test_molynx_stands_in_keeper_1s_dungeon_on_every_test_map(stage1_dir):
+    for name in MAPS:
+        things = (maps_dir(stage1_dir) / f"{name}Things.kld").read_bytes()
+        pos, owners = HEADER_SIZE, []
+        while pos < len(things):
+            kind, size = struct.unpack_from("<II", things, pos)
+            if kind == 200 and things[pos + 34] == 47:
+                owners.append(things[pos + 35])
+            pos += 8 + size
+        assert owners == [3], name  # exactly one Molynx thing, owned by player 3 = "Keeper 1"
 
 
 @needs_data
@@ -363,7 +406,7 @@ def test_a_corrupted_byte_in_a_copied_block_names_the_block(mod):
     assert not report.ok
     (line,) = fail_lines(report, "a")
     assert "Siege" in line and "Terrain" in line and "0x6E" in line
-    assert not fail_lines(report, "a", "13coop")
+    assert not fail_lines(report, "a", SECOND)
     assert not fail_lines(report, "b") and not fail_lines(report, "c")
 
 
@@ -378,10 +421,10 @@ def test_a_corrupted_header_of_any_other_block_names_that_block(mod, signature, 
         blocks[at] = Block(signature, bytes(header), blocks[at].content)
         return blocks
 
-    edit_globals(mod, "13coop", corrupt_header)
+    edit_globals(mod, SECOND, corrupt_header)
     report = audit(mod)
     (line,) = fail_lines(report, "a")
-    assert "13coop" in line and label in line
+    assert SECOND in line and label in line
 
 
 @needs_data
@@ -398,16 +441,16 @@ def test_a_changed_byte_in_a_copied_map_file_names_the_file(mod):
     assert not report.ok
     (line,) = fail_lines(report, "e")
     assert "Siege" in line and "SiegeMap.kld" in line
-    assert not fail_lines(report, "e", "13coop")
+    assert not fail_lines(report, "e", SECOND)
 
 
 @needs_data
 @pytest.mark.parametrize("suffix", [".kwd", "Players.kld", "Triggers.kld", "Variables.kld"])
 def test_every_other_copied_file_is_compared_with_its_source(mod, suffix):
-    flip_byte(maps_dir(mod) / f"13coop{suffix}", 60)
+    flip_byte(maps_dir(mod) / f"{SECOND}{suffix}", 60)
     report = audit(mod)
     (line,) = fail_lines(report, "e")
-    assert f"13coop{suffix}" in line
+    assert f"{SECOND}{suffix}" in line
 
 
 @needs_data
@@ -429,15 +472,15 @@ def test_a_things_file_that_is_the_untouched_source_fails(mod):
 
 @needs_data
 def test_a_things_file_retargeted_to_another_id_fails(mod):
-    path = maps_dir(mod) / "13coopThings.kld"
+    path = maps_dir(mod) / f"{SECOND}Things.kld"
     data = bytearray(path.read_bytes())
-    (at,) = [i for i, (a, b) in enumerate(zip(data, (map_source_dir("13coop") / "13coopThings.kld").read_bytes()))
+    (at,) = [i for i, (a, b) in enumerate(zip(data, (map_source_dir(SECOND) / f"{SECOND}Things.kld").read_bytes()))
              if a != b]
     data[at] = 46
     path.write_bytes(bytes(data))
     report = audit(mod)
     (line,) = fail_lines(report, "d")
-    assert "13coop" in line and "47" in line
+    assert SECOND in line and "47" in line
 
 
 @needs_data
@@ -493,9 +536,9 @@ def test_record_47_with_a_wrong_stage_1_value_fails(mod, field, value, needle):
         creatures[-1].set(field, value)
         return creatures
 
-    edit_creatures(mod, "13coop", wrong)
+    edit_creatures(mod, SECOND, wrong)
     (line,) = fail_lines(audit(mod), "b")
-    assert "13coop" in line and needle in line
+    assert SECOND in line and needle in line
 
 
 @needs_data
@@ -575,9 +618,9 @@ def test_a_changed_timestamp_in_the_creatures_header_fails_rule_c(mod):
         blocks[at] = Block(CREATURES, bytes(header), blocks[at].content)
         return blocks
 
-    edit_globals(mod, "13coop", touch_timestamp)
+    edit_globals(mod, SECOND, touch_timestamp)
     (line,) = fail_lines(audit(mod), "c")
-    assert "13coop" in line
+    assert SECOND in line
 
 
 @needs_data
@@ -733,8 +776,8 @@ def test_stage3_fields_are_recognised_but_icons_and_textures_are_not_yet_checked
 
 @needs_data
 def test_stage3_text_ids_are_part_of_the_record(tmp_path):
-    out = build_mod(3, tmp_path, "Molynx_full", maps=["13coop"], text_ids=TEXT_IDS)
-    molynx = record_47(out, "13coop")
+    out = build_mod(3, tmp_path, "Molynx_full", maps=[SECOND], text_ids=TEXT_IDS)
+    molynx = record_47(out, SECOND)
     assert molynx.get("nameStringId") == 3001 and molynx.get("weaknessStringId") == 3005
     assert molynx.resource_name("icon1Resource") == r"gui\creatures\evil\molynx"
-    assert molynx.get("hp") > source_bile("13coop").get("hp")
+    assert molynx.get("hp") > source_bile(SECOND).get("hp")

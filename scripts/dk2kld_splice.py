@@ -68,7 +68,12 @@ IS_SKIRMISH_LEVEL, while the editor-folder Siege.kwd sets both.
 
 The second test map (`pick_skirmish_test_map`). A map the Skirmish list may not offer is a wasted test
 round, so a second map is shipped whose source `.kwd` has IS_SKIRMISH_LEVEL set: the best map by the
-same ordering and criteria as `pick_test_map`, other than that one. The level flags are the bit
+same ordering and criteria as `pick_test_map`, other than that one, and in which the Bile Demon that
+`first_player_bile_thing` picks (the one Molynx replaces) is owned by player 3, "Keeper 1" (`HUMAN_PLAYER`),
+so Molynx stands in the human's own dungeon. Of the 41 candidates, 30 have the skirmish flag; the
+smallest, 13coop, would give Molynx to Keeper 4 (player 6, usually an AI side), and the only one whose
+first keeper Bile Demon is Keeper 1's is "Dead Walking" (editor folder, 745,684 B, flags 0xC04). The
+`pick_test_map` choice (Siege, Keeper 1's Bile Demon too) does not use this rule. The level flags are the bit
 struct LevelFlag of the template ufdada/dk2-tools Formats/Level/level_struct.bt, read little-endian
 from the least significant bit: bit 2 UNK_1 (always on), 3 ALWAYS_IMPRISON_ENEMIES, 4 ONE_SHOT_HORNY,
 5 IS_SECRET_LEVEL, 6 IS_SPECIAL_LEVEL, 7 SHOW_HERO_KILLS, 8 AUTO_OBJECTIVE_BOX, 9 HEART_MAKES_GEM,
@@ -166,6 +171,7 @@ CREATURE_THING = 200
 _CREATURE_DATA_SIZE = 28
 _CREATURE_ID_AT, _PLAYER_AT = 34, 35  # from the first byte of a type-200 record
 KEEPER_PLAYERS = range(3, 8)
+HUMAN_PLAYER = 3  # "Keeper 1": the first keeper slot, the one the human plays
 MAP_SUFFIXES = (".kwd", "Map.kld", "Things.kld", "Players.kld", "Triggers.kld", "Variables.kld",
                 "Globals.kld")
 
@@ -320,16 +326,25 @@ def pick_test_map() -> str:
     return min(candidates)[2]
 
 
+def _molynx_owner(name: str) -> int:
+    """Owner (player id) of the creature thing that Molynx replaces in map `name`."""
+    things = (map_source_dir(name) / (name + "Things.kld")).read_bytes()
+    return find_creature_things(things)[first_player_bile_thing(things)].player
+
+
 def pick_skirmish_test_map() -> str:
     """The second test map: the best candidate other than `pick_test_map()` whose source `.kwd`
-    has IS_SKIRMISH_LEVEL set (see the module docstring); ValueError if none."""
+    has IS_SKIRMISH_LEVEL set and whose Molynx thing is owned by `HUMAN_PLAYER` (see the module
+    docstring); ValueError if none."""
     candidates = _test_map_candidates()
     if not candidates:
         raise ValueError("no map meets the test-map criteria")
     first = min(candidates)[2]
-    skirmish = [c for c in candidates
-                if c[2] != first
-                and level_flags((map_source_dir(c[2]) / (c[2] + ".kwd")).read_bytes()) & IS_SKIRMISH_LEVEL]
-    if not skirmish:
-        raise ValueError("no second map meets the test-map criteria and has the skirmish flag")
-    return min(skirmish)[2]
+    second = [c for c in candidates
+              if c[2] != first
+              and level_flags((map_source_dir(c[2]) / (c[2] + ".kwd")).read_bytes()) & IS_SKIRMISH_LEVEL
+              and _molynx_owner(c[2]) == HUMAN_PLAYER]
+    if not second:
+        raise ValueError("no second map meets the test-map criteria, has the skirmish flag and "
+                         f"gives Molynx to player {HUMAN_PLAYER}")
+    return min(second)[2]

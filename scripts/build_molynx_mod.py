@@ -21,7 +21,8 @@ Flame build of the user's install). The user's Quuz_LevelFixes folder holds its 
 this folder has to be listed BEFORE Quuz_LevelFixes: the guide tells the user to put it first.
 
 Test maps (`test_maps`): the smallest suitable map, "Siege", and a second one that certainly shows in
-the Skirmish list, "13coop" (see dk2kld_splice, `pick_skirmish_test_map`).
+the Skirmish list and puts Molynx in Keeper 1's dungeon, "Dead Walking" (see dk2kld_splice,
+`pick_skirmish_test_map`). On both maps the Molynx thing is owned by player 3, "Keeper 1".
 
 Nothing is ever deleted or overwritten: `build_mod` refuses an existing `out_dir/<name>`, builds all
 file contents in memory before it creates the folder, and so leaves no half-built folder behind when
