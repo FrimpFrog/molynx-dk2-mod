@@ -84,6 +84,28 @@ def source_bile(map_name: str) -> Creature:
     return bile
 
 
+def creature_things(things: bytes) -> list[tuple[int, int, int]]:
+    """(record offset, creatureId, owner) of every type-200 creature thing, by a plain walk of the file."""
+    pos, found = HEADER_SIZE, []
+    while pos < len(things):
+        kind, size = struct.unpack_from("<II", things, pos)
+        if kind == 200:
+            found.append((pos, things[pos + 34], things[pos + 35]))
+        pos += 8 + size
+    return found
+
+
+def with_creature_id(things: bytes, index: int, creature_id: int) -> bytes:
+    """`things` with the creature id byte of its `index`-th creature thing set to `creature_id`."""
+    data = bytearray(things)
+    data[creature_things(things)[index][0] + 34] = creature_id
+    return bytes(data)
+
+
+def differing_fields(a: bytes, b: bytes) -> set[str]:
+    return {name for name, f in FIELDS.items() if f.end <= len(a) and a[f.offset:f.end] != b[f.offset:f.end]}
+
+
 def add_placeholder_meshes(mod: Path, names: set[str]) -> None:
     meshes = mod / "Data" / "Meshes"
     meshes.mkdir(parents=True, exist_ok=True)
@@ -286,8 +308,7 @@ def test_stage1_record_47_is_the_bile_demon_with_three_fields_changed(stage1_dir
     for name in MAPS:
         molynx, bile = record_47(stage1_dir, name), source_bile(name)
         assert len(molynx.raw) == len(bile.raw) == 5537
-        diff = [i for i in range(len(bile.raw)) if molynx.raw[i] != bile.raw[i]]
-        assert diff, "Molynx must differ from the Bile Demon"
+        assert differing_fields(bytes(molynx.raw), bytes(bile.raw)) == {"name", "creatureId", "orderInEditor"}
         assert molynx.get("name") == "Molynx" and molynx.get("creatureId") == 47
         assert molynx.get("orderInEditor") == 47
 
@@ -514,6 +535,62 @@ def test_a_changed_creature_id_on_a_creature_that_is_not_a_bile_demon_fails(mod)
 
 
 @needs_data
+def test_dead_walking_has_two_keeper_bile_demons_and_the_first_is_keeper_1s():
+    things = (map_source_dir(SECOND) / f"{SECOND}Things.kld").read_bytes()
+    found = creature_things(things)
+    assert [(i, owner) for i, (_pos, cid, owner) in enumerate(found) if cid == 3] == [(24, 3), (25, 4)]
+
+
+@needs_data
+def test_rule_d_names_the_retargeted_bile_demon_and_its_owner(stage1_dir):
+    report = audit(stage1_dir)
+    (siege,) = pass_lines(report, "d", "Siege")
+    (second,) = pass_lines(report, "d", SECOND)
+    assert "#12" in siege and "first keeper-owned Bile Demon" in siege and "Keeper 1 (player 3)" in siege
+    assert "#24" in second and "first keeper-owned Bile Demon" in second and "Keeper 1 (player 3)" in second
+
+
+@needs_data
+def test_retargeting_the_second_keeper_bile_demon_fails_naming_both(mod):
+    """Dead Walking: thing #24 (owner 3) is the one to retarget; thing #25 (owner 4) is also a keeper's Bile Demon."""
+    source = (map_source_dir(SECOND) / f"{SECOND}Things.kld").read_bytes()
+    (maps_dir(mod) / f"{SECOND}Things.kld").write_bytes(with_creature_id(source, 25, 47))
+    report = audit(mod)
+    (line,) = fail_lines(report)
+    assert line.startswith(f"FAIL (d) {SECOND}:")
+    assert "#25" in line and "player 4" in line and "#24" in line and "first" in line
+
+
+@needs_data
+def test_a_first_keeper_bile_demon_that_is_not_keeper_1s_fails(tmp_path):
+    """13coop: the first keeper Bile Demon is Keeper 4's (player 6); the human's side is player 3."""
+    out = build_mod(1, tmp_path, "Molynx_13coop", maps=["13coop"])
+    (line,) = fail_lines(audit(out))
+    assert line.startswith("FAIL (d) 13coop:") and "player 6" in line and "Keeper 1" in line
+
+
+@needs_data
+def test_a_retargeted_bile_demon_that_is_not_a_keepers_fails(mod, tmp_path, monkeypatch):
+    """A neutral (player 2) Bile Demon thing, made in a private copy of the source and of the output."""
+    real = map_source_dir("Siege")
+    src = tmp_path / "source_copy"
+    src.mkdir()
+    for suffix in MAP_SUFFIXES:
+        shutil.copyfile(real / f"Siege{suffix}", src / f"Siege{suffix}")
+    things = (src / "SiegeThings.kld").read_bytes()
+    ((pos, _cid, _owner),) = [t for t in creature_things(things) if t[1] == 3]
+    neutral = bytearray(things)
+    neutral[pos + 35] = 2
+    (src / "SiegeThings.kld").write_bytes(bytes(neutral))
+    neutral[pos + 34] = 47
+    (maps_dir(mod) / "SiegeThings.kld").write_bytes(bytes(neutral))
+    monkeypatch.setattr(audit_module, "map_source_dir",
+                        lambda name: src if name == "Siege" else map_source_dir(name))
+    (line,) = fail_lines(audit(mod))
+    assert line.startswith("FAIL (d) Siege:") and "player 2" in line and "not a keeper" in line
+
+
+@needs_data
 def test_record_47_with_an_extra_changed_field_fails_naming_it(mod):
     def bump_hp(creatures):
         creatures[-1].set("hp", creatures[-1].get("hp") + 1)
@@ -624,6 +701,37 @@ def test_a_changed_timestamp_in_the_creatures_header_fails_rule_c(mod):
 
 
 @needs_data
+@pytest.mark.parametrize("extra", [bytes(10), bytes(100)], ids=["short-tail", "zero-block"])
+def test_trailing_bytes_after_the_last_globals_block_fail_rules_a_b_c(mod, extra):
+    path = maps_dir(mod) / "SiegeGlobals.kld"
+    path.write_bytes(path.read_bytes() + extra)
+    report = audit(mod)
+    for rule in "abc":
+        (line,) = fail_lines(report, rule, "Siege")
+        assert "does not parse" in line
+    assert not fail_lines(report, map_name=SECOND)
+
+
+@needs_data
+def test_an_extra_whole_block_after_the_last_globals_block_fails_rule_a(mod):
+    path = maps_dir(mod) / "SiegeGlobals.kld"
+    data = path.read_bytes()
+    last = read_blocks(data)[-1]
+    path.write_bytes(data + last.header + last.content)  # a valid block, one too many
+    (line,) = fail_lines(audit(mod), "a", "Siege")
+    assert "blocks are" in line
+
+
+@needs_data
+def test_the_globals_of_one_map_in_the_slot_of_the_other_fail(mod):
+    shutil.copyfile(maps_dir(mod) / f"{SECOND}Globals.kld", maps_dir(mod) / "SiegeGlobals.kld")
+    report = audit(mod)
+    (line,) = fail_lines(report, "a", "Siege")
+    assert "Terrain" in line
+    assert not fail_lines(report, map_name=SECOND)
+
+
+@needs_data
 def test_an_extra_file_fails_rule_g_naming_it(mod):
     (mod / "readme.txt").write_text("hello")
     report = audit(mod)
@@ -660,6 +768,14 @@ def test_a_missing_or_malformed_resource_toml_fails_rule_h(mod):
     assert "resource.toml" in line
     (mod / "resource.toml").unlink()
     assert fail_lines(audit(mod), "h")
+
+
+@needs_data
+def test_a_resource_toml_name_that_is_not_the_folder_name_fails_rule_h(mod):
+    toml = (mod / "resource.toml").read_bytes()
+    (mod / "resource.toml").write_bytes(toml.replace(f'name = "{FOLDER}"'.encode(), b'name = "Other"'))
+    (line,) = fail_lines(audit(mod), "h")
+    assert '"Other"' in line and f'"{FOLDER}"' in line
 
 
 # ---- audit: stage 2 (animation and mesh names) --------------------------------------------------

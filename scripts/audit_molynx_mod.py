@@ -20,8 +20,9 @@ Rules, each one PASS or FAIL line per map (per folder for g and h):
       constants 4 / 28 / 1, check words signature + 1 and + 2, file size and content size match the
       content), the Creatures block holds whole 5537-byte records numbered by its item count, and its
       header is the source's apart from file size, item count and content size.
-  (d) `<map>Things.kld` differs from its source in exactly one byte: the creature id of a keeper's
-      Bile Demon (type-200 record), 3 -> 47.
+  (d) `<map>Things.kld` differs from its source in exactly one byte: the creature id, 3 -> 47, of the
+      FIRST type-200 creature thing of the source that is a Bile Demon owned by a keeper (player 3..7),
+      and that thing is owned by player 3 ("Keeper 1", the human's side). The line names the thing.
   (e) every other map file is byte-identical to its source.
   (f) animation (mesh) names: every animation slot name of record 47 that differs from the Bile
       Demon's exists as `Data/Meshes/<name>.kmf` in the folder (exact case, not empty); every name left
@@ -29,7 +30,8 @@ Rules, each one PASS or FAIL line per map (per folder for g and h):
       not checked yet, which is a FAIL, so a stage-3 folder cannot pass as verified.
   (g) the folder holds nothing else: `resource.toml`, the seven files of each map and, from stage 2,
       `Data/Meshes/*.kmf` and `Data/EngineTextures/**/*.png`.
-  (h) `resource.toml` is valid TOML with a [resource] table of name, version, authors, description.
+  (h) `resource.toml` is valid TOML with a [resource] table of name, version, authors, description,
+      and its name is the name of the folder.
 
 The stages (written independently of the builder, from the Molynx design):
   1  record 47 = Bile Demon with name "Molynx", creatureId 47, orderInEditor = the source's largest + 1.
@@ -60,6 +62,7 @@ CREATURES = 0xAA
 THINGS = 0xBE
 CREATURE_THING = 200
 KEEPER_PLAYERS = range(3, 8)
+HUMAN_PLAYER = 3  # "Keeper 1", the first keeper slot: the player the human plays
 BILE_DEMON_ID, BILE_DEMON_NAME = 3, "Bile Demon"
 MOLYNX_ID, MOLYNX_NAME, MOLYNX_PREFIX = 47, "Molynx", "Molynx-"
 SOURCE_RECORDS = 46
@@ -152,17 +155,13 @@ def _resource_bytes(record: Creature, slot: str) -> bytes:
     return bytes(record.raw[start:start + RESOURCE_SIZE])
 
 
-def _resource_name(record: Creature, slot: str) -> str:
-    return record.resource_name(slot)
-
-
 def _anim_slots() -> list[str]:
     return [slot for slot in ANIM_SLOTS if slot != "unk_1"]  # unk_1 holds no name; never touched
 
 
 def _stage_field_sets(bile: Creature) -> dict[int, frozenset[str]]:
     """The set of record fields in which record 47 must differ from the Bile Demon, per stage."""
-    renamed = frozenset(slot for slot in _anim_slots() if _resource_name(bile, slot))
+    renamed = frozenset(slot for slot in _anim_slots() if bile.resource_name(slot))
     stage2 = _STAGE1_FIELDS | renamed
     stage3 = stage2 | set(STATS) | {"icon1Resource", "portraitResource"} | set(TEXT_ID_FIELDS)
     return {1: _STAGE1_FIELDS, 2: stage2, 3: stage3}
@@ -186,9 +185,9 @@ def _value_problems(molynx: Creature, bile: Creature, stage: int, order: int) ->
                         "(the source's largest + 1)")
     if stage >= 2:
         for slot in _anim_slots():
-            if not _resource_name(bile, slot):
+            if not bile.resource_name(slot):
                 continue
-            name = _resource_name(molynx, slot)
+            name = molynx.resource_name(slot)
             raw = _resource_bytes(molynx, slot)
             if not name.startswith(MOLYNX_PREFIX) or len(name) == len(MOLYNX_PREFIX):
                 problems.append(f"{slot} is {name!r}, expected a name starting with {MOLYNX_PREFIX!r}")
@@ -202,8 +201,8 @@ def _value_problems(molynx: Creature, bile: Creature, stage: int, order: int) ->
                 problems.append(f"{stat} is {molynx.get(stat)}, not above the Bile Demon's {bile.get(stat)}")
         for slot, expected in (("icon1Resource", ICON), ("portraitResource", PORTRAIT)):
             raw = _resource_bytes(molynx, slot)
-            if _resource_name(molynx, slot) != expected:
-                problems.append(f"{slot} is {_resource_name(molynx, slot)!r}, expected {expected!r}")
+            if molynx.resource_name(slot) != expected:
+                problems.append(f"{slot} is {molynx.resource_name(slot)!r}, expected {expected!r}")
             elif raw[_RESOURCE_TAIL] != _resource_bytes(bile, slot)[_RESOURCE_TAIL]:
                 problems.append(f"{slot}: the last 20 bytes after its name differ from the Bile Demon's")
     return problems
@@ -358,7 +357,8 @@ def _thing_records(data: bytes) -> list[tuple[int, int, int]]:
 
 
 def _check_things(src: bytes, mod: bytes) -> tuple[bool, str]:
-    """Rule (d)."""
+    """Rule (d): the one changed byte is the creature id of the FIRST keeper-owned Bile Demon thing of
+    the source, 3 -> 47, and that thing belongs to Keeper 1 (player 3), the human's side."""
     if len(src) != len(mod):
         return False, f"is {len(mod)} bytes, the source {len(src)}"
     diffs = [i for i in range(len(src)) if src[i] != mod[i]]
@@ -366,24 +366,34 @@ def _check_things(src: bytes, mod: bytes) -> tuple[bool, str]:
         return False, (f"differs from the source in {len(diffs)} bytes, expected exactly 1 "
                        f"(the creature id of one Bile Demon)")
     at = diffs[0]
-    records = _thing_records(src)
-    creature_things = [r for r in records if r[1] == CREATURE_THING]
-    hit = [(n, r) for n, r in enumerate(creature_things) if r[0] + 34 == at]
+
+    things = []  # (index among the creature things, record offset, creature id, owner)
+    for n, (pos, _kind, size) in enumerate(r for r in _thing_records(src) if r[1] == CREATURE_THING):
+        if size != 28:
+            raise ValueError(f"creature thing #{n} at byte {pos} has {size} data bytes, expected 28")
+        things.append((n, pos, src[pos + 34], src[pos + 35]))
+    hit = [t for t in things if t[1] + 34 == at]
     if not hit:
         return False, f"the changed byte {at} is not the creature id byte of any creature thing"
-    n, (pos, _kind, size) = hit[0]
-    owner = src[pos + 35]
-    if size != 28:
-        return False, f"the creature thing at byte {pos} has {size} data bytes, expected 28"
-    if src[at] != BILE_DEMON_ID:
-        return False, (f"the changed creature thing #{n} is creature id {src[at]}, not a Bile Demon "
+    n, _pos, creature_id, owner = hit[0]
+    if creature_id != BILE_DEMON_ID:
+        return False, (f"the changed creature thing #{n} is creature id {creature_id}, not a Bile Demon "
                        f"({BILE_DEMON_ID})")
     if mod[at] != MOLYNX_ID:
-        return False, (f"the creature id of thing #{n} was changed to {mod[at]}, expected {MOLYNX_ID}")
+        return False, f"the creature id of thing #{n} was changed to {mod[at]}, expected {MOLYNX_ID}"
     if owner not in KEEPER_PLAYERS:
         return False, f"the changed creature thing #{n} is owned by player {owner}, not a keeper (3..7)"
-    return True, (f"differs from the source in exactly 1 byte: creature thing #{n} (byte {at}), "
-                  f"Bile Demon {BILE_DEMON_ID} -> {MOLYNX_ID}, owned by keeper player {owner}")
+    first_n, _first_pos, _id, first_owner = next(
+        t for t in things if t[2] == BILE_DEMON_ID and t[3] in KEEPER_PLAYERS)
+    if n != first_n:
+        return False, (f"the retargeted Bile Demon is creature thing #{n} (owner player {owner}), not "
+                       f"the first keeper-owned one, #{first_n} (owner player {first_owner})")
+    if owner != HUMAN_PLAYER:
+        return False, (f"the retargeted Bile Demon, creature thing #{n}, is owned by player {owner}, "
+                       f"not Keeper 1 (player {HUMAN_PLAYER}), the human's side")
+    return True, (f"differs from the source in exactly 1 byte: creature thing #{n} (byte {at}), the "
+                  f"first keeper-owned Bile Demon, {BILE_DEMON_ID} -> {MOLYNX_ID}, owned by "
+                  f"Keeper 1 (player {owner})")
 
 
 def _check_other_files(mod_dir: Path, name: str, source_dir: Path) -> tuple[bool, str]:
@@ -412,10 +422,10 @@ def _check_assets(mod_dir: Path, stage: int, molynx: Creature, bile: Creature) -
     """Rule (f). Task 8 extends this with the textures and icon files (the `unchecked` list)."""
     game = _game_mesh_names()
     problems, unchecked = [], []
-    changed = sorted({_resource_name(molynx, slot) for slot in _anim_slots()
-                      if _resource_name(molynx, slot) != _resource_name(bile, slot)})
-    kept = sorted({_resource_name(molynx, slot) for slot in _anim_slots()
-                   if _resource_name(molynx, slot) and _resource_name(molynx, slot) == _resource_name(bile, slot)})
+    names = {slot: molynx.resource_name(slot) for slot in _anim_slots()}
+    bile_names = {slot: bile.resource_name(slot) for slot in names}
+    changed = sorted({name for slot, name in names.items() if name != bile_names[slot]})
+    kept = sorted({name for slot, name in names.items() if name and name == bile_names[slot]})
 
     meshes = mod_dir / "Data" / "Meshes"
     listing = set(os.listdir(meshes)) if meshes.is_dir() else set()
@@ -441,7 +451,7 @@ def _check_assets(mod_dir: Path, stage: int, molynx: Creature, bile: Creature) -
         unchecked.append("the icon and texture files (icon1Resource, portraitResource, "
                          "Data/EngineTextures) are not checked by this audit version yet")
     if problems or unchecked:
-        return False, "; ".join(problems + [u for u in unchecked])
+        return False, "; ".join(problems + unchecked)
     return True, (f"every animation slot name resolves: {len(changed)} Molynx meshes in Data/Meshes "
                   f"and {len(kept)} Bile Demon names in the game's Meshes.WAD")
 
@@ -576,9 +586,10 @@ def _check_resource_toml(mod_dir: Path) -> tuple[bool, str]:
     absent = [k for k in ("name", "version", "authors", "description") if not isinstance(table.get(k), str)]
     if absent:
         return False, f"[resource] lacks the text keys {absent}"
-    if not table["name"]:
-        return False, "[resource] name is empty"
-    return True, f'resource.toml is valid TOML with [resource] name = "{table["name"]}"'
+    folder = mod_dir.resolve().name
+    if table["name"] != folder:
+        return False, f'[resource] name is "{table["name"]}", expected the folder name "{folder}"'
+    return True, f'resource.toml is valid TOML with [resource] name = "{table["name"]}", the folder name'
 
 
 def audit(mod_dir: Path) -> AuditReport:
