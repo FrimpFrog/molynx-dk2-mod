@@ -85,6 +85,153 @@ def test_numbers_are_plausible(source):
     assert creatures[NAMES.index("Bile Demon")].get("angerInHand") == -300
 
 
+# Exact values from the editor Creatures.kwd for every field the Molynx record (Task 3) reads or
+# writes, plus their same-width neighbours, so a swap of neighbours or an off-by-one in a byte run
+# cannot pass.
+_COMMON_IDS = dict(tooltipStringId=2408, strengthStringId=2410, weaknessStringId=2410)
+PINS = {
+    "Imp": dict(
+        scoreRating=10, roomCapacityNeeded=1, hungerFill=0, unhappyThreshold=50, slapDamage=100,
+        creatureId=1, orderInEditor=1, cloneCreatureId=0, hp=500, hpFromChicken=0, meleeDamage=30,
+        fear=5, threat=2, mass=1 * FIXED, pay=0, lairObjectId=0, unk_26=188,
+        soundGategory="CREATURE_IMP", nameStringId=2771, generalDescriptionStringId=2347,
+        uniqueNameTextId=0, **_COMMON_IDS),
+    "Bile Demon": dict(
+        scoreRating=90, roomCapacityNeeded=1, hungerFill=5, unhappyThreshold=50, slapDamage=182,
+        creatureId=3, orderInEditor=11, cloneCreatureId=0, hp=6000, hpFromChicken=200,
+        meleeDamage=525, fear=300, threat=120, mass=5 * FIXED, pay=600, lairObjectId=18, unk_26=188,
+        soundGategory="CREATURE_BILE_DEMON", nameStringId=2356, generalDescriptionStringId=2357,
+        uniqueNameTextId=0, **_COMMON_IDS),
+    "Unique Bile Demon": dict(
+        scoreRating=90, roomCapacityNeeded=1, hungerFill=5, unhappyThreshold=50, slapDamage=182,
+        creatureId=41, orderInEditor=41, cloneCreatureId=3, hp=6000, hpFromChicken=200,
+        meleeDamage=525, fear=400, threat=200, mass=5 * FIXED, pay=900, lairObjectId=18, unk_26=188,
+        soundGategory="CREATURE_BILE_DEMON", nameStringId=2356, generalDescriptionStringId=2357,
+        uniqueNameTextId=1774, **_COMMON_IDS),
+    "Unique Firefly": dict(
+        scoreRating=20, roomCapacityNeeded=1, hungerFill=0, unhappyThreshold=50, slapDamage=100,
+        creatureId=32, orderInEditor=32, cloneCreatureId=12, hp=2000, hpFromChicken=0,
+        meleeDamage=130, fear=19, threat=15, mass=2 * FIXED, pay=450, lairObjectId=21, unk_26=200,
+        soundGategory="CREATURE_FIREFLY", nameStringId=2348, generalDescriptionStringId=2349,
+        uniqueNameTextId=1765, **_COMMON_IDS),
+}
+PIN_RESOURCES = {
+    "Imp": dict(icon1Resource=r"gui\creatures\evil\imp", icon2Resource="CreatureIcons#0",
+                portraitResource=r"gui\creatures\evil\imp-bg"),
+    "Bile Demon": dict(icon1Resource=r"gui\creatures\evil\bile_demon", icon2Resource="CreatureIcons#2",
+                       portraitResource=r"gui\creatures\evil\bile_demon-bg"),
+    "Unique Bile Demon": dict(icon1Resource=r"gui\creatures\evil\bile_demon",
+                              icon2Resource="CreatureIcons#2", portraitResource=""),
+}
+PIN_ANIMS = {
+    "Imp": dict(walk="Imp_Run", run="", melee1="Imp_Dig", die="Imp_Die1", idle1="Imp_Idle1",
+                poseFrame="Imp-PoseFrame", drunkIdle=""),
+    "Bile Demon": dict(walk="Bile_Demon-Walk", run="", melee1="Bile_Demon-Melee", die="Bile_Demon-Die",
+                       idle1="BileDemon-Idle1", poseFrame="BD-PoseFrame", drunkIdle="BIL-Drunkidle"),
+    "Unique Bile Demon": dict(walk="Bile_Demon-Walk", melee1="Bile_Demon-Melee", die="Bile_Demon-Die",
+                              idle1="BileDemon-Idle1", drunkIdle=""),
+}
+
+
+@pytest.fixture(scope="module")
+def editor_creatures():
+    path = EDITOR_DIR / "Creatures.kwd"
+    if not have(path):
+        pytest.skip("editor Creatures.kwd not present")
+    return {c.get("name"): c for c in read_creatures(_creatures_block(path))}
+
+
+@pytest.mark.parametrize("creature", sorted(PINS))
+def test_pinned_values(editor_creatures, creature):
+    c = editor_creatures[creature]
+    assert {f: c.get(f) for f in PINS[creature]} == PINS[creature]
+    want = PIN_RESOURCES.get(creature, {})
+    assert {f: c.resource_name(f) for f in want} == want
+    want = PIN_ANIMS.get(creature, {})
+    assert {s: c.anim_name(s) for s in want} == want
+
+
+def test_offsets_match_the_template_comments():
+    # Absolute offsets written as comments in creatures_struct.bt (hex), and for nameStringId /
+    # tooltipStringId (f24, f26: between decomposeValue f22 and angerNoLair f28) and
+    # cloneCreatureId (d3b: between shuffleSpeed d37 and firstPersonGammaEffect d3c) by position.
+    # The template's "f3c" on generalDescriptionStringId is stale: f38 is per-creature (name id + 1)
+    # while f3a and f3c hold 2410 for every creature but Jack, as the other two string ids do.
+    template = dict(
+        icon1Resource=0xC44, swipeSpeed=0xCEC, orderInEditor=0xCF6, angerStringIdGeneral=0xCF7,
+        cloneCreatureId=0xD3B, firstPersonGammaEffect=0xD3C, portraitResource=0xD40, mass=0xEA8,
+        speed=0xEB4, flags=0xEFC, hp=0xF0C, hpFromChicken=0xF0E, fear=0xF10, threat=0xF12,
+        meleeDamage=0xF14, pay=0xF1C, decomposeValue=0xF22, nameStringId=0xF24, tooltipStringId=0xF26,
+        angerNoLair=0xF28, entranceEffectId=0xF36, generalDescriptionStringId=0xF38,
+        strengthStringId=0xF3A, weaknessStringId=0xF3C, slapEffectId=0xF3E, creatureId=0xF4B,
+        unhappyThreshold=0xF4F, lairObjectId=0xF52, unk_26=0xF53, soundGategory=0xF56,
+        drunkIdle=0xFD1, firstPersonMeleeResource=0x1027, animMelee2Resource=0x1083,
+        animWalkbackResource=0x12CF, animPoseFrameResource=0x13E3, uniqueResource=0x14F1,
+        flags2=0x1545)
+    assert {f: FIELDS[f].offset for f in template} == template
+
+
+def _base(name: str) -> str:
+    return name.removeprefix("Unique ")
+
+
+def test_unique_creatures_follow_their_base(source):
+    _, creatures, _ = source
+    by_name = {c.get("name").strip(): c for c in creatures}
+    uniques = [c for c in creatures if c.get("name").startswith("Unique ")]
+    assert len(uniques) == 13
+    for u in uniques:
+        base = by_name[_base(u.get("name"))]
+        assert u.get("cloneCreatureId") == base.get("creatureId"), u.get("name")
+        assert u.get("hp") >= base.get("hp"), u.get("name")
+        for f in ("fear", "pay", "meleeDamage"):
+            assert u.get(f) >= base.get(f), (u.get("name"), f)
+        for f in ("nameStringId", "generalDescriptionStringId", "lairObjectId", "soundGategory", "mass"):
+            assert u.get(f) == base.get(f), (u.get("name"), f)
+        assert u.get("uniqueNameTextId") != 0 and base.get("uniqueNameTextId") == 0
+    # Only unique creatures are clones.
+    assert {c.get("name") for c in creatures if c.get("cloneCreatureId")} == {u.get("name") for u in uniques}
+
+
+def test_lair_objects_are_creature_beds(source):
+    # lairObjectId is an Objects.kwd id (record id - 1, its own id at record offset 858): each creature
+    # with a lair sleeps in its own "<creature> Creature Bed" or the "Hero Creature Bed". unk_26 (the
+    # next byte) holds 188 / 200, beyond the 145 objects, so a shift onto it cannot pass.
+    path = EDITOR_DIR / "Objects.kwd"
+    if not have(path):
+        pytest.skip("Objects.kwd not present")
+    objects = next(b for b in read_blocks(path.read_bytes()) if b.signature == 0xF0)
+    size = len(objects.content) // objects.item_count
+    names = [objects.content[i * size:i * size + 32].split(b"\0")[0].decode() for i in range(objects.item_count)]
+    _, creatures, _ = source
+    beds = {c.get("name"): names[c.get("lairObjectId") - 1] for c in creatures if c.get("lairObjectId")}
+    assert len(beds) == 36
+    for creature, bed in beds.items():
+        if bed == "Hero Creature Bed" or creature == "Fairy":  # a Fairy uses the Dark Elf bed
+            continue
+        assert bed.endswith(" Creature Bed") and bed.removesuffix(" Creature Bed") in creature, creature
+    assert beds["Fairy"] == "Dark Elf Creature Bed" and beds["Maiden Of The Nest"] == "Maiden Creature Bed"
+
+
+def test_string_ids_relate(source):
+    _, creatures, _ = source
+    plain = [c for c in creatures if not c.get("name").startswith("Unique ") and c.get("name") != "Jack"]
+    # Every non-unique creature has its own name string; the description string follows it except
+    # for the Imp and the three princes (who share description 2401).
+    assert len({c.get("nameStringId") for c in plain}) == len(plain) == 32
+    off_by_one = {c.get("name") for c in plain if c.get("generalDescriptionStringId") != c.get("nameStringId") + 1}
+    assert off_by_one == {"Imp", "Prince Tristran", "Prince Felix", "Prince Balder"}
+    # tooltipStringId is the shared tooltip 2408 (Horny 2374, Jack none); strength and weakness are
+    # 2410 for all but Jack, so the data cannot tell those two apart: their order is the template's.
+    assert {c.get("name"): c.get("tooltipStringId") for c in creatures if c.get("tooltipStringId") != 2408} \
+        == {"Horny": 2374, "Jack": 0}
+    for f in ("strengthStringId", "weaknessStringId"):
+        assert {c.get("name") for c in creatures if c.get(f) != 2410} == {"Jack"}
+    # A fearsome creature always scares more than it threatens: fear and threat cannot be swapped.
+    assert all(c.get("fear") > c.get("threat") for c in creatures)
+    assert sorted(c.get("orderInEditor") for c in creatures) == list(range(1, 47))
+
+
 def test_set_of_get_leaves_raw_unchanged(source):
     _, creatures, size = source
     for c in creatures:
