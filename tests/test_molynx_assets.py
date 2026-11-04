@@ -15,8 +15,9 @@ from scripts.dk2kmf_write import anim_invariants, write_kmf
 from scripts.dk2kwd_creatures import ANIM_SLOTS
 from scripts.dk2paths import (BEHEMOTH_DIR, CHARACTER_PICKLE, EDITOR_DIR, GAME_DIR, MAPS_DIR,
                               MESHES_DIR, QUUZ_MAPS_DIR, have)
-from scripts.molynx_record import (CLIPS, POSE_STEMS, PREFIX, SOURCE_WRAP, build_molynx, clip_of,
-                                   file_plan, slot_assignment, stems_used)
+from scripts.molynx_record import (CLIPS, MAX_CLOSE_GAP, ONE_WAY_GAPS, POSE_STEMS, PREFIX,
+                                   SOURCE_WRAP, WrapException, build_molynx, clip_of, file_plan,
+                                   slot_assignment, stems_used)
 import scripts.molynx_assets as assets
 from molynx_files import ANIM_INFO, FILE_WRAPS
 
@@ -36,7 +37,7 @@ REQUIRED = {
     "walk": True, "walk_once": False, "getting_hit": False, "getting_hit_loop": True,
     "stand": False, "fidgeting": False, "eating": False, "happy": False, "attack": False,
     "angry": False, "celebrating": False, "die": False, "being_slapped": False,
-    "knockback": False, "waking_up": False, "sleeping": True, "being_picked_up": True,
+    "knockback": False, "waking_up": False, "sleeping": False, "being_picked_up": True,
     "manufacturing": True, "praying": True, "staggering": True,
 }
 RATIO = 1.15
@@ -493,7 +494,7 @@ RESAMPLED = ["stand", "walk", "attack", "die", "celebrating", "victory_celebrati
              "training", "fighting_another_creature"]
 # Files whose loop flag is not their source clip's: opened loops keep the loop's frames (timed as a
 # loop, ending on the copy of frame 0); closed ones are resampled as a loop.
-FLIPPED = ["stand", "fidgeting", "eating", "happy", "attack", "angry", "celebrating", "sleeping",
+FLIPPED = ["stand", "fidgeting", "eating", "happy", "attack", "angry", "celebrating",
            "walk_once", "getting_hit_loop"]
 
 
@@ -640,9 +641,8 @@ def test_opened_loops_keep_the_loops_frames(export):
 
 @needs_data
 def test_closed_loops_end_on_frame_0_with_one_more_frame(export):
-    """sleeping and getting_hit do not close in the source: the copy of frame 0 is appended."""
+    """getting_hit does not close in the source: the copy of frame 0 is appended."""
     info, plan = export["result"]["info"], export["plan"]
-    assert (info["sleeping"]["frames"], plan.info["sleeping"]["frames"]) == (137, 136)
     assert (info["getting_hit_loop"]["frames"], info["getting_hit"]["frames"]) == (18, 17)
     hit, loop = export["models"]["getting_hit"].anim, export["models"]["getting_hit_loop"].anim
     for f in range(hit.frame_count):
@@ -652,7 +652,8 @@ def test_closed_loops_end_on_frame_0_with_one_more_frame(export):
 
 @needs_data
 @pytest.mark.parametrize("wraps", [{"walk_twice": True}, {"walk_once": True}, {"walk_loop": False},
-                                   {"PoseFrame": True}, {"walk": 1}])
+                                   {"PoseFrame": True}, {"walk": 1}, {"sleeping": True},
+                                   {"waking_up_loop": True}])
 def test_bad_wraps_are_refused_before_anything_is_written(export, tmp_path, wraps):
     with pytest.raises(ValueError):
         assets.export_molynx_assets(tmp_path / "out", RATIO, plan=export["plan"], portrait_src=None,
@@ -680,3 +681,39 @@ def test_pinned_file_wraps_are_the_files_of_every_shipped_bile_demon(bile):
             biles += [c for c in read_creatures(block) if c.get("creatureId") == 3]
     assert len(biles) > 240
     assert assets.bile_file_wraps(biles) == FILE_WRAPS
+
+
+# ---------------------------------------------------------------- one-way clips are never looped
+
+@needs_data
+def test_one_way_gaps_are_measured_on_the_source(export):
+    """Non-looping source clips whose last frame is more than 10 median steps from frame 0."""
+    data, _ = export["plan"].source
+    gaps = {clip: _median_gap(data[clip]["frames"]) for clip in CLIPS if not data[clip]["wrap"]}
+    far = {clip: gap for clip, gap in gaps.items() if gap > 10}
+    assert set(far) == set(ONE_WAY_GAPS) == {"sleeping", "waking_up"}
+    for clip, gap in far.items():
+        assert gap == pytest.approx(ONE_WAY_GAPS[clip], abs=0.01), clip
+    assert gaps["getting_hit"] == pytest.approx(5.80, abs=0.01)  # closed into getting_hit_loop
+
+
+@needs_data
+def test_every_looping_file_closes_a_small_gap(export):
+    """No file loops over a jump of more than MAX_CLOSE_GAP median steps of its source clip."""
+    data, _ = export["plan"].source
+    assert MAX_CLOSE_GAP == 10
+    for stem in ANIMS:
+        if export["models"][stem].anim.wrap:
+            assert _median_gap(data[clip_of(stem)[0]]["frames"]) <= 10, stem
+
+
+@needs_data
+def test_sleeping_stays_one_way_and_is_reported(export, bile):
+    model = export["models"]["sleeping"].anim
+    assert model.wrap is False
+    assert export["result"]["info"]["sleeping"] == {"frames": 136, "fps": 30, "wrap": False}
+    (exception,) = export["result"]["wrap_exceptions"]
+    assert exception == WrapException("sleeping", ("animSleepResource",), True,
+                                      ONE_WAY_GAPS["sleeping"])
+    assert assets.required_wraps(bile)["sleeping"] is False  # reported, not raised
+    assert assets.molynx_files(bile).wrap_exceptions == (exception,)

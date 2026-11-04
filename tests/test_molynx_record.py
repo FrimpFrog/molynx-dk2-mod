@@ -9,8 +9,8 @@ from scripts.dk2kwd_creatures import (
 from scripts.dk2paths import EDITOR_DIR, MAPS_DIR, have
 from molynx_files import ANIM_INFO, FILE_WRAPS
 from scripts.molynx_record import (
-    CLIPS, MULTIPLIERS, POSE_STEMS, SLOT_CLIPS, SOURCE_WRAP, build_molynx, file_plan, review_list,
-    slot_assignment, stems_used,
+    CLIPS, MAX_CLOSE_GAP, MULTIPLIERS, ONE_WAY_GAPS, POSE_STEMS, SLOT_CLIPS, SOURCE_WRAP,
+    WrapException, build_molynx, file_plan, review_list, slot_assignment, stems_used,
 )
 
 CREATURES = 0xAA
@@ -71,7 +71,7 @@ TAILS = {
     "animSwingResource": ("being_picked_up", "000000003c0000001e0000000000000006000000",
                           "000000003c0000001e0000000000000006000000"),
     "animSleepResource": ("sleeping", "00000000780000000f0000000000000006000000",
-                          "00000000880000001e0000000000000006000000"),
+                          "00000000880000001e0000000000000006000000"),  # 136, not looping
     "animEatResource": ("eating", "01000000500000001e0000000000000006000000",
                         "01000000530000001e0000000000000006000000"),
     "animTortureResource": ("getting_hit", "01000000640000001e0000000000000006000000",
@@ -383,7 +383,7 @@ def test_file_plan_for_the_real_bile_demon(bile):
         "walk": True, "walk_once": False, "getting_hit": False, "getting_hit_loop": True,
         "stand": False, "fidgeting": False, "eating": False, "happy": False, "attack": False,
         "angry": False, "celebrating": False, "die": False, "being_slapped": False,
-        "knockback": False, "waking_up": False, "sleeping": True, "being_picked_up": True,
+        "knockback": False, "waking_up": False, "sleeping": False, "being_picked_up": True,
         "manufacturing": True, "praying": True, "staggering": True,
     }
     assert stems_used(bile, plan) == set(plan.slots.values()) == set(plan.wraps) | set(POSE_STEMS)
@@ -411,8 +411,40 @@ def test_a_stem_needed_both_ways_keeps_its_source_flag_and_the_other_slots_take_
 def test_a_stem_needed_one_way_has_no_variant(bile):
     plan = file_plan(bile, FILE_WRAPS)
     assert SOURCE_WRAP["stand"] is True and plan.wraps["stand"] is False  # opened, same name
-    assert SOURCE_WRAP["sleeping"] is False and plan.wraps["sleeping"] is True  # closed
     assert not any(s.startswith(("stand_", "sleeping_")) for s in plan.wraps)
+
+
+def test_one_way_clips_are_the_measured_ones():
+    # last-to-first gap in median frame steps of the source clips that do not loop (pinned; the
+    # asset tests measure them on the source): sleeping lies down, waking_up gets up.
+    assert MAX_CLOSE_GAP == 10
+    assert set(ONE_WAY_GAPS) == {"sleeping", "waking_up"}
+    assert ONE_WAY_GAPS["sleeping"] == pytest.approx(37.09, abs=0.01)
+    assert ONE_WAY_GAPS["waking_up"] == pytest.approx(25.25, abs=0.01)
+    assert all(not SOURCE_WRAP[clip] for clip in ONE_WAY_GAPS)
+
+
+@needs_data
+def test_a_one_way_clip_is_not_looped_even_where_the_bile_demons_file_loops(bile):
+    plan = file_plan(bile, FILE_WRAPS)
+    assert FILE_WRAPS["biledemon-bed(sleeping)"] is True
+    assert plan.wraps["sleeping"] is False and plan.slots["animSleepResource"] == "sleeping"
+    assert plan.wrap_exceptions == (
+        WrapException("sleeping", ("animSleepResource",), True, ONE_WAY_GAPS["sleeping"]),)
+    # the tail of a non-looping file: frames = file frames (136), fps 30
+    assert build(bile, 2).art_tail("animSleepResource").frames == 136
+
+
+@needs_data
+def test_a_one_way_clip_needed_both_ways_gets_no_loop_variant(bile):
+    plan = file_plan(bile, FILE_WRAPS)
+    assert not any(e.stem == "waking_up" for e in plan.wrap_exceptions)  # getUp ends anyway
+    # Were getUp's file a loop, waking_up would still not be looped (no waking_up_loop either).
+    looped = file_plan(bile, {**FILE_WRAPS, "bile_demon-getup": True})
+    assert looped.wraps["waking_up"] is False and "waking_up_loop" not in looped.wraps
+    assert looped.slots["animGetUpResource"] == "waking_up"
+    assert WrapException("waking_up", ("animGetUpResource",), True,
+                         ONE_WAY_GAPS["waking_up"]) in looped.wrap_exceptions
 
 
 @needs_data

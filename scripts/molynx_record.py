@@ -41,8 +41,16 @@ slot that is a static mesh (type 5) in the record and becomes an animation (stun
 needs a LOOPING file: a static pose never ends, and a clip that never ends cannot trigger an early
 "finished" state. A slot that names a file but whose type is NONE (0; 63 shipped maps name
 Bile_Demon-Dejected_Pose so) is not loaded by the game: it is renamed but needs nothing and keeps
-its tail. A stem needed one way only is that one file with that flag (stand, fidgeting, eating,
-happy, attack, angry, celebrating are opened; sleeping is closed). A stem needed BOTH ways keeps
+its tail. One-way clips are never looped: a clip whose source does not loop and whose last frame
+is more than MAX_CLOSE_GAP = 10 median frame steps from frame 0 (ONE_WAY_GAPS, measured on the
+source and checked by molynx_assets.plan_molynx: sleeping 37.09, which lies down and stays down,
+and waking_up 25.25) stays non-looping even in a slot that needs a loop; closing it would snap
+back across the whole motion every cycle. Such a slot is listed in `FilePlan.wrap_exceptions`
+(stem, slots, the Bile Demon file's flag, the gap); the engine then most likely plays the file once
+and holds its last frame (for sleeping, the lying pose). The real Bile Demon has one exception:
+sleeping in the sleep slot, whose Bile file loops. A stem needed one way only is that one file
+with that flag (stand, fidgeting, eating, happy, attack, angry, celebrating are opened). A stem
+needed BOTH ways keeps
 its plain file for the flag that equals its source flag (SOURCE_WRAP) and the slots that need the
 other flag name a variant, `<stem>_once` (not looping) or `<stem>_loop` (looping): for the real
 Bile Demon `entrance` -> `walk_once` (walk / walkback loop, the entrance file ends) and `elec` ->
@@ -74,7 +82,7 @@ LICENCE: GPL-3.0.
 import struct
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Mapping, NamedTuple
 
 from scripts.dk2kwd_creatures import (
     ANIM_SLOTS, ART_FLAG_HAS_END_ANIMATION, ART_FLAG_HAS_START_ANIMATION, ART_TYPE_ANIMATING_MESH,
@@ -110,6 +118,10 @@ POSE_STEMS = ("PoseFrame", "DiePose", "DraggedPose")
 SOURCE_WRAP: dict[str, bool] = {clip: clip not in (
     "die", "victory_celebration", "getting_hit", "being_slapped", "waking_up", "knockback",
     "sleeping") for clip in CLIPS}
+# Non-looping source clips that end far from where they began (last-to-first gap, in median frame
+# steps, as molynx_assets.loop_gap measures it): never closed into a loop (see "File plan").
+MAX_CLOSE_GAP = 10
+ONE_WAY_GAPS: dict[str, float] = {"sleeping": 37.089, "waking_up": 25.251}
 ONCE_SUFFIX, LOOP_SUFFIX = "_once", "_loop"   # variant files: the clip opened / closed
 GAME_FPS = 30
 
@@ -166,10 +178,19 @@ def slot_assignment(bile: Creature) -> dict[str, str]:
             if slot != "unk_1" and bile.resource_name(slot)}
 
 
+class WrapException(NamedTuple):
+    """A one-way clip kept non-looping in slots whose Bile Demon file loops (or that need a loop)."""
+    stem: str
+    slots: tuple
+    bile_wrap: bool | None   # the Bile Demon file's flag (None: a static mesh)
+    gap: float               # last-to-first gap of the source clip, in median frame steps
+
+
 @dataclass(frozen=True)
 class FilePlan:
     slots: dict    # slot field name -> file stem (a clip, a pose stem or a _once / _loop variant)
     wraps: dict    # animation file stem -> whether that file loops
+    wrap_exceptions: tuple = ()   # WrapException, one per one-way stem a slot wanted looped
 
 
 def variant(stem: str, wrap: bool) -> str:
@@ -215,6 +236,11 @@ def file_plan(bile: Creature, file_wraps: Mapping[str, bool | None]) -> FilePlan
     files = {name.lower(): wrap for name, wrap in file_wraps.items()}
     assignment = slot_assignment(bile)
     needs = {slot: _slot_need(bile, slot, stem, files) for slot, stem in assignment.items()}
+    held: dict[str, list] = {}  # one-way stem -> the slots that wanted it looped
+    for slot, stem in assignment.items():
+        if needs[slot] is True and stem in ONE_WAY_GAPS:
+            held.setdefault(stem, []).append(slot)
+            needs[slot] = False
     flags: dict[str, set] = {}
     for slot, stem in assignment.items():
         if stem not in POSE_STEMS:
@@ -234,7 +260,11 @@ def file_plan(bile: Creature, file_wraps: Mapping[str, bool | None]) -> FilePlan
         else:
             slots[slot] = variant(stem, needs[slot])
             wraps[slots[slot]] = needs[slot]
-    return FilePlan(slots, wraps)
+    exceptions = tuple(
+        WrapException(stem, tuple(held[stem]),
+                      files.get(bile.resource_name(held[stem][0]).lower()), ONE_WAY_GAPS[stem])
+        for stem in held)
+    return FilePlan(slots, wraps, exceptions)
 
 
 def stems_used(bile: Creature, plan: FilePlan | None = None) -> set[str]:

@@ -76,8 +76,12 @@ own flag. `file_clip` changes a clip's flag:
     file frames);
   - closing a clip that does not loop resamples its source as a loop (the rule above: the copy of
     frame 0 replaces a nearly closing last frame, else is appended). The step from the last source
-    frame back to frame 0 is then played as one frame, a visible snap when the clip ends far from
-    where it began (sleeping: 37 median steps, getting_hit: 5.8).
+    frame back to frame 0 is then played as one frame, so only a clip that ends near where it began
+    is ever closed: its `loop_gap` (last-to-first gap / median step) must be at most
+    MAX_CLOSE_GAP = 10 (getting_hit 5.8 -> getting_hit_loop). The one-way clips above it
+    (molynx_record.ONE_WAY_GAPS: sleeping 37.1, waking_up 25.3) are never closed; plan_molynx
+    checks that list against the source, and a slot that wanted one looped is reported in
+    `wrap_exceptions` (the real Bile Demon: sleeping in the sleep slot).
 The returned `info` gives the FINAL frames, fps and wrap of every animation file written; the
 stage-2 record turns it into each slot's frames (file frames - 1 for looping files, as the Bile
 Demon's record does: walk 41 -> 40; = file frames otherwise: idle1 190).
@@ -143,8 +147,8 @@ from scripts.dk2kmf_write import encode_anim, write_kmf
 from scripts.dk2kwd_blocks import read_blocks
 from scripts.dk2kwd_creatures import ART_TYPE_NONE, Creature, read_creatures
 from scripts.dk2paths import BEHEMOTH_DIR, EDITOR_DIR, GAME_DIR, MESHES_DIR
-from scripts.molynx_record import (CLIPS, POSE_STEMS, PREFIX, SOURCE_WRAP, clip_of, file_plan,
-                                   slot_assignment)
+from scripts.molynx_record import (CLIPS, MAX_CLOSE_GAP, ONE_WAY_GAPS, POSE_STEMS, PREFIX,
+                                   SOURCE_WRAP, FilePlan, clip_of, file_plan, slot_assignment)
 
 PORTRAIT_SRC = Path("/mnt/user-data/attachments/76eb4112-412f-58e4-a30a-b275f992be89/"
                     "8582356e-image.png")
@@ -202,10 +206,15 @@ def bile_file_wraps(biles, meshes_dir: Path = MESHES_DIR) -> dict:
     return out
 
 
+def molynx_files(bile: Creature, meshes_dir: Path = MESHES_DIR) -> FilePlan:
+    """molynx_record.file_plan on the Bile Demon's own files (slots, wraps, wrap_exceptions)."""
+    return file_plan(bile, bile_file_wraps([bile], meshes_dir))
+
+
 def required_wraps(bile: Creature, meshes_dir: Path = MESHES_DIR) -> dict:
     """{file stem: wrap flag} of every Molynx animation file the slots of `bile` name, variants
-    included (molynx_record.file_plan on the Bile Demon's own files)."""
-    return dict(file_plan(bile, bile_file_wraps([bile], meshes_dir)).wraps)
+    included. One-way clips are listed non-looping (see molynx_files(...).wrap_exceptions)."""
+    return dict(molynx_files(bile, meshes_dir).wraps)
 
 
 def texture_cache(game_dir: Path = GAME_DIR):
@@ -303,13 +312,18 @@ def _split(part: int, indices, texture: str) -> list[SpriteLayout]:
     return out
 
 
-def loop_closes(frames: list) -> bool:
-    """True when the last frame already is (or nearly is) frame 0: its largest vertex distance from
-    frame 0 is below LOOP_GAP x the median step between consecutive frames (largest vertex move)."""
+def loop_gap(frames: list) -> float:
+    """The last frame's largest vertex distance from frame 0, in median steps between consecutive
+    frames (each step its largest vertex move)."""
     track = np.stack([np.concatenate(f) for f in frames])
     steps = np.linalg.norm(np.diff(track, axis=0), axis=2).max(axis=1)
     gap = np.linalg.norm(track[-1] - track[0], axis=1).max()
-    return bool(gap <= LOOP_GAP * np.median(steps))
+    return float(gap / np.median(steps))
+
+
+def loop_closes(frames: list) -> bool:
+    """True when the last frame already is (or nearly is) frame 0: loop_gap <= LOOP_GAP."""
+    return loop_gap(frames) <= LOOP_GAP
 
 
 def _resample(frames: list, fps: float, wrap: bool) -> list:
@@ -399,6 +413,10 @@ def plan_molynx(height_ratio: float = 1.15, source=None, *, unit_dir: Path = BEH
 
     if {name: bool(data[name]["wrap"]) for name in CLIPS} != SOURCE_WRAP:
         raise ValueError("the clip library's loop flags are not molynx_record.SOURCE_WRAP")
+    far = {name: loop_gap(data[name]["frames"]) for name in CLIPS if not data[name]["wrap"]}
+    far = {name: gap for name, gap in far.items() if gap > MAX_CLOSE_GAP}
+    if set(far) != set(ONE_WAY_GAPS) or any(abs(far[n] - ONE_WAY_GAPS[n]) > 0.01 for n in far):
+        raise ValueError(f"the one-way clips measure {far}, not molynx_record.ONE_WAY_GAPS")
     for name in CLIPS:
         clip = data[name]
         frames = _resample(clip["frames"], clip["fps"], clip["wrap"])
@@ -509,6 +527,9 @@ def _file_wraps(plan: MolynxPlan, wraps: dict) -> dict:
             raise ValueError(f"wraps names {stem!r}, which is not a clip or a clip variant")
         if not isinstance(wrap, bool) or (forced is not None and forced != wrap):
             raise ValueError(f"wraps gives {stem!r} the loop flag {wrap!r}")
+        if wrap and clip in ONE_WAY_GAPS:
+            raise ValueError(f"{clip} is one-way (gap {ONE_WAY_GAPS[clip]} median steps): "
+                             f"it is never closed into a loop")
     files = {clip: plan.clips[clip].wrap for clip in CLIPS}
     files.update(wraps)
     return files
@@ -630,6 +651,7 @@ def export_molynx_assets(out_dir: Path, height_ratio: float = 1.15,
     the keyframes each vertex needs (the fallback if the fully keyed files prove too big).
     -> {"meshes": {stem: path}, "textures": {name: path}, "portraits": {name: path},
         "preview": path | None, "info": {file stem: {frames, fps, wrap}} (final files),
+        "wrap_exceptions": [molynx_record.WrapException] (default wraps only, else []),
         "scale": float, "target_height": float}"""
     out_dir = Path(out_dir)
     if out_dir.exists() and (not out_dir.is_dir() or any(out_dir.iterdir())):
@@ -642,8 +664,10 @@ def export_molynx_assets(out_dir: Path, height_ratio: float = 1.15,
     elif plan.height_ratio != height_ratio:
         raise ValueError(f"the plan was made for height_ratio {plan.height_ratio}, "
                          f"not {height_ratio}")
+    exceptions = []
     if wraps is None:
-        wraps = required_wraps(bile_demon_record(editor_dir), meshes_dir)
+        files_plan = molynx_files(bile_demon_record(editor_dir), meshes_dir)
+        wraps, exceptions = files_plan.wraps, list(files_plan.wrap_exceptions)
     files = _file_wraps(plan, wraps)
     out_dir.mkdir(parents=True, exist_ok=True)
     meshes, info = {}, {}
@@ -673,4 +697,4 @@ def export_molynx_assets(out_dir: Path, height_ratio: float = 1.15,
         _preview([("Molynx -bg", bg), ("Molynx", icon), ("Bile Demon -bg", bile_bg),
                   ("Bile Demon", bile_icon)]).save(preview)
     return {"meshes": meshes, "textures": textures, "portraits": portraits, "preview": preview,
-            "info": info, "scale": plan.scale, "target_height": plan.target_height}
+            "info": info, "wrap_exceptions": exceptions, "scale": plan.scale, "target_height": plan.target_height}
