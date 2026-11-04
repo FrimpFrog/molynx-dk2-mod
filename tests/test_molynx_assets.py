@@ -183,6 +183,8 @@ def test_plan_frames_are_the_source_frames_scaled_mirrored_and_placed(export):
         if src["fps"] != GAME_FPS:
             continue  # resampled: checked by test_clips_are_resampled_to_the_game_rate
         for f, frame in enumerate(src["frames"]):
+            if src["wrap"] and f == len(src["frames"]) - 1 and assets.loop_closes(src["frames"]):
+                frame = src["frames"][0]  # a (nearly) closed loop's last frame becomes frame 0
             want = plan.to_sprites(plan.to_kmf(frame))
             for got, w in zip(clip.frames[f], want):
                 np.testing.assert_allclose(got, w, atol=1e-9)
@@ -208,8 +210,7 @@ def test_clips_are_resampled_to_the_game_rate(export):
     for stem in CLIPS:
         src, clip = data[stem], plan.clips[stem]
         n = len(src["frames"])
-        closed = src["wrap"] and np.allclose(np.concatenate(src["frames"][0]),
-                                             np.concatenate(src["frames"][-1]))
+        closed = src["wrap"] and assets.loop_closes(src["frames"])
         seconds = (n if src["wrap"] and not closed else n - 1) / src["fps"]
         played = len(clip.frames) - 1
         assert abs(played / GAME_FPS - seconds) <= 0.5 / GAME_FPS, stem
@@ -227,6 +228,36 @@ def test_wrap_clips_end_on_a_copy_of_their_first_frame(export):
         first, last = evaluate_anim_frame(anim, 0), evaluate_anim_frame(anim, anim.frame_count - 1)
         for a, b in zip(first, last):
             np.testing.assert_array_equal(a, b)
+
+
+def _median_gap(src_frames):
+    track = np.stack([np.concatenate(f) for f in src_frames])
+    steps = np.linalg.norm(np.diff(track, axis=0), axis=2).max(axis=1)
+    return np.linalg.norm(track[-1] - track[0], axis=1).max() / np.median(steps)
+
+
+@needs_data
+def test_loops_have_no_near_duplicate_frame_at_the_loop_point(export):
+    """A loop that nearly closes has its last frame replaced by frame 0 (frame count kept); any
+    other loop gets frame 0 appended. Either way the last step is a real step. Loops whose source
+    already ends exactly on frame 0 keep the source's own last step (an ease into the loop). The
+    bound is 0.2 of the median step: interacting_with_objects, whose source eases its last steps
+    (0.15 of a step), ends on a 0.23 step after the replacement (appending would leave 0.21)."""
+    data, _ = export["plan"].source
+    for stem in CLIPS:
+        src, anim = data[stem], export["models"][stem].anim
+        if not src["wrap"]:
+            continue
+        gap = _median_gap(src["frames"])
+        n = len(src["frames"])
+        if src["fps"] == GAME_FPS:
+            assert anim.frame_count == (n if gap < 0.3 else n + 1), stem
+        if gap < 1e-9:
+            continue
+        track = np.stack([np.concatenate(evaluate_anim_frame(anim, f))
+                          for f in range(anim.frame_count)])
+        steps = np.linalg.norm(np.diff(track, axis=0), axis=2).max(axis=1)
+        assert steps[-1] >= 0.2 * np.median(steps), stem
 
 
 @needs_data
@@ -268,10 +299,12 @@ def test_faces_the_same_way_as_the_bile_demon(export, bile):
 
 @needs_data
 def test_winding_and_normals_follow_the_game_files(export, bile):
-    def stats(model):
+    def stats(model, texture=None):
         dots, outward = [], []
-        allp = np.concatenate(_points(model))
-        for sprite, p in zip(_sprites(model), _points(model)):
+        chosen = [(s, p) for s, p in zip(_sprites(model), _points(model))
+                  if texture is None or model.materials[s.material].textures == [texture]]
+        allp = np.concatenate([p for _, p in chosen])
+        for sprite, p in chosen:
             t = np.array(sprite.triangles[0])
             n = np.array([v.normal for v in sprite.vertices])
             np.testing.assert_allclose(np.linalg.norm(n, axis=1), 1, atol=1e-5)
@@ -288,6 +321,9 @@ def test_winding_and_normals_follow_the_game_files(export, bile):
     for stem in ("PoseFrame", "stand", "walk"):
         dot, out = stats(export["models"][stem])
         assert dot > 0.5 and out < 0.5, stem
+        for texture in (assets.BODY_TEXTURE, assets.MACE_TEXTURE):
+            dot, out = stats(export["models"][stem], texture)
+            assert dot > 0.5 and out < 0.5, (stem, texture)
 
 
 @needs_data
@@ -295,6 +331,7 @@ def test_sprites_fit_the_byte_triangle_indices_and_carry_16_lods(export):
     for stem, model in export["models"].items():
         for sprite in _sprites(model):
             assert len(sprite.vertices) <= 255, stem
+            assert len(sprite.triangles[0]) <= 255, stem  # the game's largest sprite has 255
             assert len(sprite.triangles) == 16
             assert all(lod == sprite.triangles[0] for lod in sprite.triangles), stem
             assert max(max(t) for t in sprite.triangles[0]) < len(sprite.vertices)
@@ -412,3 +449,107 @@ def test_refuses_an_existing_non_empty_folder_and_deletes_nothing(export, tmp_pa
 def test_stem_pattern_is_the_slot_name_pattern():
     for stem in STEMS:
         assert re.fullmatch(r"[A-Za-z_]+", stem)
+
+
+@needs_data
+def test_refuses_a_plan_made_for_another_height_ratio(export, tmp_path):
+    with pytest.raises(ValueError):
+        assets.export_molynx_assets(tmp_path / "out", 1.3, plan=export["plan"], portrait_src=None)
+    assert not (tmp_path / "out").exists()
+
+
+@needs_data
+def test_a_missing_portrait_source_fails_before_anything_is_written(export, tmp_path):
+    with pytest.raises(FileNotFoundError):
+        assets.export_molynx_assets(tmp_path / "out", RATIO, plan=export["plan"],
+                                    portrait_src=tmp_path / "missing.png")
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.skipif(not have(GAME_DIR / "EngineTextures.dir"), reason="texture cache not present")
+def test_texture_limit_is_the_games_largest_texture():
+    cache = assets.texture_cache()
+    largest = max(max(cache.size_of(n)) for n in cache.names if n.endswith("MM0"))
+    assert assets.MAX_TEXTURE == largest == 128
+
+
+# ---------------------------------------------------------------- independent resampling check
+
+RESAMPLED = ["stand", "walk", "attack", "die", "celebrating", "victory_celebration", "sleeping",
+             "training", "fighting_another_creature"]
+
+
+def _axes(p):
+    """Character Y-up, right-handed -> KMF axes, written out on its own: mirror x (DK2 is
+    left-handed), then (X, Y, Z) -> (X, Z, -Y) (KMF y forward, z down)."""
+    p = np.asarray(p, float)
+    return np.stack([-p[..., 0], p[..., 2], -p[..., 1]], axis=-1)
+
+
+def _lerp_frame(frames, t, nxt):
+    i = int(np.floor(t + 1e-9))
+    u = t - i
+    if u < 1e-9:
+        return [np.asarray(p, float) for p in frames[i]]
+    j = nxt(i)
+    return [np.asarray(a, float) * (1 - u) + np.asarray(b, float) * u
+            for a, b in zip(frames[i], frames[j])]
+
+
+@needs_data
+def test_resampled_clips_decode_to_a_plain_interpolation_of_the_source(export, bile):
+    """Independent of plan_molynx / _resample: the source clip (the reference pickle when present),
+    interpolated linearly at 30 fps and moved to KMF space here, against the DECODED files."""
+    if have(CHARACTER_PICKLE):
+        data, _ = pickle.loads(CHARACTER_PICKLE.read_bytes())
+    else:
+        data, _ = export["plan"].source
+    layout = [(s.part, s.vertices) for s in export["plan"].sprites]  # which source vertex is which
+
+    def sprites(parts):
+        return [np.asarray(parts[part])[idx] for part, idx in layout]
+
+    # scale: the Bile Demon's idle1 height x RATIO over the height of stand frame 0
+    idle = np.concatenate(evaluate_anim_frame(_bile_file(bile, "idle1").anim, 0))
+    rest = np.concatenate(sprites([_axes(p) for p in data["stand"]["frames"][0]]))
+    scale = (idle[:, 2].max() - idle[:, 2].min()) * RATIO / (rest[:, 2].max() - rest[:, 2].min())
+    # offset: whatever constant moves the scaled source rest pose onto the written PoseFrame
+    pose = export["models"]["PoseFrame"]
+    moved = np.concatenate(mesh_points(pose)) - rest * scale
+    offset = moved.mean(0)
+    assert np.abs(moved - offset).max() < 1e-6  # one translation for every vertex
+
+    def kmf(frame):
+        return [_axes(p) * scale + offset for p in sprites(frame)]
+
+    for stem in RESAMPLED:
+        src = data[stem]
+        frames, fps, wrap = src["frames"], src["fps"], src["wrap"]
+        assert fps != GAME_FPS, stem
+        anim = export["models"][stem].anim
+        count = anim.frame_count
+        n = len(frames)
+        if wrap:
+            closes = _median_gap(frames) < 0.3
+            cycle = n - 1 if closes else n
+            assert count - 1 == round(cycle / fps * GAME_FPS), stem
+            times = [k * cycle / (count - 1) for k in range(count - 1)] + [0.0]
+            nxt = lambda i, c=cycle: (i + 1) % c
+        else:
+            assert count - 1 == round((n - 1) / fps * GAME_FPS), stem
+            times = [k * (n - 1) / (count - 1) for k in range(count)]
+            nxt = lambda i, last=n - 1: min(i + 1, last)
+        bound = anim.scale / 511 * 1.01
+        check = sorted({0, count // 2, count - 1, *range(0, count, 5)})
+        for f in check:
+            want = kmf(_lerp_frame(frames, times[f], nxt))
+            got = evaluate_anim_frame(anim, f)
+            err = max(float(np.abs(g - w).max()) for g, w in zip(got, want))
+            assert err <= bound, (stem, f, err, bound)
+        first = max(float(np.abs(g - w).max())
+                    for g, w in zip(evaluate_anim_frame(anim, 0), kmf(frames[0])))
+        assert first <= bound, stem
+        if not wrap:
+            last = max(float(np.abs(g - w).max())
+                       for g, w in zip(evaluate_anim_frame(anim, count - 1), kmf(frames[-1])))
+            assert last <= bound, stem

@@ -34,9 +34,11 @@ winding, so triangle corners are kept in their order (reversing them would break
 area-weighted sum of -(b - a) x (c - a) over the triangles of a part, shared by all vertices of the
 part at the same position (UV seams stay smooth), from frame 0 of each file.
 
-Sprites, LODs and mmFactor. Triangle corners are bytes and no game sprite has more than 255
-vertices (2007 files), so a part is cut into sprites of at most 255 vertices (triangles in order,
-greedily); the body becomes 3 sprites, the mace 1, all body sprites sharing one material (132 game
+Sprites, LODs and mmFactor. Triangle corners are bytes, and no game sprite has more than 255
+vertices or more than 255 triangles (6551 sprites in 2007 files; 2 have exactly 255 triangles), so a
+part is cut into sprites of at most 255 vertices and 255 triangles (triangles in order, greedily);
+the body becomes 3 sprites (255 / 222 / 156 vertices, 254 / 255 / 154 triangles), the mace 1 (246,
+86), all body sprites sharing one material (132 game
 files reuse a material across sprites, e.g. DRKnight-Melee). Every sprite carries 16 LOD lists; the
 game's own lists shrink with distance (Bile Demon 120 -> 7 triangles) from its artists' tool. We have
 no reduction, so every LOD is the full list, the conservative valid choice (22 game sprites do the
@@ -50,12 +52,21 @@ Animations. Every frame is keyed (encode_anim reduce=False), as in 17 of the 21 
 A KMF has no rate: the creature record gives each slot (frames, fps) and the Bile Demon's slots all
 say 30 fps (sleep 15). Every clip is resampled to 30 fps by linear interpolation of the vertices,
 over the clip's own duration ((n - 1) / fps; a looping clip n / fps, or (n - 1) / fps when its last
-frame already repeats frame 0), stretched by at most half a frame so the first and last source
+frame already closes the loop), stretched by at most half a frame so the first and last source
 frames are kept exactly. Clips at 30 fps are unchanged. A looping (`wrap`) clip ends on a copy of
-frame 0, as all 209 looping game files do; so a loop that already closed keeps its frames as they
-are. Wrap flags are the clip's own. `plan.info` gives each clip's file frame count, fps and wrap for
+frame 0, as all 209 looping game files do. A loop "already closes" (`loop_closes`) when its last
+frame is within LOOP_GAP = 0.3 x the median frame-to-frame step of frame 0: that last frame is
+REPLACED by the copy (frame count unchanged; the 9 retargeted loops that close exactly and
+fidgeting, staggering, interacting_with_objects at 0.16 / 0.22 / 0.21 of a step), so the loop has
+no near-duplicate frame; any other loop gets the copy appended. Wrap flags are the clip's own. `plan.info` gives each clip's file frame count, fps and wrap for
 the stage-2 record (the Bile Demon's record has frames = file frames - 1 for looping files, e.g.
 walk 41 -> 40, and = file frames otherwise, e.g. idle1 190).
+
+Size (a known risk, kept on purpose). Fully keyed files are large: the biggest GEOM is 136,344
+keyframe positions (Molynx-victory_celebration: 552 rows x 247, its 246 frames plus the block
+seam), against 34,816 in the largest game animation (Mis-Idle1), and DraggedPose has 552 GEOM
+positions against 311 in the largest game mesh. If the game rejects or mis-handles them, `export_molynx_assets(reduce=True)`
+writes the reduced family instead (one quantisation step of tolerance), like 661 game files.
 
 Poses. The Bile Demon's PoseFrame / DiePose / Dragged_Pose files are static meshes (kind 1, three
 sprites, 20 CTRL entries, record type byte 5 = mesh), so Molynx's three are static meshes too:
@@ -120,6 +131,8 @@ GAME_FPS = 30
 VERSION = 17
 LODS = 16
 MAX_SPRITE_VERTICES = 255
+MAX_SPRITE_TRIANGLES = 255
+LOOP_GAP = 0.3  # a loop whose last frame is this close to frame 0 (x the median step) is closed
 MAX_TEXTURE = 128
 MM_PER_RATIO = 2.33
 BODY_TEXTURE, MACE_TEXTURE = "Molynx_Body", "Molynx_Mace"
@@ -200,6 +213,7 @@ class Clip:
 @dataclass
 class MolynxPlan:
     source: tuple
+    height_ratio: float
     parts: list
     sprites: list
     scale: float
@@ -227,7 +241,8 @@ def _kmf_axes(p: np.ndarray) -> np.ndarray:
 
 
 def _split(part: int, indices, texture: str) -> list[SpriteLayout]:
-    """Cut a part's triangles, in order, into sprites of at most MAX_SPRITE_VERTICES vertices."""
+    """Cut a part's triangles, in order, into sprites of at most MAX_SPRITE_VERTICES vertices and
+    MAX_SPRITE_TRIANGLES triangles."""
     out, tris, used = [], [], {}
 
     def flush():
@@ -236,7 +251,7 @@ def _split(part: int, indices, texture: str) -> list[SpriteLayout]:
             out.append(SpriteLayout(part, order, [tuple(used[i] for i in t) for t in tris], texture))
     for tri in np.asarray(indices, int).reshape(-1, 3):
         new = [i for i in dict.fromkeys(tri.tolist()) if i not in used]
-        if len(used) + len(new) > MAX_SPRITE_VERTICES:
+        if len(used) + len(new) > MAX_SPRITE_VERTICES or len(tris) == MAX_SPRITE_TRIANGLES:
             flush()
             tris, used = [], {}
             new = list(dict.fromkeys(tri.tolist()))
@@ -247,10 +262,19 @@ def _split(part: int, indices, texture: str) -> list[SpriteLayout]:
     return out
 
 
+def loop_closes(frames: list) -> bool:
+    """True when the last frame already is (or nearly is) frame 0: its largest vertex distance from
+    frame 0 is below LOOP_GAP x the median step between consecutive frames (largest vertex move)."""
+    track = np.stack([np.concatenate(f) for f in frames])
+    steps = np.linalg.norm(np.diff(track, axis=0), axis=2).max(axis=1)
+    gap = np.linalg.norm(track[-1] - track[0], axis=1).max()
+    return bool(gap <= LOOP_GAP * np.median(steps))
+
+
 def _resample(frames: list, fps: float, wrap: bool) -> list:
     """Frames (lists of per-part arrays) at `fps` -> frames at GAME_FPS (see the module docstring)."""
     arr = [np.stack([f[p] for f in frames]) for p in range(len(frames[0]))]
-    closed = wrap and np.allclose(np.concatenate(frames[0]), np.concatenate(frames[-1]))
+    closed = wrap and loop_closes(frames)
     n = len(frames)
     if wrap:
         cycle = n - 1 if closed else n
@@ -325,7 +349,7 @@ def plan_molynx(height_ratio: float = 1.15, source=None, *, unit_dir: Path = BEH
     their = np.concatenate(evaluate_anim_frame(idle.anim, 0))
     target = float(their[:, 2].max() - their[:, 2].min()) * height_ratio
 
-    plan = MolynxPlan(source, parts, sprites, 1.0, np.zeros(3), target)
+    plan = MolynxPlan(source, height_ratio, parts, sprites, 1.0, np.zeros(3), target)
     raw = plan.to_sprites(plan.to_kmf(data["stand"]["frames"][0]))
     allp = np.concatenate(raw)
     plan.scale = target / float(allp[:, 2].max() - allp[:, 2].min())
@@ -414,13 +438,13 @@ def _check_rows(rows: np.ndarray, frame: list) -> None:
             raise AssertionError("vertices sharing a row differ")
 
 
-def clip_kmf(plan: MolynxPlan, stem: str) -> Kmf:
+def clip_kmf(plan: MolynxPlan, stem: str, reduce: bool = False) -> Kmf:
     clip = plan.clips[stem]
     rows = _rows(clip.frames)
     sprites = _sprites(plan, clip.frames[0], rows, mesh=False)
     controls = b"".join(np.array([(v << 16) | s, ident], "<u4").tobytes()
                         for s, v, ident in plan.controls)
-    anim = encode_anim(PREFIX + stem, sprites, clip.frames, clip.wrap, controls, reduce=False)
+    anim = encode_anim(PREFIX + stem, sprites, clip.frames, clip.wrap, controls, reduce=reduce)
     return Kmf(VERSION, "anim", list(plan.materials), anim=anim)
 
 
@@ -518,23 +542,30 @@ def _preview(images: list[tuple[str, Image.Image]]) -> Image.Image:
 
 def export_molynx_assets(out_dir: Path, height_ratio: float = 1.15,
                          portrait_src: Path | None = PORTRAIT_SRC, *, plan: MolynxPlan | None = None,
-                         body_size: int = MAX_TEXTURE, editor_dir: Path = EDITOR_DIR,
-                         game_dir: Path = GAME_DIR) -> dict:
+                         body_size: int = MAX_TEXTURE, reduce: bool = False,
+                         editor_dir: Path = EDITOR_DIR, game_dir: Path = GAME_DIR) -> dict:
     """Write Molynx's 28 .kmf files, 2 textures and (with `portrait_src`) 2 portraits plus a
-    preview into `out_dir`, which must not exist or be empty (nothing is ever deleted).
+    preview into `out_dir`, which must not exist or be empty (nothing is ever deleted). Every
+    input is checked before the first file is written. `reduce=True` keeps only the keyframes each
+    vertex needs (the fallback if the fully keyed files prove too big for the game).
     -> {"meshes": {stem: path}, "textures": {name: path}, "portraits": {name: path},
         "preview": path | None, "info": {clip: {frames, fps, wrap}}, "scale": float,
         "target_height": float}"""
     out_dir = Path(out_dir)
     if out_dir.exists() and (not out_dir.is_dir() or any(out_dir.iterdir())):
         raise FileExistsError(f"{out_dir} exists and is not an empty folder")
+    if portrait_src is not None and not Path(portrait_src).is_file():
+        raise FileNotFoundError(f"portrait source {portrait_src} not found")
     if plan is None:
         plan = plan_molynx(height_ratio, editor_dir=editor_dir, game_dir=game_dir)
+    elif plan.height_ratio != height_ratio:
+        raise ValueError(f"the plan was made for height_ratio {plan.height_ratio}, "
+                         f"not {height_ratio}")
     out_dir.mkdir(parents=True, exist_ok=True)
     meshes = {}
     for stem in CLIPS:
         meshes[stem] = out_dir / f"{PREFIX}{stem}.kmf"
-        meshes[stem].write_bytes(write_kmf(clip_kmf(plan, stem)))
+        meshes[stem].write_bytes(write_kmf(clip_kmf(plan, stem, reduce)))
     for stem in POSE_STEMS:
         meshes[stem] = out_dir / f"{PREFIX}{stem}.kmf"
         meshes[stem].write_bytes(write_kmf(pose_kmf(plan, stem)))
