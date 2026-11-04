@@ -8,14 +8,19 @@ is written out below from the stage definitions. Run it on a folder with
 
 The stage and the maps are inferred from the folder. The maps are the `<name>` of the files in
 `Data/editor/maps`; each map's source is `map_source_dir(name)` (the Quuz copy when the user's game
-loads that one, else the editor folder). The stage comes from record 47 (see `_STAGE_FIELDS`).
+loads that one, else the editor folder). The stage comes from record 47: it is the stage whose set
+of changed fields (`_stage_field_sets`) is closest to the fields in which record 47 differs from the
+Bile Demon; a field of that set left unchanged, or a field outside it, is a rule (b) FAIL that names
+the field and its record bytes, and the other rules still run for that stage. Molynx's files are read
+with the format reader (dk2kmf, dk2kmf_write.anim_invariants), never with the builder or exporter.
 
 Rules, each one PASS or FAIL line per map (per folder for g and h):
 
   (a) every block of the patched `<map>Globals.kld` except Creatures is byte-identical to the source
       (same blocks in the same order, header and content).
   (b) the Creatures block has 47 records; the first 46 are identical to the source; record 47 is the
-      source's Bile Demon with exactly the fields of one stage changed (and only to the ruled values).
+      source's Bile Demon with exactly the fields of one stage changed (and only to the ruled values;
+      a wrong slot tail names the slot, the sub-field and its record bytes).
   (c) header invariants: every block header of the Globals file is consistent (signature, the
       constants 4 / 28 / 1, check words signature + 1 and + 2, file size and content size match the
       content), the Creatures block holds whole 5537-byte records numbered by its item count, and its
@@ -26,17 +31,32 @@ Rules, each one PASS or FAIL line per map (per folder for g and h):
   (e) every other map file is byte-identical to its source.
   (f) animation (mesh) names: every animation slot name of record 47 that differs from the Bile
       Demon's exists as `Data/Meshes/<name>.kmf` in the folder (exact case, not empty); every name left
-      as the Bile Demon's exists in the game's Meshes.WAD. At stage 3 the icon and texture files are
-      not checked yet, which is a FAIL, so a stage-3 folder cannot pass as verified.
+      as the Bile Demon's exists in the game's Meshes.WAD. From stage 2 every such Molynx file must also
+      parse to its last byte, store its own name as its internal name, pass the animation invariants
+      (`anim_invariants`), keep every sprite within 255 vertices and 255 triangles with every triangle
+      index in range, and name only textures that exist as `Data/EngineTextures/<texture>.png` (exact
+      case; a PNG whose sides are powers of two of at most MAX_TEXTURE = 128 px, the largest texture
+      in the game's cache). Each file's loop flag must be the loop flag of the Bile Demon's own file in
+      that slot (for a slot whose Bile Demon file is a static mesh: a static mesh, or an animation that
+      loops), except the slots in WRAP_EXCEPTIONS, which the PASS line lists by name. A stage-3 folder
+      always FAILs (f): its icon and portrait files are not audited before Task 10.
   (g) the folder holds nothing else: `resource.toml`, the seven files of each map and, from stage 2,
-      `Data/Meshes/*.kmf` and `Data/EngineTextures/**/*.png`.
+      exactly the `Data/Meshes/<name>.kmf` files record 47 names and the `Data/EngineTextures/<t>.png`
+      files those meshes name (no unreferenced mesh or texture).
   (h) `resource.toml` is valid TOML with a [resource] table of name, version, authors, description,
       and its name is the name of the folder.
 
 The stages (written independently of the builder, from the Molynx design):
   1  record 47 = Bile Demon with name "Molynx", creatureId 47, orderInEditor = the source's largest + 1.
-  2  + every animation slot that is non-empty in the Bile Demon (not unk_1) renamed `Molynx-<stem>`;
-     empty slots stay empty and the 20 bytes after a slot's 64-byte name stay the Bile Demon's.
+  2  + every animation slot that is non-empty in the Bile Demon (not unk_1) renamed `Molynx-<stem>`
+     (64-byte name, NUL padded); empty slots stay empty. The 20 bytes after the name (`TAIL`) of a
+     renamed slot that plays one of Molynx's animation files follow the stage-2 rule, written out in
+     `_expected_tail`: flags = the Bile Demon's without 0x8 / 0x10 (no Start / End files), frames =
+     the file's frame count (minus 1 when the file loops), fps 30, type 6, startAf = endAf = 0,
+     startDist / endDist / sometimesOne the Bile Demon's when its slot was an animation (type 6), 0
+     when it was a static mesh (type 5). A slot whose Molynx file is a static mesh (a pose) and a slot
+     of type NONE (0, not loaded by the game) keep the Bile Demon's 20 bytes. The frame count and
+     loop flag are read from the folder's own file.
   3  + hp, meleeDamage, fear, threat, mass, pay above the Bile Demon's, icon1Resource
      `gui\\creatures\\evil\\molynx`, portraitResource `gui\\creatures\\evil\\molynx-bg`, and the five
      text id fields changed.
@@ -53,6 +73,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scripts.dk2kld_splice import MAP_SUFFIXES, map_source_dir
+from scripts.dk2kmf import parse_kmf
+from scripts.dk2kmf_write import anim_invariants
 from scripts.dk2kwd_blocks import HEADER_SIZE, read_blocks
 from scripts.dk2kwd_creatures import ANIM_SLOTS, FIELDS, RESOURCE_NAME_SIZE, RESOURCE_SIZE, Creature
 from scripts.dk2paths import GAME_DIR, MESHES_DIR
@@ -77,9 +99,26 @@ BLOCK_NAMES = {0x6E: "Terrain", 0x78: "Rooms", 0x82: "Traps", 0x8C: "Doors", 0x9
                0xA0: "CreatureSpells", 0xAA: "Creatures", 0xF0: "Objects", 0xFA: "EffectElements",
                0x104: "Shots", 0x10E: "Effects"}
 
-_PARSE_ERRORS = (ValueError, KeyError, IndexError, struct.error, OSError)
+_PARSE_ERRORS = (ValueError, KeyError, IndexError, struct.error, OSError, UnicodeDecodeError)
 _STAGE1_FIELDS = frozenset({"name", "creatureId", "orderInEditor"})
 _RESOURCE_TAIL = slice(RESOURCE_NAME_SIZE, RESOURCE_SIZE)
+
+# The 20 bytes after a slot's 64-byte name (resource.bt ArtResource; decoded in the Task 8a report):
+# (sub-field, offset in the 20 bytes, struct format).
+TAIL = (("flags", 0, "<I"), ("frames", 4, "<I"), ("fps", 8, "<I"), ("startDist", 12, "<H"),
+        ("endDist", 14, "<H"), ("type", 16, "<B"), ("startAf", 17, "<B"), ("endAf", 18, "<B"),
+        ("sometimesOne", 19, "<B"))
+HAS_START_END = 0x8 | 0x10        # "has a <name>Start / <name>End file": Molynx has none
+TYPE_NONE, TYPE_MESH, TYPE_ANIM = 0, 5, 6
+MOLYNX_FPS = 30                   # every Molynx file is resampled to 30 fps
+MAX_SPRITE = 255                  # vertices and triangles per sprite (corners are bytes)
+MAX_TEXTURE = 128                 # no texture in the game's cache is larger (0 of 1911)
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# Slots whose Molynx file may end where the Bile Demon's file loops: slot -> (file, why).
+WRAP_EXCEPTIONS = {
+    "animSleepResource": ("Molynx-sleeping", "a one-way clip (he lies down and stays down), so it "
+                          "plays once and is not looped"),
+}
 
 
 @dataclass(frozen=True)
@@ -131,6 +170,95 @@ def _game_mesh_names() -> frozenset[str] | None:
     return None
 
 
+@functools.cache
+def _game_wad():
+    wad = GAME_DIR / "Meshes.WAD"
+    return read_wad(wad) if wad.is_file() else None
+
+
+@functools.cache
+def _game_mesh(file_name: str) -> bytes | None:
+    """The bytes of one game mesh file (exact case), from Meshes.WAD or the extracted folder."""
+    try:
+        wad = _game_wad()
+        if wad is not None:
+            entry = next((e for e in wad.entries if e.name == file_name), None)
+            return None if entry is None else wad.extract(entry)
+        path = MESHES_DIR / file_name
+        return path.read_bytes() if file_name in os.listdir(MESHES_DIR) else None
+    except _PARSE_ERRORS:
+        return None
+
+
+def _file_kind(data: bytes) -> tuple[str, int, bool | None]:
+    """(kind, frames, loops) of a KMF file: ("anim", n, wrap) or ("mesh", 0, None)."""
+    model = parse_kmf(data)
+    if model.kind == "anim":
+        return "anim", model.anim.frame_count, bool(model.anim.wrap)
+    if model.kind == "mesh":
+        return "mesh", 0, None
+    raise ValueError(f"is a {model.kind} file, not a mesh or an animation")
+
+
+# ---- the folder's own mesh files ----------------------------------------------------------------
+
+class _Files:
+    """The folder's Data/Meshes and Data/EngineTextures files, each read and parsed once."""
+
+    def __init__(self, mod_dir: Path) -> None:
+        self.meshes = mod_dir / "Data" / "Meshes"
+        self.textures = mod_dir / "Data" / "EngineTextures"
+        self.mesh_names = set(os.listdir(self.meshes)) if self.meshes.is_dir() else set()
+        self.texture_names = set(os.listdir(self.textures)) if self.textures.is_dir() else set()
+        self._parsed: dict[str, tuple] = {}
+
+    def parsed(self, name: str):
+        """(model or None, problem or None) of `Data/Meshes/<name>.kmf`."""
+        if name not in self._parsed:
+            self._parsed[name] = self._parse(name + ".kmf")
+        return self._parsed[name]
+
+    def _parse(self, file_name: str):
+        if file_name not in self.mesh_names:
+            folded = {n.lower(): n for n in self.mesh_names}
+            if file_name.lower() in folded:
+                return None, (f"Data/Meshes/{file_name} is missing (only "
+                              f"{folded[file_name.lower()]!r}, other case, exists)")
+            return None, f"Data/Meshes/{file_name} is missing"
+        data = _read(self.meshes / file_name)
+        if not data:
+            return None, f"Data/Meshes/{file_name} is empty"
+        try:
+            model = parse_kmf(data)
+        except _PARSE_ERRORS as err:
+            return None, f"Data/Meshes/{file_name} does not parse: {err}"
+        if model.end != len(data):
+            return None, (f"Data/Meshes/{file_name} is not read to its end: {len(data) - model.end} "
+                          "bytes are left after the model")
+        if model.kind not in ("anim", "mesh"):
+            return None, f"Data/Meshes/{file_name} is a {model.kind} file, not a mesh or an animation"
+        return model, None
+
+    def kind(self, name: str) -> tuple[str, int, bool | None] | None:
+        """(kind, frames, loops) of the folder's file `name`, None when it cannot be read."""
+        model, _problem = self.parsed(name)
+        if model is None:
+            return None
+        if model.kind == "anim":
+            return "anim", model.anim.frame_count, bool(model.anim.wrap)
+        return "mesh", 0, None
+
+
+def _png_size(data: bytes) -> tuple[int, int]:
+    if data[:8] != PNG_SIGNATURE or data[12:16] != b"IHDR":
+        raise ValueError("is not a PNG file")
+    return struct.unpack_from(">II", data, 16)
+
+
+def _power_of_two(n: int) -> bool:
+    return n > 0 and not n & (n - 1)
+
+
 # ---- record fields ------------------------------------------------------------------------------
 
 def _field_extents(size: int) -> list[tuple[int, int, str]]:
@@ -167,14 +295,68 @@ def _stage_field_sets(bile: Creature) -> dict[int, frozenset[str]]:
     return {1: _STAGE1_FIELDS, 2: stage2, 3: stage3}
 
 
+def _tail(resource: bytes) -> dict[str, int]:
+    """The 20 bytes after a slot's name, by sub-field (see TAIL)."""
+    tail = resource[RESOURCE_NAME_SIZE:RESOURCE_SIZE]
+    return {name: struct.unpack_from(fmt, tail, at)[0] for name, at, fmt in TAIL}
+
+
+def _tail_range(slot: str, sub: str) -> str:
+    """The record bytes of one tail sub-field, e.g. 'record 47 bytes 2124-2127'."""
+    at, fmt = next((at, fmt) for name, at, fmt in TAIL if name == sub)
+    start = FIELDS[slot].offset + RESOURCE_NAME_SIZE + at
+    return f"record 47 bytes {start}-{start + struct.calcsize(fmt) - 1}"
+
+
+def _expected_tail(bile_tail: dict[str, int], file: tuple | None) -> tuple[dict | None, str]:
+    """The stage-2 rule for one renamed slot: (expected tail, or None for "the Bile Demon's or the
+    converted one", and what the slot is). `file` is (kind, frames, loops) of the Molynx file, None
+    when the file cannot be read; then `frames` of an animation tail is None (not checkable)."""
+    kind = bile_tail["type"]
+    if kind == TYPE_NONE:
+        return dict(bile_tail), "type NONE (not loaded), kept"
+    if file is not None and file[0] == "mesh":
+        return dict(bile_tail), "a static mesh, kept"
+    keep = kind == TYPE_ANIM
+    frames = None if file is None else file[1] - (1 if file[2] else 0)
+    converted = {
+        "flags": bile_tail["flags"] & ~HAS_START_END, "frames": frames, "fps": MOLYNX_FPS,
+        "startDist": bile_tail["startDist"] if keep else 0,
+        "endDist": bile_tail["endDist"] if keep else 0, "type": TYPE_ANIM,
+        "startAf": 0, "endAf": 0, "sometimesOne": bile_tail["sometimesOne"] if keep else 0,
+    }
+    return converted, "an animation, rewritten"
+
+
+def _tail_problems(slot: str, name: str, found: dict, bile_tail: dict, file: tuple | None) -> list[str]:
+    if file is not None and file[0] == "mesh" and bile_tail["type"] == TYPE_ANIM:
+        return [f"{slot} names {name}, a static mesh, but the Bile Demon's slot plays an animation "
+                f"(type {TYPE_ANIM})"]
+    expected, _what = _expected_tail(bile_tail, file)
+    if file is None and bile_tail["type"] == TYPE_MESH and found == bile_tail:
+        return []  # the file is unreadable (rule f); the Bile Demon's mesh tail fits a pose
+    problems = []
+    for sub, _at, _fmt in TAIL:
+        want = expected[sub]
+        if want is None or found[sub] == want:
+            continue
+        shown = (lambda v: f"0x{v:X}") if sub == "flags" else str
+        note = " (the Start / End bits 0x8 and 0x10 must be clear)" if sub == "flags" else ""
+        problems.append(f"{slot} {sub} ({_tail_range(slot, sub)}) is {shown(found[sub])}, "
+                        f"expected {shown(want)}{note}")
+    return problems
+
+
 def _name_field_bytes(record: Creature) -> bytes:
     start = FIELDS["name"].offset
     return bytes(record.raw[start:start + NAME_FIELD_SIZE])
 
 
-def _value_problems(molynx: Creature, bile: Creature, stage: int, order: int) -> list[str]:
-    """Where record 47 has the right fields changed but not the ruled values."""
-    problems = []
+def _value_problems(molynx: Creature, bile: Creature, stage: int, order: int,
+                    files: "_Files") -> tuple[list[str], dict[str, int]]:
+    """Where record 47 has the right fields changed but not the ruled values; also counts of how
+    the renamed slots' tails were checked."""
+    problems, counts = [], {"rewritten": 0, "kept": 0, "unchecked": 0}
     if _name_field_bytes(molynx) != MOLYNX_NAME.encode().ljust(NAME_FIELD_SIZE, b"\0"):
         problems.append(f"name is {molynx.get('name')!r} (or has bytes after its NUL), "
                         f"expected {MOLYNX_NAME!r} padded with NULs")
@@ -189,12 +371,23 @@ def _value_problems(molynx: Creature, bile: Creature, stage: int, order: int) ->
                 continue
             name = molynx.resource_name(slot)
             raw = _resource_bytes(molynx, slot)
+            if raw == _resource_bytes(bile, slot):
+                continue  # left as the Bile Demon's: already named as a missing stage-2 field
+            start = FIELDS[slot].offset
             if not name.startswith(MOLYNX_PREFIX) or len(name) == len(MOLYNX_PREFIX):
-                problems.append(f"{slot} is {name!r}, expected a name starting with {MOLYNX_PREFIX!r}")
+                problems.append(f"{slot} name (record 47 bytes {start}-{start + RESOURCE_NAME_SIZE - 1}) "
+                                f"is {name!r}, expected a name starting with {MOLYNX_PREFIX!r}")
             elif raw[len(name):RESOURCE_NAME_SIZE].strip(b"\0"):
-                problems.append(f"{slot} has bytes after the NUL of its name")
-            if raw[_RESOURCE_TAIL] != _resource_bytes(bile, slot)[_RESOURCE_TAIL]:
-                problems.append(f"{slot}: the last 20 bytes after its name differ from the Bile Demon's")
+                problems.append(f"{slot} name (record 47 bytes {start}-{start + RESOURCE_NAME_SIZE - 1}) "
+                                "has bytes after its NUL")
+            bile_tail = _tail(_resource_bytes(bile, slot))
+            file = files.kind(name) if name and name != bile.resource_name(slot) else None
+            problems += _tail_problems(slot, name, _tail(raw), bile_tail, file)
+            what = _expected_tail(bile_tail, file)[1]
+            if file is None and bile_tail["type"] != TYPE_NONE:
+                counts["unchecked"] += 1
+            else:
+                counts["rewritten" if what.endswith("rewritten") else "kept"] += 1
     if stage >= 3:
         for stat in STATS:
             if not molynx.get(stat) > bile.get(stat):
@@ -205,7 +398,7 @@ def _value_problems(molynx: Creature, bile: Creature, stage: int, order: int) ->
                 problems.append(f"{slot} is {molynx.resource_name(slot)!r}, expected {expected!r}")
             elif raw[_RESOURCE_TAIL] != _resource_bytes(bile, slot)[_RESOURCE_TAIL]:
                 problems.append(f"{slot}: the last 20 bytes after its name differ from the Bile Demon's")
-    return problems
+    return problems, counts
 
 
 # ---- one map ------------------------------------------------------------------------------------
@@ -297,7 +490,12 @@ def _check_headers(src_blocks, mod_blocks, record_size: int) -> tuple[bool, str]
                   f"source's apart from file size, item count and content size")
 
 
-def _check_creatures(src_blocks, mod_blocks) -> tuple[bool, str, tuple | None]:
+def _missing_field_problems(missing: list[str]) -> list[str]:
+    return [f"{field} is left as the Bile Demon's (record 47 bytes {FIELDS[field].offset}-"
+            f"{FIELDS[field].end - 1})" for field in missing]
+
+
+def _check_creatures(src_blocks, mod_blocks, files: "_Files") -> tuple[bool, str, tuple | None]:
     """Rule (b): (ok, message, (stage, record 47, Bile Demon, record size) or None)."""
     src = _creatures_block(src_blocks, "the source")
     mod = _creatures_block(mod_blocks, "the Globals file")
@@ -322,21 +520,33 @@ def _check_creatures(src_blocks, mod_blocks) -> tuple[bool, str, tuple | None]:
     bile, molynx = biles[0], records[-1]
     differing = _differing_fields(bytes(bile.raw), bytes(molynx.raw))
     sets = _stage_field_sets(bile)
-    stage = next((s for s, fields in sets.items() if differing == fields), None)
-    if stage is None:
-        closest = min(sets, key=lambda s: len(differing ^ sets[s]))
-        extra, missing = sorted(differing - sets[closest]), sorted(sets[closest] - differing)
-        return False, (f"record 47 differs from the Bile Demon in a set of fields that is no stage's; "
-                       f"closest is stage {closest}: unexpected {extra}, missing {missing}"), None
+    # the stage whose field set is closest to the differing fields (the lower one on a tie); a field
+    # of that set left unchanged (a slot left as the Bile Demon's, ...) or a field outside it is a
+    # problem, and the other rules still run for that stage
+    stage = min(sorted(sets), key=lambda s: len(differing ^ sets[s]))
     order = max(c.get("orderInEditor") for c in source) + 1
-    problems = _value_problems(molynx, bile, stage, order)
+    by_offset = lambda f: FIELDS[f].offset  # noqa: E731
+    problems = [f"{field} differs from the Bile Demon's, but stage {stage} keeps it (record 47 bytes "
+                f"{FIELDS[field].offset}-{FIELDS[field].end - 1})"
+                for field in sorted(differing - sets[stage], key=by_offset)]
+    problems += _missing_field_problems(sorted(sets[stage] - differing, key=by_offset))
+    values, counts = _value_problems(molynx, bile, stage, order, files)
+    problems += values
+    info = (stage, molynx, bile, size)
     if problems:
-        return False, f"record 47 (stage {stage}): " + "; ".join(problems), None
-    detail = (", ".join(sorted(differing)) if stage == 1
-              else f"{len(differing)} fields (stage {stage} set)")
+        return False, f"record 47 (stage {stage}): " + "; ".join(problems), info
+    if stage == 1:
+        detail = ", ".join(sorted(differing))
+    else:
+        detail = (f"{len(differing)} fields (stage {stage} set); the 20 bytes after each renamed "
+                  f"slot's name follow the stage-2 rule: {counts['rewritten']} rewritten from "
+                  f"Molynx's animation files, {counts['kept']} kept (static meshes, type NONE)")
+        if counts["unchecked"]:
+            detail += (f", {counts['unchecked']} whose frame count cannot be checked because the "
+                       "file is missing or unreadable (rule f)")
     return True, (f"{len(records)} records; the first {SOURCE_RECORDS} are identical to the source; "
                   f"record 47 is Molynx at stage {stage}, differing from the Bile Demon only in {detail}"
-                  ), (stage, molynx, bile, size)
+                  ), info
 
 
 def _thing_records(data: bytes) -> list[tuple[int, int, int]]:
@@ -418,28 +628,106 @@ def _check_other_files(mod_dir: Path, name: str, source_dir: Path) -> tuple[bool
     return True, f"the other {count} files are byte-identical to the source"
 
 
-def _check_assets(mod_dir: Path, stage: int, molynx: Creature, bile: Creature) -> tuple[bool, str]:
-    """Rule (f). Task 8 extends this with the textures and icon files (the `unchecked` list)."""
+def _model_problems(name: str, model, files: "_Files") -> tuple[list[str], set[str]]:
+    """Rule (f) on one parsed Molynx file: (problems, the texture names its materials use)."""
+    file_name = f"Data/Meshes/{name}.kmf"
+    body = model.anim if model.kind == "anim" else model.mesh
+    problems = []
+    if body.name != name:
+        problems.append(f"{file_name} calls itself {body.name!r} inside, not {name!r}")
+    if model.kind == "anim":
+        problems += [f"{file_name}: {text}" for text in anim_invariants(model.anim)[:3]]
+    for s, sprite in enumerate(body.sprites):
+        if len(sprite.vertices) > MAX_SPRITE:
+            problems.append(f"{file_name} sprite {s} has {len(sprite.vertices)} vertices, at most "
+                            f"{MAX_SPRITE} fit")
+        for lod, triangles in enumerate(sprite.triangles):
+            if len(triangles) > MAX_SPRITE:
+                problems.append(f"{file_name} sprite {s} LOD {lod} has {len(triangles)} triangles, "
+                                f"at most {MAX_SPRITE} fit")
+            if any(not 0 <= i < len(sprite.vertices) for t in triangles for i in t):
+                problems.append(f"{file_name} sprite {s} LOD {lod} has a triangle index outside its "
+                                f"{len(sprite.vertices)} vertices")
+        if not 0 <= sprite.material < len(model.materials):
+            problems.append(f"{file_name} sprite {s} uses material {sprite.material} of "
+                            f"{len(model.materials)}")
+    textures = {t for material in model.materials for t in material.textures}
+    return problems, textures
+
+
+def _texture_problems(texture: str, files: "_Files") -> list[str]:
+    file_name = texture + ".png"
+    shown = f"Data/EngineTextures/{file_name}"
+    if file_name not in files.texture_names:
+        folded = {n.lower(): n for n in files.texture_names}
+        if file_name.lower() in folded:
+            return [f"{shown} is missing (only {folded[file_name.lower()]!r}, other case, exists)"]
+        return [f"{shown} is missing"]
+    try:
+        width, height = _png_size(_read(files.textures / file_name) or b"")
+    except (ValueError, struct.error) as err:
+        return [f"{shown} {err}"]
+    if not (_power_of_two(width) and _power_of_two(height)
+            and width <= MAX_TEXTURE and height <= MAX_TEXTURE):
+        return [f"{shown} is {width}x{height}; each side must be a power of two of at most "
+                f"{MAX_TEXTURE} px"]
+    return []
+
+
+def _wrap_problems(slots: dict[str, str], bile: Creature, files: "_Files") -> tuple[list[str], list[str]]:
+    """Rule (f), loop flags: (problems, the WRAP_EXCEPTIONS used, as text)."""
+    problems, used = [], []
+    for slot, name in slots.items():
+        kind = _tail(_resource_bytes(bile, slot))["type"]
+        mine = files.kind(name)
+        if kind == TYPE_NONE or mine is None:
+            continue  # not loaded by the game / unreadable (named above)
+        bile_name = bile.resource_name(slot)
+        data = _game_mesh(bile_name + ".kmf")
+        if data is None:
+            problems.append(f"{slot}: the Bile Demon's {bile_name}.kmf is not in the game's meshes, "
+                            "so its loop flag cannot be compared")
+            continue
+        theirs = _file_kind(data)
+        if theirs[0] == "mesh":
+            if mine[0] == "anim" and not mine[2]:
+                problems.append(f"{slot}: {name} does not loop, but it replaces the Bile Demon's "
+                                f"static {bile_name}, which never ends")
+            continue
+        if mine[0] != "anim" or mine[2] == theirs[2]:
+            continue  # a static mesh in an animation slot is a rule (b) problem
+        exception = WRAP_EXCEPTIONS.get(slot)
+        if exception and exception[0] == name and theirs[2] and not mine[2]:
+            used.append(f"{slot} {name} does not loop although the Bile Demon's {bile_name} does: "
+                        f"{exception[1]}")
+            continue
+        problems.append(f"{slot}: {name} {'loops' if mine[2] else 'does not loop'}, but the Bile "
+                        f"Demon's {bile_name} {'loops' if theirs[2] else 'does not'}")
+    return problems, used
+
+
+def _check_assets(stage: int, molynx: Creature, bile: Creature,
+                  files: "_Files") -> tuple[bool, str, set[str], set[str]]:
+    """Rule (f): (ok, message, Molynx mesh names used, texture names they use)."""
     game = _game_mesh_names()
-    problems, unchecked = [], []
+    problems = []
     names = {slot: molynx.resource_name(slot) for slot in _anim_slots()}
     bile_names = {slot: bile.resource_name(slot) for slot in names}
-    changed = sorted({name for slot, name in names.items() if name != bile_names[slot]})
+    renamed = {slot: name for slot, name in names.items() if name != bile_names[slot] and name}
+    changed = sorted(set(renamed.values()))
     kept = sorted({name for slot, name in names.items() if name and name == bile_names[slot]})
 
-    meshes = mod_dir / "Data" / "Meshes"
-    listing = set(os.listdir(meshes)) if meshes.is_dir() else set()
-    folded = {n.lower(): n for n in listing}
+    textures: set[str] = set()
     for name in changed:
-        file_name = name + ".kmf"
-        if file_name in listing:
-            if (meshes / file_name).stat().st_size == 0:
-                problems.append(f"Data/Meshes/{file_name} is empty")
-        elif file_name.lower() in folded:
-            problems.append(f"Data/Meshes/{file_name} is missing (only {folded[file_name.lower()]!r}, "
-                            "other case, exists)")
-        else:
-            problems.append(f"Data/Meshes/{file_name} is missing")
+        model, problem = files.parsed(name)
+        if problem:
+            problems.append(problem)
+        elif stage >= 2:
+            more, used = _model_problems(name, model, files)
+            problems += more
+            textures |= used
+    for texture in sorted(textures):
+        problems += _texture_problems(texture, files)
     if kept:
         if game is None:
             problems.append("the game's Meshes.WAD (or the extracted Meshes folder) was not found, so "
@@ -447,13 +735,29 @@ def _check_assets(mod_dir: Path, stage: int, molynx: Creature, bile: Creature) -
         else:
             problems += [f"{name}.kmf is not in the game's Meshes.WAD" for name in kept
                          if name + ".kmf" not in game]
+    exceptions = []
+    if stage >= 2:
+        more, exceptions = _wrap_problems(renamed, bile, files)
+        problems += more
     if stage >= 3:
-        unchecked.append("the icon and texture files (icon1Resource, portraitResource, "
-                         "Data/EngineTextures) are not checked by this audit version yet")
-    if problems or unchecked:
-        return False, "; ".join(problems + unchecked)
-    return True, (f"every animation slot name resolves: {len(changed)} Molynx meshes in Data/Meshes "
-                  f"and {len(kept)} Bile Demon names in the game's Meshes.WAD")
+        problems.append("stage 3 is not audited yet (until Task 10): its icon and portrait files "
+                        "(icon1Resource, portraitResource) and texts are not checked, so a stage-3 "
+                        "folder never passes")
+    if problems:
+        return False, "; ".join(problems), set(changed), textures
+    if stage == 1:
+        return True, (f"every animation slot name resolves: 0 Molynx meshes in Data/Meshes and "
+                      f"{len(kept)} Bile Demon names in the game's Meshes.WAD"), set(), set()
+    message = (f"every animation slot name resolves: {len(changed)} Molynx meshes in Data/Meshes (each "
+               f"parses to its end, has its own name inside, passes the animation invariants, keeps "
+               f"sprites within {MAX_SPRITE} vertices and triangles) using {len(textures)} textures in "
+               f"Data/EngineTextures ({', '.join(sorted(textures))}; powers of two up to "
+               f"{MAX_TEXTURE} px), and {len(kept)} Bile Demon names in the game's Meshes.WAD; each "
+               f"file loops exactly when the Bile Demon's file in its slot does (where that file is "
+               f"a static mesh: a static pose, or an animation that loops)")
+    if exceptions:
+        message += f", except {len(exceptions)} recorded exception(s): " + "; ".join(exceptions)
+    return True, message, set(changed), textures
 
 
 def _safe(check, *args) -> tuple:
@@ -464,14 +768,15 @@ def _safe(check, *args) -> tuple:
         return (False, f"could not be checked: {err}")
 
 
-def _audit_map(mod_dir: Path, name: str, lines: _Lines) -> int | None:
-    """Rules (a) to (f) for one map; returns the stage found in record 47 (None if not found)."""
+def _audit_map(mod_dir: Path, name: str, lines: _Lines, files: _Files) -> tuple:
+    """Rules (a) to (f) for one map; returns (the stage found in record 47 or None, the Molynx mesh
+    names its record uses, the texture names those meshes use)."""
     try:
         source_dir = map_source_dir(name)
     except FileNotFoundError as err:
         for rule in "abcdef":
             lines.add(False, rule, name, f"no source files to compare with: {err}")
-        return None
+        return None, set(), set()
     maps = mod_dir / MAPS_PATH
     info = None
 
@@ -491,7 +796,7 @@ def _audit_map(mod_dir: Path, name: str, lines: _Lines) -> int | None:
         else:
             ok, message = _safe(_check_blocks, src_blocks, mod_blocks)
             lines.add(ok, "a", name, message)
-            ok, message, *rest = _safe(_check_creatures, src_blocks, mod_blocks)
+            ok, message, *rest = _safe(_check_creatures, src_blocks, mod_blocks, files)
             info = rest[0] if rest else None
             lines.add(ok, "b", name, message)
             ok, message = _safe(_check_headers, src_blocks, mod_blocks, record_size)
@@ -511,11 +816,12 @@ def _audit_map(mod_dir: Path, name: str, lines: _Lines) -> int | None:
 
     if info:
         stage, molynx, bile, _size = info
-        ok, message = _safe(_check_assets, mod_dir, stage, molynx, bile)
+        ok, message, *rest = _safe(_check_assets, stage, molynx, bile, files)
         lines.add(ok, "f", name, message)
-        return stage
-    lines.add(False, "f", name, "not checked because record 47 could not be read as a stage")
-    return None
+        meshes, textures = rest if rest else (set(), set())
+        return stage, meshes, textures
+    lines.add(False, "f", name, "not checked because record 47 could not be read")
+    return None, set(), set()
 
 
 # ---- the folder ---------------------------------------------------------------------------------
@@ -530,29 +836,35 @@ def _map_names(files: list[str]) -> list[str]:
     return sorted(names)
 
 
-def _check_layout(mod_dir: Path, names: list[str], stage: int | None) -> tuple[bool, str]:
-    """Rule (g)."""
+def _check_layout(mod_dir: Path, names: list[str], stage: int | None, meshes: set[str],
+                  textures: set[str]) -> tuple[bool, str]:
+    """Rule (g): `meshes` / `textures` are the names record 47 and its meshes use (stage >= 2)."""
     maps_rel = MAPS_PATH.as_posix()
     expected_maps = {name + suffix for name in names for suffix in MAP_SUFFIXES}
     stage2 = stage is not None and stage >= 2
+    expected_meshes = {n + ".kmf" for n in meshes} if stage2 else set()
+    expected_textures = {t + ".png" for t in textures} if stage2 else set()
     problems, files, mesh_count, texture_count = [], [], 0, 0
     for root, dirs, names_here in os.walk(mod_dir):
         here = Path(root).relative_to(mod_dir).as_posix()
-        for d in dirs:
+        for d in sorted(dirs):
             rel = d if here == "." else f"{here}/{d}"
             if not (rel in ("Data", "Data/editor", maps_rel)
-                    or (stage2 and (rel in ("Data/Meshes", "Data/EngineTextures")
-                                    or rel.startswith("Data/EngineTextures/")))):
+                    or (stage2 and rel in ("Data/Meshes", "Data/EngineTextures"))):
                 problems.append(f"unexpected folder {rel}")
-        for f in names_here:
+        for f in sorted(names_here):
             rel = f if here == "." else f"{here}/{f}"
             files.append(rel)
             if rel == "resource.toml" or (here == maps_rel and f in expected_maps):
                 continue
-            if stage2 and here == "Data/Meshes" and f.endswith(".kmf") and len(f) > 4:
+            if here == "Data/Meshes" and f in expected_meshes:
                 mesh_count += 1
-            elif stage2 and here.startswith("Data/EngineTextures") and f.endswith(".png") and len(f) > 4:
+            elif here == "Data/EngineTextures" and f in expected_textures:
                 texture_count += 1
+            elif here == "Data/Meshes" and f.endswith(".kmf") and stage2:
+                problems.append(f"unexpected file {rel} (record 47 names no such mesh)")
+            elif here == "Data/EngineTextures" and stage2:
+                problems.append(f"unexpected file {rel} (no Molynx mesh names this texture)")
             else:
                 problems.append(f"unexpected file {rel}")
     if "resource.toml" not in files:
@@ -566,7 +878,8 @@ def _check_layout(mod_dir: Path, names: list[str], stage: int | None) -> tuple[b
             problems.append(f"map {name} is missing " + ", ".join(missing))
     if problems:
         return False, "; ".join(problems)
-    extra = f", {mesh_count} meshes and {texture_count} textures" if stage2 else ""
+    extra = (f", {mesh_count} meshes that record 47 names and {texture_count} textures those "
+             "meshes name") if stage2 else ""
     return True, (f"holds only resource.toml and {len(names) * len(MAP_SUFFIXES)} map files of "
                   f"{len(names)} map(s) ({', '.join(names)}){extra}")
 
@@ -603,11 +916,15 @@ def audit(mod_dir: Path) -> AuditReport:
     maps_dir = mod_dir / MAPS_PATH
     names = _map_names(sorted(os.listdir(maps_dir)) if maps_dir.is_dir() else [])
     maps = _Lines()
-    stages = {name: _audit_map(mod_dir, name, maps) for name in names}
+    files = _Files(mod_dir)
+    results = {name: _audit_map(mod_dir, name, maps, files) for name in names}
+    stages = {name: result[0] for name, result in results.items()}
+    meshes = set().union(*(result[1] for result in results.values()))
+    textures = set().union(*(result[2] for result in results.values()))
 
     distinct = {s for s in stages.values() if s is not None}
     stage = next(iter(distinct)) if len(distinct) == 1 and None not in stages.values() else None
-    ok, message = _safe(_check_layout, mod_dir, names, stage)
+    ok, message = _safe(_check_layout, mod_dir, names, stage, meshes, textures)
     folder.add(ok, "g", "folder", message)
     ok, message = _safe(_check_resource_toml, mod_dir)
     folder.add(ok, "h", "folder", message)

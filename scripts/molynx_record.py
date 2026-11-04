@@ -289,9 +289,14 @@ def _check_text_ids(text_ids: dict[str, int]) -> None:
 
 def _anim_frames(stem: str, wrap: bool, anim_info: Mapping[str, dict]) -> int:
     """The record's frame count for file `stem` (checked against the plan's wrap flag)."""
+    if not isinstance(anim_info, Mapping):
+        raise ValueError(f"anim_info must be a mapping of file stems, not {type(anim_info).__name__}")
     if stem not in anim_info:
         raise ValueError(f"anim_info has no entry for the file {PREFIX}{stem}")
     info = anim_info[stem]
+    if not isinstance(info, Mapping):
+        raise ValueError(f"anim_info[{stem!r}] must be a mapping with frames, fps and wrap, not "
+                         f"{type(info).__name__}")
     if bool(info.get("wrap")) != wrap:
         raise ValueError(f"anim_info says {stem} {'loops' if info.get('wrap') else 'does not loop'}"
                          f", its slots need the opposite")

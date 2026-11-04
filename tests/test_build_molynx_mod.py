@@ -1,6 +1,9 @@
-"""Stage-1 Molynx mod: the builder (`build_mod`), the independent audit (`audit`) and the test maps.
+"""The Molynx mod: the builder (`build_mod`, stages 1 and 2), the independent audit (`audit`) and
+the test maps.
 
-The builds read the real DK2 maps, so every test that needs them skips when they are absent.
+The builds read the real DK2 maps, so every test that needs them skips when they are absent. The
+stage-2 builds take Molynx's files from a fresh export (molynx_assets.export_molynx_assets) made
+once per module.
 """
 import re
 import shutil
@@ -10,20 +13,29 @@ from pathlib import Path
 
 import pytest
 
+from PIL import Image
+
 from molynx_files import ANIM_INFO, FILE_WRAPS
 import scripts.audit_molynx_mod as audit_module
 import scripts.build_molynx_mod as builder
+import scripts.molynx_assets as molynx_assets
 from scripts.audit_molynx_mod import audit
 from scripts.build_molynx_mod import build_mod
 from scripts.dk2kld_splice import (MAP_SUFFIXES, level_flags, map_source_dir, pick_skirmish_test_map,
                                    pick_test_map)
 from scripts.dk2kwd_blocks import HEADER_SIZE, Block, read_blocks, write_blocks
+from scripts.dk2kmf import parse_kmf
+from scripts.dk2kmf_write import write_kmf
 from scripts.dk2kwd_creatures import ANIM_SLOTS, FIELDS, Creature, creatures_block, read_creatures
-from scripts.dk2paths import GAME_DIR, MAPS_DIR, QUUZ_MAPS_DIR, have
+from scripts.dk2paths import BEHEMOTH_DIR, EDITOR_DIR, GAME_DIR, MAPS_DIR, MESHES_DIR, QUUZ_MAPS_DIR, have
 
 needs_data = pytest.mark.skipif(
     not (have(MAPS_DIR) and have(QUUZ_MAPS_DIR) and have(GAME_DIR / "Meshes.WAD")),
     reason="DK2 editor maps, Quuz maps or Meshes.WAD not present")
+needs_assets = pytest.mark.skipif(
+    not (have(MESHES_DIR) and have(EDITOR_DIR) and have(GAME_DIR / "EngineTextures.dir")
+         and have(BEHEMOTH_DIR / "behemoth.xml")),
+    reason="the data Molynx's files are exported from is not present")
 
 CREATURES = 0xAA
 SKIRMISH_FLAG = 1 << 11
@@ -32,7 +44,17 @@ FOLDER = "Molynx_slot_only"
 SECOND = "Dead Walking"  # the skirmish map whose first keeper Bile Demon is Keeper 1's
 MAPS = ["Siege", SECOND]
 TEXT_IDS = {"name": 3001, "tooltip": 3002, "general": 3003, "strength": 3004, "weakness": 3005}
-FILES = {"anim_info": ANIM_INFO, "file_wraps": FILE_WRAPS}  # stages 2 and 3 need them
+# The files a stage-2 folder delivers (literal; the record's file plan for the test maps' Bile Demons):
+# 18 clips, the variants walk_once and getting_hit_loop, the 3 poses, and the 2 textures.
+STAGE2_MESHES = sorted(f"Molynx-{stem}.kmf" for stem in (
+    "walk", "walk_once", "DraggedPose", "getting_hit", "getting_hit_loop", "attack", "die",
+    "DiePose", "happy", "angry", "staggering", "being_picked_up", "sleeping", "eating", "stand",
+    "being_slapped", "manufacturing", "praying", "knockback", "waking_up", "celebrating",
+    "fidgeting", "PoseFrame"))
+STAGE2_TEXTURES = ["Molynx_Body.png", "Molynx_Mace.png"]
+UNUSED_CLIPS = ["running", "victory_celebration", "training", "fighting_another_creature",
+                "patrolling", "guarding", "interacting_with_objects"]
+TAIL_AT = {"flags": (0, 4), "frames": (4, 4), "fps": (8, 4), "type": (16, 1)}  # tail sub-fields
 
 
 # ---- helpers ------------------------------------------------------------------------------------
@@ -136,8 +158,31 @@ def mod(stage1_dir, tmp_path):
 
 
 @pytest.fixture(scope="module")
-def stage2_dir(tmp_path_factory):
-    return build_mod(2, tmp_path_factory.mktemp("stage2"), "Molynx_stage2", maps=["Siege"], **FILES)
+def assets_dir(tmp_path_factory):
+    """A fresh export of Molynx's files (models, variants, poses, textures; no portraits)."""
+    out = tmp_path_factory.mktemp("assets") / "molynx_assets"
+    molynx_assets.export_molynx_assets(out, portrait_src=None)
+    return out
+
+
+@pytest.fixture
+def assets_copy(assets_dir, tmp_path):
+    """A private, writable copy of the export that a test may damage."""
+    target = tmp_path / "assets_copy"
+    shutil.copytree(assets_dir, target)
+    return target
+
+
+@pytest.fixture(scope="module")
+def stage2_dir(tmp_path_factory, assets_dir):
+    return build_mod(2, tmp_path_factory.mktemp("stage2"), "Molynx_stage2", maps=["Siege"],
+                     assets_dir=assets_dir)
+
+
+@pytest.fixture(scope="module")
+def stage2_full(tmp_path_factory, assets_dir):
+    """The stage-2 folder as it is handed over: name Molynx, both test maps."""
+    return build_mod(2, tmp_path_factory.mktemp("stage2_full"), assets_dir=assets_dir)
 
 
 @pytest.fixture
@@ -244,13 +289,17 @@ def test_build_refuses_a_bad_stage(tmp_path, stage):
     assert list(tmp_path.iterdir()) == []
 
 
-@needs_data
 @pytest.mark.parametrize("stage", [2, 3])
-def test_build_stage_2_and_3_need_the_files_info(tmp_path, stage):
-    with pytest.raises(ValueError, match="anim_info"):
-        build_mod(stage, tmp_path, maps=["Siege"], text_ids=TEXT_IDS, file_wraps=FILE_WRAPS)
-    with pytest.raises(ValueError, match="file_wraps"):
-        build_mod(stage, tmp_path, maps=["Siege"], text_ids=TEXT_IDS, anim_info=ANIM_INFO)
+def test_build_stage_2_and_3_need_an_assets_dir(tmp_path, stage):
+    for extra in ({}, {"anim_info": ANIM_INFO, "file_wraps": FILE_WRAPS}):
+        with pytest.raises(ValueError, match="assets_dir"):
+            build_mod(stage, tmp_path, maps=["Siege"], text_ids=TEXT_IDS, **extra)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_build_stage_1_takes_no_assets_dir(tmp_path):
+    with pytest.raises(ValueError, match="assets_dir"):
+        build_mod(1, tmp_path, maps=["Siege"], assets_dir=tmp_path)
     assert list(tmp_path.iterdir()) == []
 
 
@@ -401,7 +450,8 @@ def test_audit_infers_stage_1_from_the_folder(stage1_dir):
 def test_audit_does_not_grade_the_builder_with_itself():
     source = Path(audit_module.__file__).read_text()
     for forbidden in ("build_molynx", "molynx_record", "build_mod", "splice_creatures",
-                      "molynx_for_map", "retarget_creature_thing"):
+                      "molynx_for_map", "retarget_creature_thing", "file_plan", "molynx_assets",
+                      "slot_assignment", "SLOT_CLIPS", "art_tail", "anim_info"):
         assert forbidden not in source, forbidden
 
 
@@ -790,102 +840,535 @@ def test_a_resource_toml_name_that_is_not_the_folder_name_fails_rule_h(mod):
     assert '"Other"' in line and f'"{FOLDER}"' in line
 
 
-# ---- audit: stage 2 (animation and mesh names) --------------------------------------------------
+# ---- build_mod: stage 2 (his own files) ---------------------------------------------------------
+
+def files_under(folder: Path) -> list[str]:
+    return sorted(p.name for p in folder.iterdir()) if folder.is_dir() else []
+
+
+def tail_range(slot: str, sub: str) -> str:
+    """'record 47 bytes a-b' of one sub-field of the 20 bytes after a slot's name (written out here)."""
+    at, size = TAIL_AT[sub]
+    start = FIELDS[slot].offset + 64 + at
+    return f"record 47 bytes {start}-{start + size - 1}"
+
+
+def set_tail(mod: Path, map_name: str, slot: str, sub: str, value: int) -> None:
+    at, size = TAIL_AT[sub]
+
+    def edit(creatures):
+        start = FIELDS[slot].offset + 64 + at
+        creatures[-1].raw[start:start + size] = value.to_bytes(size, "little")
+        return creatures
+    edit_creatures(mod, map_name, edit)
+
+
+def get_tail(record: Creature, slot: str, sub: str) -> int:
+    at, size = TAIL_AT[sub]
+    start = FIELDS[slot].offset + 64 + at
+    return int.from_bytes(record.raw[start:start + size], "little")
+
+
+def rewrite_kmf(path: Path, change) -> None:
+    model = parse_kmf(path.read_bytes())
+    change(model)
+    path.write_bytes(write_kmf(model))
+
+
+def meshes(mod: Path) -> Path:
+    return mod / "Data" / "Meshes"
+
+
+def textures(mod: Path) -> Path:
+    return mod / "Data" / "EngineTextures"
+
 
 @needs_data
-@pytest.mark.xfail(strict=True, reason="8b-2: audit stage-2 expectations, remove marker")
+@needs_assets
+def test_stage2_folder_holds_exactly_the_files_the_record_names(stage2_full):
+    assert stage2_full.name == "Molynx"
+    found = sorted(p.relative_to(stage2_full).as_posix() for p in stage2_full.rglob("*") if p.is_file())
+    expected = sorted(["resource.toml",
+                       *(f"Data/editor/maps/{name}{suffix}" for name in MAPS for suffix in MAP_SUFFIXES),
+                       *(f"Data/Meshes/{f}" for f in STAGE2_MESHES),
+                       *(f"Data/EngineTextures/{f}" for f in STAGE2_TEXTURES)])
+    assert found == expected
+    assert len(STAGE2_MESHES) == 23
+    for clip in UNUSED_CLIPS:
+        assert not (meshes(stage2_full) / f"Molynx-{clip}.kmf").exists(), clip
+
+
+@needs_data
+@needs_assets
+def test_stage2_names_every_delivered_mesh_in_record_47_of_each_map(stage2_full):
+    for name in MAPS:
+        assert {n + ".kmf" for n in renamed_slots(stage2_full, name)} == set(STAGE2_MESHES), name
+
+
+@needs_data
+@needs_assets
+def test_stage2_files_are_byte_copies_of_the_export(stage2_full, assets_dir):
+    for f in STAGE2_MESHES:
+        assert (meshes(stage2_full) / f).read_bytes() == (assets_dir / f).read_bytes(), f
+    for f in STAGE2_TEXTURES:
+        assert (textures(stage2_full) / f).read_bytes() == (assets_dir / f).read_bytes(), f
+
+
+@needs_data
+@needs_assets
+def test_stage2_record_frames_come_from_the_files(stage2_dir):
+    """A few literal values: walk loops (47 frames -> 46), sleeping does not (136), elec is the
+    looping getting_hit (18 -> 17) and became an animation (type 6), poses stay meshes (type 5)."""
+    molynx = record_47(stage2_dir, "Siege")
+    assert get_tail(molynx, "animWalkResource", "frames") == 46
+    assert get_tail(molynx, "animSleepResource", "frames") == 136
+    assert get_tail(molynx, "animSleepResource", "fps") == 30
+    assert get_tail(molynx, "animElecResource", "frames") == 17
+    assert get_tail(molynx, "animElecResource", "type") == 6
+    assert get_tail(molynx, "animPoseFrameResource", "type") == 5
+    assert get_tail(molynx, "animWalkResource", "flags") & 0x18 == 0
+
+
+@needs_data
+@needs_assets
+def test_stage2_building_twice_gives_identical_bytes(stage2_dir, assets_dir, tmp_path):
+    again = build_mod(2, tmp_path, "Molynx_stage2", maps=["Siege"], assets_dir=assets_dir)
+    files = sorted(p.relative_to(stage2_dir) for p in stage2_dir.rglob("*") if p.is_file())
+    assert files == sorted(p.relative_to(again) for p in again.rglob("*") if p.is_file())
+    assert all((stage2_dir / f).read_bytes() == (again / f).read_bytes() for f in files)
+
+
+@needs_data
+@needs_assets
+def test_stage2_agreeing_anim_info_and_file_wraps_are_accepted(assets_dir, tmp_path, stage2_dir):
+    out = build_mod(2, tmp_path, "Molynx_stage2", maps=["Siege"], assets_dir=assets_dir,
+                    anim_info=ANIM_INFO, file_wraps=FILE_WRAPS)
+    assert (maps_dir(out) / "SiegeGlobals.kld").read_bytes() == \
+        (maps_dir(stage2_dir) / "SiegeGlobals.kld").read_bytes()
+
+
+def _refused(tmp_path, assets, match, **extra):
+    out = tmp_path / "out"
+    with pytest.raises(ValueError, match=match):
+        build_mod(2, out, maps=["Siege"], assets_dir=assets, **extra)
+    assert not out.exists()
+
+
+@needs_data
+@needs_assets
+def test_stage2_refuses_a_missing_file_and_writes_nothing(assets_copy, tmp_path):
+    (assets_copy / "Molynx-walk_once.kmf").unlink()
+    _refused(tmp_path, assets_copy, "Molynx-walk_once.kmf")
+
+
+@needs_data
+@needs_assets
+def test_stage2_refuses_a_file_named_in_another_case(assets_copy, tmp_path):
+    (assets_copy / "Molynx-DraggedPose.kmf").rename(assets_copy / "Molynx-draggedpose.kmf")
+    _refused(tmp_path, assets_copy, "other case")
+
+
+@needs_data
+@needs_assets
+def test_stage2_refuses_a_file_whose_inside_name_differs(assets_copy, tmp_path):
+    rewrite_kmf(assets_copy / "Molynx-stand.kmf", lambda m: setattr(m.anim, "name", "Molynx-Stand"))
+    _refused(tmp_path, assets_copy, "Molynx-Stand")
+
+
+@needs_data
+@needs_assets
+def test_stage2_refuses_a_file_that_loops_against_the_file_plan(assets_copy, tmp_path):
+    rewrite_kmf(assets_copy / "Molynx-praying.kmf", lambda m: setattr(m.anim, "wrap", False))
+    _refused(tmp_path, assets_copy, "file plan")
+
+
+@needs_data
+@needs_assets
+def test_stage2_refuses_a_pose_that_is_an_animation(assets_copy, tmp_path):
+    shutil.copyfile(assets_copy / "Molynx-stand.kmf", assets_copy / "Molynx-DiePose.kmf")
+    _refused(tmp_path, assets_copy, "Molynx-DiePose")
+
+
+@needs_data
+@needs_assets
+@pytest.mark.parametrize("damage", ["trailing", "truncated"])
+def test_stage2_refuses_a_file_that_does_not_parse_to_its_end(assets_copy, tmp_path, damage):
+    path = assets_copy / "Molynx-angry.kmf"
+    data = path.read_bytes()
+    path.write_bytes(data + b"\0" if damage == "trailing" else data[:len(data) // 2])
+    _refused(tmp_path, assets_copy, "Molynx-angry.kmf")
+
+
+@needs_data
+@needs_assets
+def test_stage2_refuses_a_missing_texture(assets_copy, tmp_path):
+    (assets_copy / "Molynx_Mace.png").unlink()
+    _refused(tmp_path, assets_copy, "Molynx_Mace.png")
+
+
+@needs_data
+@needs_assets
+@pytest.mark.parametrize("size", [(256, 256), (100, 128)])
+def test_stage2_refuses_a_texture_the_game_cannot_take(assets_copy, tmp_path, size):
+    Image.new("RGB", size).save(assets_copy / "Molynx_Body.png")
+    _refused(tmp_path, assets_copy, "Molynx_Body.png")
+
+
+@needs_data
+@needs_assets
+def test_stage2_refuses_anim_info_that_disagrees_with_the_files(assets_dir, tmp_path):
+    wrong = {**ANIM_INFO, "walk": {"frames": 48, "fps": 30, "wrap": True}}
+    _refused(tmp_path, assets_dir, "anim_info.*walk", anim_info=wrong)
+    _refused(tmp_path, assets_dir, "anim_info", anim_info=[("walk", 47)])
+
+
+@needs_data
+@needs_assets
+def test_stage2_refuses_file_wraps_that_disagree_with_the_bile_demons_files(assets_dir, tmp_path):
+    _refused(tmp_path, assets_dir, "file_wraps", file_wraps={**FILE_WRAPS, "bile_demon-walk": False})
+
+
+def test_stage2_refuses_an_assets_dir_that_is_not_a_folder(tmp_path):
+    _refused(tmp_path, tmp_path / "nothing", "assets_dir")
+
+
+@needs_data
+@needs_assets
+def test_build_main_builds_stage_2_from_an_export(assets_dir, tmp_path, capsys):
+    out = tmp_path / "bundle"
+    assert builder.main(["--stage", "2", "--assets", str(assets_dir), "--out", str(out),
+                         "--maps", "Siege"]) == 0
+    assert capsys.readouterr().out.strip().endswith("Molynx")
+    assert files_under(meshes(out / "Molynx")) == STAGE2_MESHES
+    assert audit(out / "Molynx").ok
+
+
+@pytest.mark.parametrize("argv,needle", [(["--stage", "2"], "--assets"),
+                                         (["--stage", "1", "--assets", "x"], "--assets")])
+def test_build_main_refuses_assets_at_the_wrong_stage(tmp_path, capsys, argv, needle):
+    with pytest.raises(SystemExit) as exit_info:
+        builder.main([*argv, "--out", str(tmp_path / "bundle")])
+    assert exit_info.value.code == 2
+    assert needle in capsys.readouterr().err
+    assert not (tmp_path / "bundle").exists()
+
+
+def test_build_main_help_names_the_stages_and_the_assets_option(capsys):
+    with pytest.raises(SystemExit):
+        builder.main(["--help"])
+    out = capsys.readouterr().out
+    assert "--assets" in out and "--stage" in out and "Stage 2" in out
+
+
+# ---- audit: stage 2 -----------------------------------------------------------------------------
+
+@needs_data
+@needs_assets
+def test_stage2_audit_of_the_handed_over_folder_passes_every_rule(stage2_full):
+    report = audit(stage2_full)
+    assert report.ok, "\n".join(report.lines)
+    for name in MAPS:
+        for rule in "abcdef":
+            assert len(pass_lines(report, rule, name)) == 1, (rule, name)
+        (line,) = pass_lines(report, "b", name)
+        assert "stage 2" in line and "26 rewritten" in line
+    (g,) = [line for line in report.lines if line.startswith("PASS (g) folder:")]
+    assert "23 meshes" in g and "2 textures" in g
+
+
+@needs_data
+@needs_assets
 def test_stage2_audit_passes_with_every_renamed_animation_present(mod2):
     names = renamed_slots(mod2, "Siege")
-    assert "Molynx-walk" in names and len(names) > 10
-    add_placeholder_meshes(mod2, names)
+    assert "Molynx-walk" in names and len(names) == 23
     report = audit(mod2)
     assert report.ok, "\n".join(report.lines)
     assert any("stage 2" in line for line in report.lines if line.startswith("PASS (b)"))
     (line,) = pass_lines(report, "f", "Siege")
-    assert f"{len(names)} Molynx meshes" in line
+    assert f"{len(names)} Molynx meshes" in line and "Molynx_Body, Molynx_Mace" in line
 
 
 @needs_data
-@pytest.mark.xfail(strict=True, reason="8b-2: audit stage-2 expectations, remove marker")
+@needs_assets
+def test_stage2_audit_lists_the_sleeping_wrap_exception_by_name(mod2):
+    (line,) = pass_lines(audit(mod2), "f", "Siege")
+    assert "1 recorded exception(s)" in line
+    assert "animSleepResource Molynx-sleeping does not loop" in line
+    assert "BileDemon-bed(sleeping)" in line
+    assert set(audit_module.WRAP_EXCEPTIONS) == {"animSleepResource"}
+
+
+@needs_data
+@needs_assets
 def test_stage2_audit_fails_naming_every_missing_mesh_when_none_is_delivered(mod2):
+    shutil.rmtree(meshes(mod2))
+    shutil.rmtree(textures(mod2))
     report = audit(mod2)
     assert not report.ok
-    (line,) = fail_lines(report, "f")
+    (line,) = fail_lines(report)
+    assert line.startswith("FAIL (f) Siege:")
     for name in ("Molynx-walk", "Molynx-DraggedPose", "Molynx-stand"):
-        assert f"{name}.kmf" in line
-    assert not fail_lines(report, "a") and not fail_lines(report, "b") and not fail_lines(report, "d")
+        assert f"Data/Meshes/{name}.kmf is missing" in line
+    (b,) = pass_lines(report, "b", "Siege")
+    assert "cannot be checked" in b
 
 
 @needs_data
-@pytest.mark.xfail(strict=True, reason="8b-2: audit stage-2 expectations, remove marker")
+@needs_assets
 def test_stage2_audit_fails_when_one_mesh_is_missing(mod2):
-    add_placeholder_meshes(mod2, renamed_slots(mod2, "Siege"))
-    (mod2 / "Data" / "Meshes" / "Molynx-walk.kmf").unlink()
-    (line,) = fail_lines(audit(mod2), "f")
-    assert "Molynx-walk.kmf" in line and "Molynx-attack" not in line
+    (meshes(mod2) / "Molynx-walk.kmf").unlink()
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (f) Siege:")
+    assert "Molynx-walk.kmf is missing" in line and "Molynx-attack" not in line
 
 
 @needs_data
-@pytest.mark.xfail(strict=True, reason="8b-2: audit stage-2 expectations, remove marker")
+@needs_assets
 def test_stage2_mesh_names_must_match_the_case_exactly(mod2):
-    names = renamed_slots(mod2, "Siege")
-    add_placeholder_meshes(mod2, names - {"Molynx-DraggedPose"})
-    add_placeholder_meshes(mod2, {"Molynx-draggedpose"})
-    (line,) = fail_lines(audit(mod2), "f")
-    assert "Molynx-DraggedPose.kmf" in line
+    (meshes(mod2) / "Molynx-DraggedPose.kmf").rename(meshes(mod2) / "Molynx-draggedpose.kmf")
+    report = audit(mod2)
+    (f,) = fail_lines(report, "f")
+    assert "Molynx-DraggedPose.kmf is missing" in f and "other case" in f
+    (g,) = fail_lines(report, "g")
+    assert "Molynx-draggedpose.kmf" in g
+    assert len(fail_lines(report)) == 2
 
 
 @needs_data
-@pytest.mark.xfail(strict=True, reason="8b-2: audit stage-2 expectations, remove marker")
+@needs_assets
 def test_stage2_an_empty_mesh_file_fails(mod2):
-    add_placeholder_meshes(mod2, renamed_slots(mod2, "Siege"))
-    (mod2 / "Data" / "Meshes" / "Molynx-walk.kmf").write_bytes(b"")
-    (line,) = fail_lines(audit(mod2), "f")
-    assert "Molynx-walk.kmf" in line and "empty" in line
+    (meshes(mod2) / "Molynx-walk.kmf").write_bytes(b"")
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (f) Siege:") and "Molynx-walk.kmf is empty" in line
 
 
 @needs_data
+@needs_assets
+@pytest.mark.parametrize("damage", ["trailing", "truncated"])
+def test_stage2_a_mesh_that_does_not_parse_to_its_end_fails(mod2, damage):
+    """A copied file that no longer reads cleanly. A changed byte inside the vertex data is NOT
+    found: the audit has no copy of the export to compare with (its expectations are the game's
+    files and the rules, not the builder's inputs); the builder's byte copy is tested above."""
+    path = meshes(mod2) / "Molynx-angry.kmf"
+    data = path.read_bytes()
+    path.write_bytes(data + b"\0\0" if damage == "trailing" else data[:-40])
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (f) Siege:") and "Molynx-angry.kmf" in line
+
+
+@needs_data
+@needs_assets
 def test_stage2_a_slot_left_as_the_bile_demons_matches_no_stage(mod2):
-    add_placeholder_meshes(mod2, renamed_slots(mod2, "Siege"))
+    """The whole 84-byte slot restored: rule (b) names the slot and its bytes, nothing else fails."""
     bile = source_bile("Siege")
+    start = FIELDS["animWalkResource"].offset
 
     def restore(creatures):
-        creatures[-1].set_resource_name("animWalkResource", bile.resource_name("animWalkResource"))
+        creatures[-1].raw[start:start + 84] = bile.raw[start:start + 84]
         return creatures
 
     edit_creatures(mod2, "Siege", restore)
-    (line,) = fail_lines(audit(mod2), "b")
-    assert "animWalkResource" in line
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (b) Siege:")
+    assert f"animWalkResource is left as the Bile Demon's (record 47 bytes {start}-{start + 83})" in line
+    assert line.count("animWalkResource") == 1, "named once, not again as a wrong name or tail"
 
 
 @needs_data
+@needs_assets
 def test_stage2_a_slot_not_named_molynx_fails(mod2):
-    add_placeholder_meshes(mod2, renamed_slots(mod2, "Siege") | {"Other-walk"})
+    """animWalkResource renamed Other-walk, with a matching, valid Other-walk.kmf delivered."""
+    shutil.copyfile(meshes(mod2) / "Molynx-walk.kmf", meshes(mod2) / "Other-walk.kmf")
+    rewrite_kmf(meshes(mod2) / "Other-walk.kmf", lambda m: setattr(m.anim, "name", "Other-walk"))
+    start = FIELDS["animWalkResource"].offset
 
     def rename(creatures):
         creatures[-1].set_resource_name("animWalkResource", "Other-walk")
         return creatures
 
     edit_creatures(mod2, "Siege", rename)
-    (line,) = fail_lines(audit(mod2), "b")
-    assert "animWalkResource" in line and "Molynx-" in line
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (b) Siege:")
+    assert f"animWalkResource name (record 47 bytes {start}-{start + 63})" in line and "Molynx-" in line
 
 
 @needs_data
+@needs_assets
 def test_stage2_a_changed_tail_of_a_slot_fails(mod2):
-    """Only the 64-byte name of a slot may change; its other 20 bytes stay the Bile Demon's."""
-    add_placeholder_meshes(mod2, renamed_slots(mod2, "Siege"))
-
+    """The 20 bytes after a renamed slot's name follow the stage-2 rule; one changed byte there (in
+    the frame count) is named with the slot and its byte range."""
     def tweak(creatures):
         creatures[-1].raw[FIELDS["animWalkResource"].offset + 70] ^= 0x01
         return creatures
 
     edit_creatures(mod2, "Siege", tweak)
-    (line,) = fail_lines(audit(mod2), "b")
-    assert "animWalkResource" in line
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (b) Siege:")
+    assert f"animWalkResource frames ({tail_range('animWalkResource', 'frames')}) is " in line
+    assert "expected 46" in line
 
 
 @needs_data
+@needs_assets
+@pytest.mark.parametrize("slot,frames", [("animWalkResource", 47), ("animIdle1Resource", 60),
+                                         ("animSleepResource", 135)])
+def test_stage2_a_frame_count_off_by_one_fails(mod2, slot, frames):
+    set_tail(mod2, "Siege", slot, "frames", frames)
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (b) Siege:")
+    assert f"{slot} frames ({tail_range(slot, 'frames')}) is {frames}," in line
+
+
+@needs_data
+@needs_assets
+def test_stage2_start_and_end_flag_bits_left_set_fail(mod2):
+    set_tail(mod2, "Siege", "animWalkResource", "flags", 0x219)  # the Bile Demon's own Siege flags
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (b) Siege:")
+    assert f"animWalkResource flags ({tail_range('animWalkResource', 'flags')}) is 0x219, " \
+           "expected 0x201" in line
+    assert "0x8 and 0x10" in line
+
+
+@needs_data
+@needs_assets
+@pytest.mark.parametrize("slot", ["animStunnedPoseResource", "animElecResource"])
+def test_stage2_a_mesh_slot_left_as_type_5_fails(mod2, slot):
+    set_tail(mod2, "Siege", slot, "type", 5)
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (b) Siege:")
+    assert f"{slot} type ({tail_range(slot, 'type')}) is 5, expected 6" in line
+
+
+@needs_data
+@needs_assets
+def test_stage2_a_wrong_fps_fails(mod2):
+    set_tail(mod2, "Siege", "animSleepResource", "fps", 15)  # the Bile Demon's sleep speed
+    (line,) = fail_lines(audit(mod2))
+    assert f"animSleepResource fps ({tail_range('animSleepResource', 'fps')}) is 15, expected 30" in line
+
+
+@needs_data
+@needs_assets
+def test_stage2_a_mesh_whose_inside_name_differs_fails(mod2):
+    rewrite_kmf(meshes(mod2) / "Molynx-stand.kmf", lambda m: setattr(m.anim, "name", "Molynx-Stand"))
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (f) Siege:")
+    assert "Molynx-stand.kmf calls itself 'Molynx-Stand' inside" in line
+
+
+@needs_data
+@needs_assets
+def test_stage2_a_triangle_index_out_of_range_fails(mod2):
+    def damage(model):
+        sprite = model.mesh.sprites[-1]
+        a, b, _c = sprite.triangles[0][0]
+        sprite.triangles[0][0] = (a, b, len(sprite.vertices))
+    rewrite_kmf(meshes(mod2) / "Molynx-DiePose.kmf", damage)
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (f) Siege:") and "Molynx-DiePose.kmf" in line
+    assert "triangle index outside" in line
+
+
+@needs_data
+@needs_assets
+def test_stage2_a_missing_texture_fails(mod2):
+    (textures(mod2) / "Molynx_Mace.png").unlink()
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (f) Siege:") and "Data/EngineTextures/Molynx_Mace.png is missing" in line
+
+
+@needs_data
+@needs_assets
+def test_stage2_a_texture_named_in_another_case_fails(mod2):
+    (textures(mod2) / "Molynx_Mace.png").rename(textures(mod2) / "molynx_mace.png")
+    report = audit(mod2)
+    (f,) = fail_lines(report, "f")
+    assert "Molynx_Mace.png is missing" in f and "other case" in f
+    (g,) = fail_lines(report, "g")
+    assert "molynx_mace.png" in g
+
+
+@needs_data
+@needs_assets
+@pytest.mark.parametrize("size", [(256, 256), (128, 100)])
+def test_stage2_a_texture_of_the_wrong_size_fails(mod2, size):
+    Image.new("RGB", size).save(textures(mod2) / "Molynx_Body.png")
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (f) Siege:") and f"Molynx_Body.png is {size[0]}x{size[1]}" in line
+
+
+@needs_data
+@needs_assets
+def test_stage2_a_texture_that_is_not_a_png_fails(mod2):
+    (textures(mod2) / "Molynx_Body.png").write_bytes(b"not a picture")
+    (line,) = fail_lines(audit(mod2))
+    assert "Molynx_Body.png is not a PNG file" in line
+
+
+@needs_data
+@needs_assets
+def test_stage2_an_extra_unreferenced_mesh_fails_rule_g(mod2, assets_dir):
+    shutil.copyfile(assets_dir / "Molynx-running.kmf", meshes(mod2) / "Molynx-running.kmf")
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (g) folder:") and "Data/Meshes/Molynx-running.kmf" in line
+
+
+@needs_data
+@needs_assets
+def test_stage2_an_extra_unreferenced_texture_fails_rule_g(mod2):
+    Image.new("RGB", (64, 64)).save(textures(mod2) / "Molynx_Spare.png")
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (g) folder:") and "Molynx_Spare.png" in line
+
+
+@needs_data
+@needs_assets
+def test_stage2_a_subfolder_of_engine_textures_fails_rule_g(mod2):
+    (textures(mod2) / "GUI").mkdir()
+    (line,) = fail_lines(audit(mod2))
+    assert line.startswith("FAIL (g) folder:") and "Data/EngineTextures/GUI" in line
+
+
+@needs_data
+@needs_assets
+def test_stage2_a_flipped_loop_flag_fails_rule_f_and_the_frame_count(mod2):
+    """praying must loop like Bile_Demon-Pray. Opened, the file no longer matches the Bile Demon's
+    loop flag (rule f), and its frame count no longer gives the record's (121, not 121 - 1: rule b)."""
+    rewrite_kmf(meshes(mod2) / "Molynx-praying.kmf", lambda m: setattr(m.anim, "wrap", False))
+    report = audit(mod2)
+    (f,) = fail_lines(report, "f")
+    assert "animPrayResource: Molynx-praying does not loop, but the Bile Demon's Bile_Demon-Pray loops" in f
+    (b,) = fail_lines(report, "b")
+    assert f"animPrayResource frames ({tail_range('animPrayResource', 'frames')}) is 120, expected 121" in b
+    assert len(fail_lines(report)) == 2
+
+
+@needs_data
+@needs_assets
+def test_stage2_a_looped_sleeping_file_is_no_exception_but_breaks_its_frame_count(mod2):
+    """The exception covers only a non-looping sleeping file; looped, it matches the Bile Demon's
+    flag (no exception listed) and the record's 136 is then one too many (rule b)."""
+    rewrite_kmf(meshes(mod2) / "Molynx-sleeping.kmf", lambda m: setattr(m.anim, "wrap", True))
+    report = audit(mod2)
+    (b,) = fail_lines(report)
+    assert b.startswith("FAIL (b) Siege:") and "animSleepResource frames" in b and "expected 135" in b
+    (f,) = pass_lines(report, "f", "Siege")
+    assert "exception" not in f
+
+
+@needs_data
+@needs_assets
+def test_stage2_a_mesh_slot_animation_that_does_not_loop_fails(mod2):
+    """elec replaces the Bile Demon's static Bil-Elec, which never ends: its animation must loop."""
+    rewrite_kmf(meshes(mod2) / "Molynx-getting_hit_loop.kmf", lambda m: setattr(m.anim, "wrap", False))
+    report = audit(mod2)
+    (f,) = fail_lines(report, "f")
+    assert "animElecResource: Molynx-getting_hit_loop does not loop" in f and "Bil-Elec" in f
+
+
+@needs_data
+@needs_assets
 def test_stage2_empty_bile_slots_stay_empty_and_other_fields_are_unchanged(mod2):
     molynx, bile = record_47(mod2, "Siege"), source_bile("Siege")
     assert molynx.resource_name("animRunResource") == "" == bile.resource_name("animRunResource")
@@ -894,23 +1377,24 @@ def test_stage2_empty_bile_slots_stay_empty_and_other_fields_are_unchanged(mod2)
                for s in ANIM_SLOTS if s != "unk_1" and bile.resource_name(s))
 
 
-# ---- audit: stage 3 is fail-closed until its icons and textures can be checked -------------------
+# ---- audit: stage 3 is fail-closed until its icons and texts can be checked (Task 10) -----------
 
 @needs_data
-@pytest.mark.xfail(strict=True, reason="8b-2: audit stage-2 expectations, remove marker")
-def test_stage3_fields_are_recognised_but_icons_and_textures_are_not_yet_checked(tmp_path):
-    out = build_mod(3, tmp_path, "Molynx_full", maps=["Siege"], text_ids=TEXT_IDS, **FILES)
-    add_placeholder_meshes(out, renamed_slots(out, "Siege"))
+@needs_assets
+def test_stage3_fields_are_recognised_but_icons_and_textures_are_not_yet_checked(tmp_path, assets_dir):
+    out = build_mod(3, tmp_path, "Molynx_full", maps=["Siege"], text_ids=TEXT_IDS, assets_dir=assets_dir)
     report = audit(out)
     assert any("stage 3" in line for line in report.lines if line.startswith("PASS (b)"))
     assert not report.ok
     (line,) = fail_lines(report)
     assert line.startswith("FAIL (f)") and "icon" in line and "not checked" in line
+    assert "stage 3 is not audited yet" in line
 
 
 @needs_data
-def test_stage3_text_ids_are_part_of_the_record(tmp_path):
-    out = build_mod(3, tmp_path, "Molynx_full", maps=[SECOND], text_ids=TEXT_IDS, **FILES)
+@needs_assets
+def test_stage3_text_ids_are_part_of_the_record(tmp_path, assets_dir):
+    out = build_mod(3, tmp_path, "Molynx_full", maps=[SECOND], text_ids=TEXT_IDS, assets_dir=assets_dir)
     molynx = record_47(out, SECOND)
     assert molynx.get("nameStringId") == 3001 and molynx.get("weaknessStringId") == 3005
     assert molynx.resource_name("icon1Resource") == r"gui\creatures\evil\molynx"

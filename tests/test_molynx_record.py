@@ -519,6 +519,17 @@ def test_anim_info_that_contradicts_the_plan_is_refused(bile, change):
 
 
 @needs_data
+@pytest.mark.parametrize("bad", [
+    [("stand", 61)],                                       # not a mapping at all
+    {**ANIM_INFO, "stand": (61, 30, False)},               # an entry that is not a mapping
+    {**ANIM_INFO, "stand": None},
+])
+def test_anim_info_that_is_not_a_mapping_is_a_value_error(bile, bad):
+    with pytest.raises(ValueError, match="anim_info"):
+        build(bile, 2, anim_info=bad)
+
+
+@needs_data
 def test_frames_follow_the_files_loop_flag(bile):
     info = {**ANIM_INFO, "walk": {"frames": 100, "fps": 30, "wrap": True},
             "stand": {"frames": 100, "fps": 30, "wrap": False}}
