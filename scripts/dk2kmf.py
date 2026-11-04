@@ -10,6 +10,11 @@ MESH / ANIM / GROP. Strings are null-terminated.
 Animations are NOT skeletal. Each vertex has a list of keyframe positions packed as 10 bits per
 axis; per-128-frame block tables (ITAB, VGEO) pick the keyframe pair and the position is
 interpolated between them.
+
+A parse keeps every field scripts/dk2kmf_write.py needs to write the file back byte for byte
+(raw CTRL entries, per-sprite mmFactor). What it does not store is fixed or derived in all 2015
+game files: chunk sizes (each counts its 8-byte header), the KMSH HEAD constant 1, the LOD count
+(the length of every sprite's `triangles`) and the two unused top bits of each GEOM keyframe (0).
 """
 import struct
 import sys
@@ -80,6 +85,7 @@ class Sprite:
     material: int
     triangles: list[list[tuple[int, int, int]]]
     vertices: list[Vertex]
+    mm_factor: float = 0.0  # SPHD float after the vertex count (per-sprite, varies in game files)
 
 
 @dataclass
@@ -89,6 +95,7 @@ class Mesh:
     scale: float
     sprites: list[Sprite]
     geometry: list[tuple[float, float, float]]
+    controls: bytes = b""   # raw CTRL entries (count * 8 bytes, the count itself is implied)
 
 
 @dataclass
@@ -105,6 +112,7 @@ class Anim:
     geom_xyz: np.ndarray    # shape (n + 1, 3), already multiplied by scale
     geom_frame_base: np.ndarray  # shape (n + 1,)
     offsets: np.ndarray     # shape (index_count, frame_count), uint8
+    controls: bytes = b""   # raw CTRL entries (count pairs of u32; see dk2kmf_write)
 
 
 @dataclass
@@ -118,10 +126,12 @@ class Kmf:
     end: int = 0  # byte position where parsing stopped
 
 
-def _controls(r: _Reader) -> None:
+def _controls(r: _Reader) -> bytes:
     r.skip_size()
     count = r.u32()
+    raw = r.data[r.pos:r.pos + count * 8]
     r.pos += count * 8
+    return raw
 
 
 def _sprite_headers(r: _Reader, count: int, lods: int):
@@ -131,8 +141,8 @@ def _sprite_headers(r: _Reader, count: int, lods: int):
         r.skip_size()
         tri_counts = [r.u32() for _ in range(lods)]
         vert_count = r.u32()
-        r.pos += 4  # mmFactor
-        heads.append((tri_counts, vert_count))
+        mm_factor = r.f32()
+        heads.append((tri_counts, vert_count, mm_factor))
     return heads
 
 
@@ -155,12 +165,12 @@ def _parse_mesh(r: _Reader) -> Mesh:
     scale = r.f32()
     lods = r.u32()
     r.tag("CTRL")
-    _controls(r)
+    controls = _controls(r)
     r.tag("SPRS")
     r.skip_size()
     heads = _sprite_headers(r, sprs_count, lods)
     sprites = []
-    for tri_counts, vert_count in heads:
+    for tri_counts, vert_count, mm_factor in heads:
         r.tag("SPRS")
         r.skip_size()
         material = r.u32()
@@ -171,11 +181,11 @@ def _parse_mesh(r: _Reader) -> Mesh:
             normal = struct.unpack_from("<3f", r.data, r.pos + 6)
             r.pos += 18
             verts.append(Vertex((u, v), normal, geom=geom))
-        sprites.append(Sprite(material, tris, verts))
+        sprites.append(Sprite(material, tris, verts, mm_factor))
     r.tag("GEOM")
     r.skip_size()
     geometry = [r.vec3() for _ in range(geom_count)]
-    return Mesh(name, pos, scale, sprites, geometry)
+    return Mesh(name, pos, scale, sprites, geometry, controls)
 
 
 def _parse_anim(r: _Reader) -> Anim:
@@ -189,12 +199,12 @@ def _parse_anim(r: _Reader) -> Anim:
     cube_scale, scale = r.f32(), r.f32()
     lods = r.u32()
     r.tag("CTRL")
-    _controls(r)
+    controls = _controls(r)
     r.tag("SPRS")
     r.skip_size()
     heads = _sprite_headers(r, sprs_count, lods)
     sprites = []
-    for tri_counts, vert_count in heads:
+    for tri_counts, vert_count, mm_factor in heads:
         r.tag("SPRS")
         r.skip_size()
         material = r.u32()
@@ -210,7 +220,7 @@ def _parse_anim(r: _Reader) -> Anim:
             (itab_index,) = struct.unpack_from("<H", r.data, r.pos + 16)
             r.pos += 18
             verts.append(Vertex((u, v), normal, itab_index=itab_index))
-        sprites.append(Sprite(material, tris, verts))
+        sprites.append(Sprite(material, tris, verts, mm_factor))
     r.tag("ITAB")
     r.skip_size()
     blocks = (frame_count - 1) // 128 + 1
@@ -234,7 +244,7 @@ def _parse_anim(r: _Reader) -> Anim:
         index_count, frame_count)
     r.pos += index_count * frame_count
     return Anim(name, frame_count, index_count, pos, cube_scale, scale, wrap, sprites,
-                itab, xyz, frame_base, offsets)
+                itab, xyz, frame_base, offsets, controls)
 
 
 def parse_kmf(data: bytes) -> Kmf:
