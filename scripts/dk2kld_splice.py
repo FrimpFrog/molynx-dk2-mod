@@ -26,10 +26,55 @@ record has ID 47 at index 44. The loader inserts records into a table sorted by 
 (spec section "The loader is count-driven", a static reading not yet run), so the ID gap is
 expected to be harmless, but it is untested in the game.
 
+Things. A `<map>Things.kld` lists the objects placed on the map. Layout taken from the community
+template ufdada/dk2-tools Formats/Level/things_struct.bt (with kwd_struct.bt) and checked on all 345
+`*Things.kld` files of MAPS_DIR (283) and QUUZ_MAPS_DIR (62):
+- The file is the same block container that `read_blocks` handles, holding exactly one block, the
+  Things block (signature 0xBE, check words 0xBF and 0xC0 in every file). Its item count is the
+  number of things.
+- The content is `item count` variable-size records, back to back: u32 thing type, u32 data size,
+  then `data size` bytes. In every file the records tile the content exactly and their number is
+  the item count. Every type has one data size in all files: 194 Object 24, 195 Trap 16, 196 Door
+  20, 197 Action point 56, 198 Neutral creature 24, 199 Good (hero) creature 32, 200 Creature 28,
+  201 Hero party 555, 202 Dead body 16, 203 Effect generator 36, 204 Room 20 (205 Camera unused).
+- Creature things are the records of type 200 (a keeper's creature) and only those: hero creatures
+  (199), hero-party members (inside 201 records), neutral creatures (198) and dead bodies (202) are
+  other types and are never returned. A type-200 record is 36 bytes; from its first byte: +0 u32
+  type 200, +4 u32 28, +8 i32 x, +12 i32 y, +16 i32 z, +20 u16 gold held, +22 u8 level, +23 u8
+  behaviour flags, +24 i32 initial health, +28 i32 objective target player, +32 u16 trigger id,
+  +34 u8 creatureId, +35 u8 owning player. `ThingRef.offset` is the byte offset in the file of
+  the record's first byte (its type word), so the creature id is the one byte at offset + 34 and
+  the owner the one byte at offset + 35.
+- Checked: all 3282 type-200 records have data size 28, creatureId in 1..45 (so within 1..46) and
+  owner in 3..7. Player ids come from the maps' `*Players.kld`: in all 345 of them player 1 is named
+  "Good Player", 2 "Neutral Player", and 3..7 are the keepers ("Keeper 1".."Keeper 5" or custom
+  names). A "real player" owner is therefore a keeper slot 3..7 (`KEEPER_PLAYERS`); 0, 1 (Good), 2
+  (Neutral) and anything above 7 are not. The Bile Demon is creatureId 3 (the Globals record named
+  "Bile Demon", see `molynx_for_map`), and type-200 Bile Demons exist in the maps the test map is
+  chosen from.
+
+The test map (`pick_test_map`): the smallest map, by the total bytes of its seven files (`<name>.kwd`
+and `<name>` + Map, Things, Players, Triggers, Variables, Globals `.kld`) in `map_source_dir(name)`,
+ties broken by name, whose Globals holds exactly 46 records of 5537 bytes (so Molynx becomes record
+index 46 with creatureId 47 == index + 1) and whose Things holds a type-200 Bile Demon owned by a
+keeper. Maps whose name (`<name>.kwd`) is in both folders are preferred when any qualifies. The
+user's game loads QUUZ_MAPS_DIR first, so a map's files are read from there when all seven are
+present, else from MAPS_DIR. File names are matched exactly (case-sensitive): the one mixed-case
+map of MAPS_DIR (level4.kwd with Level4Globals.kld) is only seen through its Quuz copy "Level4".
+43 `.kwd` files of MAPS_DIR have no Globals file of the same spelling (level4 among them); 36 of
+those maps have one in QUUZ_MAPS_DIR. The result is "Siege" (in QUUZ_MAPS_DIR), a multiplayer map: the
+level flags of the Quuz Siege.kwd (u16 at byte 56 + 25484) set IS_MULTIPLAYER_LEVEL but not
+IS_SKIRMISH_LEVEL, while the editor-folder Siege.kwd sets both.
+
 LICENCE: GPL-3.0.
 """
-from scripts.dk2kwd_blocks import Block, read_blocks, write_blocks
+import struct
+from dataclasses import dataclass
+from pathlib import Path
+
+from scripts.dk2kwd_blocks import HEADER_SIZE, Block, read_blocks, rebuilt_block, write_blocks
 from scripts.dk2kwd_creatures import Creature, creatures_block, read_creatures
+from scripts.dk2paths import MAPS_DIR, QUUZ_MAPS_DIR
 from scripts.molynx_record import build_molynx
 
 CREATURES = 0xAA
@@ -37,7 +82,7 @@ BILE_DEMON_NAME = "Bile Demon"
 BILE_DEMON_ID = 3
 
 
-def _creatures_block(blocks: list[Block]) -> int:
+def _creatures_index(blocks: list[Block]) -> int:
     """Index of the one Creatures block; ValueError if there is none or several."""
     found = [i for i, block in enumerate(blocks) if block.signature == CREATURES]
     if len(found) != 1:
@@ -62,7 +107,7 @@ def splice_creatures(globals_kld: bytes, extra: list[Creature]) -> bytes:
     if not extra:
         raise ValueError("no creature records to splice")
     blocks = read_blocks(globals_kld)
-    at = _creatures_block(blocks)
+    at = _creatures_index(blocks)
     existing = _records(blocks[at])
 
     size = len(existing[0].raw)
@@ -94,7 +139,7 @@ def molynx_for_map(globals_kld: bytes, stage: int, text_ids: dict[str, int] | No
     block (or several), no creature named "Bile Demon" with creatureId 3 (or several), or bad input.
     """
     blocks = read_blocks(globals_kld)
-    creatures = _records(blocks[_creatures_block(blocks)])
+    creatures = _records(blocks[_creatures_index(blocks)])
     biles = [c for c in creatures
              if c.get("creatureId") == BILE_DEMON_ID and c.get("name") == BILE_DEMON_NAME]
     if len(biles) != 1:
@@ -102,3 +147,142 @@ def molynx_for_map(globals_kld: bytes, stage: int, text_ids: dict[str, int] | No
                          f"map, found {len(biles)}")
     order = max(c.get("orderInEditor") for c in creatures) + 1
     return build_molynx(biles[0], stage, order, text_ids)
+
+
+# ---- Things -------------------------------------------------------------------------------------
+
+THINGS = 0xBE
+CREATURE_THING = 200
+_CREATURE_DATA_SIZE = 28
+_CREATURE_ID_AT, _PLAYER_AT = 34, 35  # from the first byte of a type-200 record
+KEEPER_PLAYERS = range(3, 8)
+MAP_SUFFIXES = (".kwd", "Map.kld", "Things.kld", "Players.kld", "Triggers.kld", "Variables.kld",
+                "Globals.kld")
+
+
+@dataclass(frozen=True)
+class Thing:
+    type: int
+    data: bytes
+
+    @property
+    def raw(self) -> bytes:
+        """The record as stored: u32 type, u32 data size, data."""
+        return struct.pack("<II", self.type, len(self.data)) + self.data
+
+
+@dataclass(frozen=True)
+class ThingRef:
+    """A creature thing: `offset` is the file offset of its record's first byte (see module doc)."""
+    offset: int
+    creature_id: int
+    player: int
+
+
+def read_things(things_kld: bytes) -> tuple[Block, list[Thing]]:
+    """The Things block (header kept as is) and its records; ValueError if the file is not exactly
+    one Things block whose records tile its content and number its item count."""
+    blocks = read_blocks(things_kld)
+    if len(blocks) != 1 or blocks[0].signature != THINGS:
+        raise ValueError(f"expected one Things block (0x{THINGS:X}), found signatures "
+                         f"{[hex(b.signature) for b in blocks]}")
+    (block,) = blocks
+    content, pos, things = block.content, 0, []
+    while pos < len(content):
+        if len(content) - pos < 8:
+            raise ValueError(f"truncated thing record at content byte {pos}")
+        kind, size = struct.unpack_from("<II", content, pos)
+        if pos + 8 + size > len(content):
+            raise ValueError(f"thing record of type {kind} at content byte {pos} overruns the block")
+        things.append(Thing(kind, content[pos + 8:pos + 8 + size]))
+        pos += 8 + size
+    if len(things) != block.item_count:
+        raise ValueError(f"the Things block says {block.item_count} things but holds {len(things)}")
+    return block, things
+
+
+def write_things(like: Block, things: list[Thing]) -> bytes:
+    """A Things file holding `things`; header sizes and count are recomputed, the rest copied from `like`."""
+    return write_blocks([rebuilt_block(like, [t.raw for t in things])])
+
+
+def find_creature_things(things_kld: bytes) -> list[ThingRef]:
+    """The creature things (type 200) of a Things file, in file order; ValueError if one is not 28 bytes."""
+    _block, things = read_things(things_kld)
+    refs, offset = [], HEADER_SIZE  # one block, so the records start right after its header
+    for thing in things:
+        if thing.type == CREATURE_THING:
+            if len(thing.data) != _CREATURE_DATA_SIZE:
+                raise ValueError(f"creature thing at byte {offset} has {len(thing.data)} data bytes, "
+                                 f"not {_CREATURE_DATA_SIZE}")
+            refs.append(ThingRef(offset, things_kld[offset + _CREATURE_ID_AT],
+                                 things_kld[offset + _PLAYER_AT]))
+        offset += len(thing.raw)
+    return refs
+
+
+def retarget_creature_thing(things_kld: bytes, index: int, new_creature_id: int) -> bytes:
+    """`things_kld` with the creature id byte of its `index`-th creature thing set to `new_creature_id`.
+
+    No other byte changes (the record keeps its size). ValueError if `index` is not in
+    0..len(find_creature_things) - 1 or `new_creature_id` is not in 1..255 (0 is no creature).
+    """
+    refs = find_creature_things(things_kld)
+    if not 0 <= index < len(refs):
+        raise ValueError(f"creature thing index {index} is not in 0..{len(refs) - 1}")
+    if not 1 <= new_creature_id <= 255:
+        raise ValueError(f"creatureId {new_creature_id} does not fit the one-byte field (1..255)")
+    out = bytearray(things_kld)
+    out[refs[index].offset + _CREATURE_ID_AT] = new_creature_id
+    return bytes(out)
+
+
+def first_player_bile_thing(things_kld: bytes) -> int:
+    """Index into `find_creature_things` of the first Bile Demon owned by a keeper; ValueError if none."""
+    for i, ref in enumerate(find_creature_things(things_kld)):
+        if ref.creature_id == BILE_DEMON_ID and ref.player in KEEPER_PLAYERS:
+            return i
+    raise ValueError("no Bile Demon creature thing owned by a keeper (player 3..7)")
+
+
+# ---- the test map -------------------------------------------------------------------------------
+
+def _complete(folder: Path, name: str) -> bool:
+    return all((folder / (name + suffix)).is_file() for suffix in MAP_SUFFIXES)
+
+
+def map_source_dir(name: str) -> Path:
+    """QUUZ_MAPS_DIR if all seven files of map `name` are there (the game loads it first), else
+    MAPS_DIR if they are there; FileNotFoundError otherwise."""
+    for folder in (QUUZ_MAPS_DIR, MAPS_DIR):
+        if _complete(folder, name):
+            return folder
+    raise FileNotFoundError(f"map {name!r} does not have all seven files in {QUUZ_MAPS_DIR} or {MAPS_DIR}")
+
+
+def _globals_shape(globals_kld: bytes) -> tuple[int, int]:
+    """(record count, record size) of a Globals file's Creatures block."""
+    blocks = read_blocks(globals_kld)
+    block = blocks[_creatures_index(blocks)]
+    return block.item_count, len(_records(block)[0].raw)
+
+
+def pick_test_map() -> str:
+    """The map Molynx is tested on (see the module docstring for the criteria); ValueError if none."""
+    names = {p.stem for folder in (QUUZ_MAPS_DIR, MAPS_DIR) for p in folder.glob("*.kwd")
+             if _complete(folder, p.stem)}
+    candidates = []
+    for name in sorted(names):
+        folder = map_source_dir(name)
+        if _globals_shape((folder / (name + "Globals.kld")).read_bytes()) != (46, 5537):
+            continue
+        try:
+            first_player_bile_thing((folder / (name + "Things.kld")).read_bytes())
+        except ValueError:
+            continue
+        size = sum((folder / (name + suffix)).stat().st_size for suffix in MAP_SUFFIXES)
+        in_both = all((d / (name + ".kwd")).is_file() for d in (QUUZ_MAPS_DIR, MAPS_DIR))
+        candidates.append((not in_both, size, name))
+    if not candidates:
+        raise ValueError("no map meets the test-map criteria")
+    return min(candidates)[2]
