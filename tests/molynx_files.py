@@ -20,8 +20,8 @@ FILE_WRAPS = {
 }
 ANIM_INFO = {stem: {"frames": frames, "fps": 30, "wrap": wrap} for stem, frames, wrap in [
     ("stand", 61, False), ("walk", 47, True), ("walk_once", 47, False), ("attack", 41, False),
-    ("die", 31, False), ("fidgeting", 63, False), ("running", 31, True), ("eating", 83, False),
-    ("praying", 121, True), ("happy", 59, False), ("angry", 23, False), ("celebrating", 94, False),
+    ("die", 31, False), ("fidgeting", 95, False), ("running", 31, True), ("eating", 83, False),
+    ("praying", 121, True), ("happy", 59, False), ("angry", 23, False), ("celebrating", 97, False),
     ("victory_celebration", 246, False), ("getting_hit", 17, False),
     ("being_slapped", 35, False), ("staggering", 96, True),
     ("waking_up", 46, False), ("knockback", 61, False), ("sleeping", 136, False),

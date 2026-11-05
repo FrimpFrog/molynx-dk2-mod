@@ -250,15 +250,20 @@ def _keyframes(deq: np.ndarray, want: np.ndarray, tol: float, reduce: bool) -> l
 
 
 def encode_anim(name: str, sprites: list[Sprite], frames: list[list[np.ndarray]], wrap: bool,
-                controls: bytes, *, reduce: bool = True) -> Anim:
+                controls: bytes, *, reduce: bool = True, tolerance: float = 1.0) -> Anim:
     """Encode `frames[f][s]` ((n_s, 3) positions of sprite s at frame f) as a game animation.
 
     Vertices that share an `itab_index` must have the same positions (they become one row).
     `pos`, `scale` and `cube_scale` are chosen from the data as the game does; every decoded
     coordinate is within one quantisation step (scale / 511) of the input. With `reduce`
     (default) each row keeps only the keyframes it needs per 128-frame block; with
-    reduce=False every frame is a keyframe, like the game's fully sampled files. A `wrap`
-    animation must end on a copy of its first frame, as all of the game's looping ones do."""
+    reduce=False every frame is a keyframe, like the game's fully sampled files. `tolerance` (in
+    quantisation steps, at least 1) widens the reduction: a reduced coordinate is then within
+    `tolerance` steps of the input between keyframes (keyframes themselves stay within half a
+    step). A `wrap` animation must end on a copy of its first frame, as all of the game's looping
+    ones do."""
+    if not tolerance >= 1.0:
+        raise ValueError(f"tolerance {tolerance} is below one quantisation step")
     if len(controls) % 8:
         raise ValueError(f"controls must be whole (u32, u32) pairs, got {len(controls)} bytes")
     tracks = _row_tracks(sprites, frames)
@@ -282,7 +287,7 @@ def encode_anim(name: str, sprites: list[Sprite], frames: list[list[np.ndarray]]
         f1 = min(count - 1, f0 + _BLOCK)  # inclusive: non-last blocks end on the next frame 0
         local = np.arange(min(_BLOCK, count - f0))
         for r in range(rows):
-            keys = _keyframes(deq[r, f0:f1 + 1], tracks[r, f0:f1 + 1], step, reduce)
+            keys = _keyframes(deq[r, f0:f1 + 1], tracks[r, f0:f1 + 1], step * tolerance, reduce)
             itab[k, r] = total
             total += len(keys)
             xyz.append(deq[r, f0 + np.array(keys)])

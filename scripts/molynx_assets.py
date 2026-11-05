@@ -165,12 +165,38 @@ MAX_SPRITE_TRIANGLES = 255
 LOOP_GAP = 0.3  # a loop whose last frame is this close to frame 0 (x the median step) is closed
 MAX_TEXTURE = 128
 MM_PER_RATIO = 2.33
+# The game's largest animation (Mis-Idle1) has 34,816 keyframe positions. An animation that would
+# have more at the default tolerance (one quantisation step) is reduced with the smallest of
+# KEY_TOLERANCES (in steps) that keeps it within that; one that none brings within it keeps one
+# step (only victory_celebration, which no slot ships). 2.5 steps of the redesign's celebrating
+# (the Troll dance, the most) is about 0.004 model units, half a percent of his height.
+GAME_MAX_KEYS = 34_816
+KEY_TOLERANCES = (1.0, 1.5, 2.0, 2.5, 3.0)
 BODY_TEXTURE, MACE_TEXTURE = "Molynx_Body", "Molynx_Mace"
-TEXTURE_NAMES = {"custom_character/body": BODY_TEXTURE, "custom_character/mace": MACE_TEXTURE}
-PART_NAMES = {BODY_TEXTURE: "Body", MACE_TEXTURE: "Mace"}
+HEAD_TEXTURE, NECK_TEXTURE = "Molynx_Head", "Molynx_Neck"          # the redesign's Golem head and its band
+TEXTURE_NAMES = {"custom_character/body": BODY_TEXTURE, "custom_character/mace": MACE_TEXTURE,
+                 "custom_character/golem_head": HEAD_TEXTURE, "custom_character/head_neck": NECK_TEXTURE}
+PART_NAMES = {BODY_TEXTURE: "Body", MACE_TEXTURE: "Mace", HEAD_TEXTURE: "Head", NECK_TEXTURE: "Neck"}
+# (width, height) of each game texture: powers of two up to MAX_TEXTURE, all sizes the game's own
+# cache uses (128x128: 629 textures, 128x32: 10). The neck band is a long strip (685 x 103 px).
+TEXTURE_SIZES = {BODY_TEXTURE: (128, 128), MACE_TEXTURE: (128, 128), HEAD_TEXTURE: (128, 128),
+                 NECK_TEXTURE: (128, 32)}
+# Textures cut to the part of the image their part's UVs use (with UV_MARGIN round it) before they
+# are scaled to the game size: the Golem face uses only a third by a half of its 512 px image.
+CROP_TO_UV = (HEAD_TEXTURE,)
+UV_MARGIN = 0.02
+# The redesign is as tall as the Horned Reaper (the top of his head level with the Reaper's skull,
+# as approved in the design scenes): scale 0.18 = 1.38 x the Bile Demon's idle1 height over his
+# stand frame 0 height (the top of the mace, the same as before the redesign).
+DESIGN_HEIGHT_RATIO = 1.38
 POSE_SOURCES = {"PoseFrame": ("stand", 0), "DiePose": ("die", -1), "DraggedPose": ("being_picked_up", 0),
                 "StunnedPose": ("staggering", 48), "ElecPose": ("getting_hit", 5)}  # see the docstring
 FRAME = 7                       # the game portraits' frame, pixels on every side
+# The redesign's portrait pictures: renders of the design (stand frame 0, turned 15 degrees, on the
+# blue of the user's picture, 10/23/89), made by data/molynx_design/painting_tools/portrait_render.py.
+_DESIGN_DIR = Path(__file__).resolve().parent.parent / "data" / "molynx_design"
+DESIGN_PORTRAIT = _DESIGN_DIR / "portrait_bg_A2.png"      # upper body, head centred: the -bg panel
+DESIGN_ICON = _DESIGN_DIR / "portrait_icon_A2.png"        # the face with the horns: the icon
 FACE_BOX = (0.503, 0.355, 0.508)  # the face square in the user's image: centre x, y and side, as
                                   # fractions of the image width, height and width
 PREVIEW_SCALE = 4
@@ -233,10 +259,14 @@ def _cache_image(cache, name: str) -> Image.Image:
     return cache.get(lowered[f"{name}MM0".lower()]).convert("RGB")
 
 
-def build_source(unit_dir: Path = BEHEMOTH_DIR, meshes_dir: Path = MESHES_DIR, cache=None):
-    """(data, textures) of the finished character, built exactly as the approved build was: the
-    MegaGlest stand / walk / attack / die plus the 21 retargeted clips, with the body triangles that
-    some clip tears into spikes left out (behemoth_rig.stretched_triangles)."""
+def build_source(unit_dir: Path = BEHEMOTH_DIR, meshes_dir: Path = MESHES_DIR, cache=None,
+                 design: bool = True):
+    """(data, textures) of the finished character: the MegaGlest stand / walk / attack / die plus
+    the 21 retargeted clips, with the body triangles that some clip tears into spikes left out
+    (behemoth_rig.stretched_triangles, measured on the original clip library). design=True (the
+    default) gives the approved redesign of scripts.molynx_design (Troll fidgeting and
+    celebrating, claw and mace-arm fixes, the Golem head, the red rock skin); design=False the
+    character as first approved (equal to the reference pickle CHARACTER_PICKLE)."""
     from scripts.behemoth_anims import build_all
     from scripts.behemoth_rig import stretched_triangles
     from scripts.custom_character import build_character
@@ -245,8 +275,15 @@ def build_source(unit_dir: Path = BEHEMOTH_DIR, meshes_dir: Path = MESHES_DIR, c
         # the donor tracks hold NaN for vertices a game file lacks; retarget's means of them warn
         warnings.simplefilter("ignore", RuntimeWarning)
         lib = build_all(Path(meshes_dir), cache, Path(unit_dir))
+    drop = stretched_triangles(Path(unit_dir), lib)
+    if design:
+        from scripts.molynx_design import design_clips
+        lib = {**lib, **design_clips(Path(meshes_dir), cache, Path(unit_dir))}
     data, textures, _ = build_character(Path(unit_dir), clips=("stand", "walk", "attack", "die"),
-                                        extra=lib, drop=stretched_triangles(Path(unit_dir), lib))
+                                        extra=lib, drop=drop)
+    if design:
+        from scripts.molynx_design import apply_design
+        data, textures = apply_design(data, textures, Path(unit_dir))
     return data, textures
 
 
@@ -281,6 +318,7 @@ class MolynxPlan:
     controls: list = field(default_factory=list)   # (sprite, vertex, id)
     materials: list = field(default_factory=list)
     mm_factors: list = field(default_factory=list)
+    crops: dict = field(default_factory=dict)      # game texture -> (u0, v0, u1, v1) of its image used
 
     def to_kmf(self, parts) -> list:
         """Character Y-up points (one array per part) -> placed KMF points."""
@@ -382,6 +420,25 @@ def _remap_controls(plan: MolynxPlan, bile_idle: Kmf, rest: list) -> list:
     return out
 
 
+def _crop_uvs(parts: list, images: dict) -> tuple[list, dict]:
+    """The parts with the UVs of each CROP_TO_UV texture's part moved into the box of its image they
+    use (their used UV range, UV_MARGIN round it, out to whole pixels of the image, within 0..1),
+    and {texture: that box}."""
+    out, crops = [], {}
+    for p in parts:
+        name = TEXTURE_NAMES[p["texture"]]
+        if name in CROP_TO_UV:
+            uv = np.asarray(p["uv"], float)
+            used = uv[np.unique(np.asarray(p["indices"], int))]
+            size = np.array(images[p["texture"]].size, float)
+            lo = np.clip(np.floor((used.min(0) - UV_MARGIN) * size) / size, 0, 1)
+            hi = np.clip(np.ceil((used.max(0) + UV_MARGIN) * size) / size, 0, 1)
+            crops[name] = (float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1]))
+            p = {**p, "uv": ((uv - lo) / (hi - lo)).astype(np.float32)}
+        out.append(p)
+    return out, crops
+
+
 def _mm_factor(points: np.ndarray, uv: np.ndarray, tris) -> float:
     t = np.asarray(tris)
     model = sum(np.linalg.norm(points[t[:, a]] - points[t[:, b]], axis=1).sum()
@@ -391,7 +448,7 @@ def _mm_factor(points: np.ndarray, uv: np.ndarray, tris) -> float:
     return float(np.float32(MM_PER_RATIO * tex / model))
 
 
-def plan_molynx(height_ratio: float = 1.15, source=None, *, unit_dir: Path = BEHEMOTH_DIR,
+def plan_molynx(height_ratio: float = DESIGN_HEIGHT_RATIO, source=None, *, unit_dir: Path = BEHEMOTH_DIR,
                 meshes_dir: Path = MESHES_DIR, editor_dir: Path = EDITOR_DIR,
                 game_dir: Path = GAME_DIR) -> MolynxPlan:
     """Everything the export writes, in KMF space, before any file is written."""
@@ -403,6 +460,7 @@ def plan_molynx(height_ratio: float = 1.15, source=None, *, unit_dir: Path = BEH
         if [p["texture"] for p in data[name]["parts"]] != [p["texture"] for p in parts] or any(
                 not np.array_equal(a["indices"], b["indices"]) for a, b in zip(data[name]["parts"], parts)):
             raise ValueError(f"clip {name} does not share the stand clip's parts")
+    parts, crops = _crop_uvs(parts, source[1])
     sprites = [lay for i, p in enumerate(parts) for lay in _split(i, p["indices"], TEXTURE_NAMES[p["texture"]])]
 
     bile = bile_demon_record(editor_dir)
@@ -410,7 +468,7 @@ def plan_molynx(height_ratio: float = 1.15, source=None, *, unit_dir: Path = BEH
     their = np.concatenate(evaluate_anim_frame(idle.anim, 0))
     target = float(their[:, 2].max() - their[:, 2].min()) * height_ratio
 
-    plan = MolynxPlan(source, height_ratio, parts, sprites, 1.0, np.zeros(3), target)
+    plan = MolynxPlan(source, height_ratio, parts, sprites, 1.0, np.zeros(3), target, crops=crops)
     raw = plan.to_sprites(plan.to_kmf(data["stand"]["frames"][0]))
     allp = np.concatenate(raw)
     plan.scale = target / float(allp[:, 2].max() - allp[:, 2].min())
@@ -548,7 +606,15 @@ def clip_kmf(plan: MolynxPlan, stem: str, reduce: bool = True, wrap: bool | None
     sprites = _sprites(plan, clip.frames[0], rows, mesh=False)
     controls = b"".join(np.array([(v << 16) | s, ident], "<u4").tobytes()
                         for s, v, ident in plan.controls)
-    anim = encode_anim(PREFIX + stem, sprites, clip.frames, clip.wrap, controls, reduce=reduce)
+    anim = None
+    for tolerance in KEY_TOLERANCES if reduce else (1.0,):
+        anim = encode_anim(PREFIX + stem, sprites, clip.frames, clip.wrap, controls, reduce=reduce,
+                           tolerance=tolerance)
+        if len(anim.geom_xyz) - 1 <= GAME_MAX_KEYS:
+            break
+    else:
+        if reduce:
+            anim = encode_anim(PREFIX + stem, sprites, clip.frames, clip.wrap, controls, reduce=True)
     return Kmf(VERSION, "anim", list(plan.materials), anim=anim)
 
 
@@ -573,11 +639,22 @@ def pose_kmf(plan: MolynxPlan, stem: str) -> Kmf:
 
 # ---------------------------------------------------------------- textures and portraits
 
-def _texture(image: Image.Image, size: int) -> Image.Image:
-    if size & (size - 1) or not 0 < size <= 256:
-        raise ValueError(f"texture size {size} is not a power of two up to 256")
+def _texture(image: Image.Image, size, crop=None) -> Image.Image:
+    """`image` (cut to `crop`, fractions (u0, v0, u1, v1), when given) at `size` (one side, or
+    (width, height)), Lanczos, RGB."""
+    w, h = (size, size) if isinstance(size, int) else size
+    for n in (w, h):
+        if n & (n - 1) or not 0 < n <= 256:
+            raise ValueError(f"texture size {n} is not a power of two up to 256")
     image = image.convert("RGB")
-    return image if image.size == (size, size) else image.resize((size, size), Image.LANCZOS)
+    if crop is not None:
+        W, H = image.size
+        u0, v0, u1, v1 = crop
+        box = (round(u0 * W), round(v0 * H), round(u1 * W), round(v1 * H))
+        if any(abs(b - c) > 1e-6 for b, c in zip(box, (u0 * W, v0 * H, u1 * W, v1 * H))):
+            raise ValueError(f"crop {crop} is not on the {W}x{H} image's pixel grid")
+        image = image.crop(box)
+    return image if image.size == (w, h) else image.resize((w, h), Image.LANCZOS)
 
 
 def _inner_picture(image: Image.Image) -> Image.Image:
@@ -609,11 +686,22 @@ def _framed(frame: Image.Image, picture: Image.Image) -> Image.Image:
     return out
 
 
-def make_portraits(src: Path, bile: Creature, cache) -> tuple[Image.Image, Image.Image, Image.Image,
-                                                              Image.Image]:
-    """(molynx-bg, molynx, bile_demon-bg, bile_demon) images."""
+def make_portraits(src: Path, bile: Creature, cache, icon_src: Path | None = None
+                   ) -> tuple[Image.Image, Image.Image, Image.Image, Image.Image]:
+    """(molynx-bg, molynx, bile_demon-bg, bile_demon) images. With `icon_src` both pictures are
+    unframed renders (the redesign): the panel is `src` cut to the game window's aspect about its
+    centre, the icon is `icon_src`; without it `src` is the user's framed picture (see the module
+    docstring)."""
     bg_frame = _cache_image(cache, bile.resource_name("portraitResource"))
     icon_frame = _cache_image(cache, bile.resource_name("icon1Resource"))
+    if icon_src is not None:
+        picture = Image.open(src).convert("RGB")
+        bg = _framed(bg_frame, _crop_aspect(picture, bg_frame.width - 2 * FRAME,
+                                            bg_frame.height - 2 * FRAME))
+        icon = _framed(icon_frame, _crop_aspect(Image.open(icon_src).convert("RGB"),
+                                                icon_frame.width - 2 * FRAME,
+                                                icon_frame.height - 2 * FRAME))
+        return bg, icon, bg_frame, icon_frame
     user = Image.open(src).convert("RGB")
     inner = _inner_picture(user)
     bg = _framed(bg_frame, _crop_aspect(inner, bg_frame.width - 2 * FRAME,
@@ -644,8 +732,9 @@ def _preview(images: list[tuple[str, Image.Image]]) -> Image.Image:
 
 # ---------------------------------------------------------------- export
 
-def export_molynx_assets(out_dir: Path, height_ratio: float = 1.15,
-                         portrait_src: Path | None = PORTRAIT_SRC, *, plan: MolynxPlan | None = None,
+def export_molynx_assets(out_dir: Path, height_ratio: float = DESIGN_HEIGHT_RATIO,
+                         portrait_src: Path | None = DESIGN_PORTRAIT, *, portrait_icon: Path | None = DESIGN_ICON,
+                         plan: MolynxPlan | None = None,
                          body_size: int = MAX_TEXTURE, reduce: bool = True,
                          editor_dir: Path = EDITOR_DIR, game_dir: Path = GAME_DIR,
                          meshes_dir: Path = MESHES_DIR, wraps: dict | None = None) -> dict:
@@ -664,8 +753,9 @@ def export_molynx_assets(out_dir: Path, height_ratio: float = 1.15,
     out_dir = Path(out_dir)
     if out_dir.exists() and (not out_dir.is_dir() or any(out_dir.iterdir())):
         raise FileExistsError(f"{out_dir} exists and is not an empty folder")
-    if portrait_src is not None and not Path(portrait_src).is_file():
-        raise FileNotFoundError(f"portrait source {portrait_src} not found")
+    for src in (portrait_src, portrait_icon if portrait_src is not None else None):
+        if src is not None and not Path(src).is_file():
+            raise FileNotFoundError(f"portrait source {src} not found")
     if plan is None:
         plan = plan_molynx(height_ratio, meshes_dir=meshes_dir, editor_dir=editor_dir,
                            game_dir=game_dir)
@@ -688,16 +778,20 @@ def export_molynx_assets(out_dir: Path, height_ratio: float = 1.15,
         meshes[stem] = out_dir / f"{PREFIX}{stem}.kmf"
         meshes[stem].write_bytes(write_kmf(pose_kmf(plan, stem)))
     _, images = plan.source
-    sizes = {BODY_TEXTURE: body_size, MACE_TEXTURE: MAX_TEXTURE}
+    sizes = {**TEXTURE_SIZES, BODY_TEXTURE: (body_size, body_size)}
     textures = {}
+    used = {s.texture for s in plan.sprites}
     for key, name in TEXTURE_NAMES.items():
+        if name not in used:
+            continue
         textures[name] = out_dir / f"{name}.png"
-        _texture(images[key], min(sizes[name], max(images[key].size))).save(textures[name])
+        _texture(images[key], sizes[name], plan.crops.get(name)).save(textures[name])
     portraits, preview = {}, None
     if portrait_src is not None:
         cache = texture_cache(game_dir)
         bile = bile_demon_record(editor_dir)
-        bg, icon, bile_bg, bile_icon = make_portraits(Path(portrait_src), bile, cache)
+        bg, icon, bile_bg, bile_icon = make_portraits(
+            Path(portrait_src), bile, cache, None if portrait_icon is None else Path(portrait_icon))
         for name, image in (("molynx-bg", bg), ("molynx", icon)):
             portraits[name] = out_dir / f"{name}.png"
             image.save(portraits[name])

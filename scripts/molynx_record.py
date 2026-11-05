@@ -46,7 +46,7 @@ static mesh slot (type 5) takes a pose and needs no flag. A slot that names a fi
 is NONE (0; 63 shipped maps name Bile_Demon-Dejected_Pose so) is not loaded by the game: it is renamed but needs nothing and keeps
 its tail. One-way clips are never looped: a clip whose source does not loop and whose last frame
 is more than MAX_CLOSE_GAP = 10 median frame steps from frame 0 (ONE_WAY_GAPS, measured on the
-source and checked by molynx_assets.plan_molynx: sleeping 37.09, which lies down and stays down,
+source and checked by molynx_assets.plan_molynx: sleeping 37.04, which lies down and stays down,
 and waking_up 25.25) stays non-looping even in a slot that needs a loop; closing it would snap
 back across the whole motion every cycle. Such a slot is listed in `FilePlan.wrap_exceptions`
 (stem, slots, the Bile Demon file's flag, the gap); the engine then most likely plays the file once
@@ -123,7 +123,7 @@ SOURCE_WRAP: dict[str, bool] = {clip: clip not in (
 # Non-looping source clips that end far from where they began (last-to-first gap, in median frame
 # steps, as molynx_assets.loop_gap measures it): never closed into a loop (see "File plan").
 MAX_CLOSE_GAP = 10
-ONE_WAY_GAPS: dict[str, float] = {"sleeping": 37.089, "waking_up": 25.251}
+ONE_WAY_GAPS: dict[str, float] = {"sleeping": 37.041, "waking_up": 25.251}  # redesign (2026-11-06); was 37.089
 ONCE_SUFFIX, LOOP_SUFFIX = "_once", "_loop"   # variant files: the clip opened / closed
 GAME_FPS = 30
 

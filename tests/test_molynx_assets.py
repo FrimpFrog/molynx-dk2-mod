@@ -25,8 +25,8 @@ needs_data = pytest.mark.skipif(
     not (have(MESHES_DIR) and have(EDITOR_DIR) and have(GAME_DIR / "EngineTextures.dir")
          and have(BEHEMOTH_DIR / "behemoth.xml")),
     reason="DK2 meshes, editor data, texture cache or the MegaGlest Behemoth not present")
-needs_portrait = pytest.mark.skipif(not have(assets.PORTRAIT_SRC),
-                                    reason="the user's portrait image is not present")
+needs_portrait = pytest.mark.skipif(not (have(assets.DESIGN_PORTRAIT) and have(assets.DESIGN_ICON)),
+                                    reason="the redesign's portrait pictures are not present")
 
 VARIANTS = ["walk_once"]  # what the real Bile Demon's slots need (see below)
 STEMS = list(CLIPS) + VARIANTS + list(POSE_STEMS)
@@ -40,7 +40,7 @@ REQUIRED = {
     "knockback": False, "waking_up": False, "sleeping": False, "being_picked_up": True,
     "manufacturing": True, "praying": True,
 }
-RATIO = 1.15
+RATIO = 1.38  # the redesign: as tall as the Horned Reaper (was 1.15 x the Bile Demon)
 GAME_FPS = 30
 
 
@@ -50,7 +50,7 @@ def export(tmp_path_factory):
             and have(BEHEMOTH_DIR / "behemoth.xml")):
         pytest.skip("game data not present")
     out = tmp_path_factory.mktemp("molynx") / "assets"
-    portrait = assets.PORTRAIT_SRC if have(assets.PORTRAIT_SRC) else None
+    portrait = assets.DESIGN_PORTRAIT if have(assets.DESIGN_PORTRAIT) else None
     plan = assets.plan_molynx(height_ratio=RATIO)
     result = assets.export_molynx_assets(out, height_ratio=RATIO, portrait_src=portrait, plan=plan)
     models = {stem: parse_kmf(p.read_bytes()) for stem, p in result["meshes"].items()}
@@ -78,10 +78,14 @@ def _sprites(model):
 
 # ---------------------------------------------------------------- source character
 
+def test_the_default_height_is_the_redesigns():
+    assert assets.DESIGN_HEIGHT_RATIO == RATIO
+
+
 @needs_data
 @pytest.mark.skipif(not have(CHARACTER_PICKLE), reason="reference character pickle not present")
-def test_rebuilt_character_equals_the_reference_build(export):
-    data, textures = export["plan"].source
+def test_rebuilt_character_without_the_design_equals_the_reference_build():
+    data, textures = assets.build_source(design=False)
     ref, ref_tex = pickle.loads(CHARACTER_PICKLE.read_bytes())
     assert list(data) == list(ref)
     for name in ref:
@@ -147,16 +151,22 @@ def test_clips_are_animations_that_pass_the_format_invariants(export):
 
 # The largest GEOM (keyframe positions) of every animation file, reduced (reduce=True). The game's
 # largest animation has 34,816 (Mis-Idle1); 65,535 is the largest a u16 index could reach.
+# The redesign (2026-11-06): files that would pass the game's largest are reduced with a wider
+# tolerance (molynx_assets.KEY_TOLERANCES): celebrating 46,079 -> 34,419 (2.5 steps), staggering
+# 40,448 -> 33,988 (1.5), training 35,676 -> 31,920 (1.5), fighting_another_creature 43,518 ->
+# 34,053 (2); victory_celebration (shipped by no slot) stays at one step.
 GEOM = {
-    "stand": 1777, "walk": 7876, "walk_once": 7876, "attack": 11157, "die": 5427,
-    "fidgeting": 16040, "running": 15529, "eating": 20006, "praying": 16993, "happy": 22705,
-    "angry": 10227, "celebrating": 27974, "victory_celebration": 76606, "getting_hit": 6410,
-    "being_slapped": 10190, "staggering": 42185, "waking_up": 16569, "knockback": 26736,
-    "sleeping": 22146, "training": 33982, "fighting_another_creature": 44650, "patrolling": 17521,
-    "guarding": 1589, "manufacturing": 13954, "interacting_with_objects": 6201,
-    "being_picked_up": 6237,
+    "stand": 1834, "walk": 8068, "walk_once": 8068, "attack": 11420, "die": 5553,
+    "fidgeting": 18932, "running": 14925, "eating": 19637, "praying": 16565, "happy": 21905,
+    "angry": 9870, "celebrating": 34419, "victory_celebration": 73948, "getting_hit": 6220,
+    "being_slapped": 10073, "staggering": 33988, "waking_up": 15987, "knockback": 25813,
+    "sleeping": 21411, "training": 31920, "fighting_another_creature": 34053, "patrolling": 16911,
+    "guarding": 1693, "manufacturing": 13467, "interacting_with_objects": 5971,
+    "being_picked_up": 6492,
 }
 GAME_MAX_GEOM = 34_816
+# The reduction tolerance (quantisation steps) of the files reduced wider than one step.
+TOLERANCE = {"celebrating": 2.5, "staggering": 1.5, "training": 1.5, "fighting_another_creature": 2.0}
 
 
 @needs_data
@@ -171,15 +181,16 @@ def test_keyframes_are_reduced_like_661_game_files(export):
 
 @needs_data
 def test_shipped_animations_stay_within_the_index_range(export, bile):
-    """Every animation the record names stays below 65,535 keyframes. Above the game's own largest
-    animation (34,816) is only staggering (42,185, a known and accepted exception: it is shipped for
-    a type NONE slot of some maps' Bile Demons); the unshipped victory_celebration (76,606) and
-    fighting_another_creature (44,650) are never delivered."""
+    """Every animation the record names (and staggering, shipped for a type NONE slot of some
+    maps' Bile Demons) stays within the game's own largest animation (34,816 keyframes); only the
+    unshipped victory_celebration (73,948) is above it, and above 65,535."""
     shipped = {s for s in stems_used(bile, assets.molynx_files(bile)) if s not in POSE_STEMS}
     shipped.add("staggering")  # Siege's Bile Demon names it in dejectedPose (type NONE)
     for stem in shipped:
         assert GEOM[stem] <= 65_535, stem
-    assert {s for s in shipped if GEOM[s] > GAME_MAX_GEOM} == {"staggering"}
+    assert {s for s in shipped if GEOM[s] > GAME_MAX_GEOM} == set()
+    assert {s for s in GEOM if GEOM[s] > GAME_MAX_GEOM} == {"victory_celebration"}
+    assert assets.GAME_MAX_KEYS == GAME_MAX_GEOM
     assert {s for s in GEOM if GEOM[s] > 65_535} == {"victory_celebration"}
     assert "victory_celebration" not in shipped and "fighting_another_creature" not in shipped
 
@@ -216,7 +227,7 @@ def test_decoded_frames_match_the_transformed_source_frames(export):
         anim = export["models"][stem].anim
         want = assets.file_clip(plan, stem, anim.wrap).frames
         assert anim.frame_count == len(want), stem
-        bound = anim.scale / 511 * 1.01
+        bound = anim.scale / 511 * TOLERANCE.get(stem, 1.0) * 1.01
         for f in range(anim.frame_count):
             assert _close(evaluate_anim_frame(anim, f), want[f], bound), (stem, f)
     for stem in POSE_STEMS:
@@ -464,12 +475,15 @@ def test_materials_name_the_texture_files_and_copy_a_game_material(export, bile)
 @needs_data
 def test_textures_are_power_of_two_rgb_within_the_games_largest_size(export):
     textures = export["result"]["textures"]
-    assert sorted(p.name for p in textures.values()) == ["Molynx_Body.png", "Molynx_Mace.png"]
+    sizes = {p.name: Image.open(p).size for p in textures.values()}
+    assert sizes == {"Molynx_Body.png": (128, 128), "Molynx_Head.png": (128, 128),
+                     "Molynx_Mace.png": (128, 128), "Molynx_Neck.png": (128, 32)}
     for path in textures.values():
         image = Image.open(path)
         w, h = image.size
         assert image.mode == "RGB"
-        assert w == h and w & (w - 1) == 0 and w <= assets.MAX_TEXTURE <= 256
+        for n in (w, h):
+            assert n & (n - 1) == 0 and n <= assets.MAX_TEXTURE <= 256
 
 
 # ---------------------------------------------------------------- portraits
@@ -527,7 +541,7 @@ def test_texture_limit_is_the_games_largest_texture():
 
 # ---------------------------------------------------------------- independent resampling check
 
-RESAMPLED = ["stand", "walk", "attack", "die", "celebrating", "victory_celebration", "sleeping",
+RESAMPLED = ["stand", "walk", "attack", "die", "fidgeting", "victory_celebration", "sleeping",
              "training", "fighting_another_creature"]
 # Files whose loop flag is not their source clip's: opened loops keep the loop's frames (timed as a
 # loop, ending on the copy of frame 0); closed ones are resampled as a loop.
@@ -554,12 +568,10 @@ def _lerp_frame(frames, t, nxt):
 
 @needs_data
 def test_resampled_clips_decode_to_a_plain_interpolation_of_the_source(export, bile):
-    """Independent of plan_molynx / _resample: the source clip (the reference pickle when present),
-    interpolated linearly at 30 fps and moved to KMF space here, against the DECODED files."""
-    if have(CHARACTER_PICKLE):
-        data, _ = pickle.loads(CHARACTER_PICKLE.read_bytes())
-    else:
-        data, _ = export["plan"].source
+    """Independent of plan_molynx / _resample: the source clip (the redesigned character, built
+    again here), interpolated linearly at 30 fps and moved to KMF space here, against the DECODED
+    files."""
+    data, _ = assets.build_source()
     layout = [(s.part, s.vertices) for s in export["plan"].sprites]  # which source vertex is which
 
     def sprites(parts):
@@ -599,7 +611,7 @@ def test_resampled_clips_decode_to_a_plain_interpolation_of_the_source(export, b
             assert count - 1 == round((n - 1) / fps * GAME_FPS), stem
             times = [k * (n - 1) / (count - 1) for k in range(count)]
             nxt = lambda i, last=n - 1: min(i + 1, last)
-        bound = anim.scale / 511 * 1.01
+        bound = anim.scale / 511 * TOLERANCE.get(stem, 1.0) * 1.01
         check = sorted({0, count // 2, count - 1, *range(0, count, 5)})
         for f in check:
             want = kmf(_lerp_frame(frames, times[f], nxt))

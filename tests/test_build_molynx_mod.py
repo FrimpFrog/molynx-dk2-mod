@@ -51,13 +51,13 @@ SHIPPED_MAPS = sorted(["Siege", *FLAT])
 TEXT_IDS = {"name": 3001, "tooltip": 3002, "general": 3003, "strength": 3004, "weakness": 3005}
 # The files a stage-2 folder delivers (literal; the record's file plan for the test maps' Bile Demons):
 # 18 clips (staggering only for Siege's type NONE dejectedPose slot), the variant walk_once, the 5
-# poses (stunnedPose and elec take static poses), and the 2 textures.
+# poses (stunnedPose and elec take static poses), and the 4 textures.
 STAGE2_MESHES = sorted(f"Molynx-{stem}.kmf" for stem in (
     "walk", "walk_once", "DraggedPose", "getting_hit", "StunnedPose", "ElecPose", "attack", "die",
     "DiePose", "happy", "angry", "staggering", "being_picked_up", "sleeping", "eating", "stand",
     "being_slapped", "manufacturing", "praying", "knockback", "waking_up", "celebrating",
     "fidgeting", "PoseFrame"))
-STAGE2_TEXTURES = ["Molynx_Body.png", "Molynx_Mace.png"]
+STAGE2_TEXTURES = ["Molynx_Body.png", "Molynx_Head.png", "Molynx_Mace.png", "Molynx_Neck.png"]
 UNUSED_CLIPS = ["running", "victory_celebration", "training", "fighting_another_creature",
                 "patrolling", "guarding", "interacting_with_objects"]
 TAIL_AT = {"flags": (0, 4), "frames": (4, 4), "fps": (8, 4), "startDist": (12, 2),
@@ -1122,7 +1122,7 @@ def test_stage2_audit_of_the_handed_over_folder_passes_every_rule(stage2_full):
         (line,) = pass_lines(report, "b", name)
         assert "stage 2" in line and "24 rewritten" in line
     (g,) = [line for line in report.lines if line.startswith("PASS (g) folder:")]
-    assert "24 meshes" in g and "2 textures" in g
+    assert "24 meshes" in g and "4 textures" in g
 
 
 @needs_data
@@ -1134,7 +1134,8 @@ def test_stage2_audit_passes_with_every_renamed_animation_present(mod2):
     assert report.ok, "\n".join(report.lines)
     assert any("stage 2" in line for line in report.lines if line.startswith("PASS (b)"))
     (line,) = pass_lines(report, "f", "Siege")
-    assert f"{len(names)} Molynx meshes" in line and "Molynx_Body, Molynx_Mace" in line
+    assert f"{len(names)} Molynx meshes" in line
+    assert "Molynx_Body, Molynx_Head, Molynx_Mace, Molynx_Neck" in line
 
 
 @needs_data

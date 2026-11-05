@@ -353,3 +353,28 @@ def test_game_pose_mesh_encodes_as_a_one_frame_animation():
     assert anim.frame_count == 1 and _keys(anim) == len(geom) and anim_invariants(anim) == []
     assert _max_error(anim, frames) <= _bound(anim)
     _roundtrip_kmf(anim)
+
+
+def test_a_wider_tolerance_keeps_fewer_keyframes_within_that_many_steps():
+    rows = [[0, 1, 2, 3, 4], [5, 6, 7, 8]]
+    frames = _random_walk(200, rows, seed=11, step=0.004)
+    sprites = [_sprite(0, rows[0]), _sprite(1, rows[1])]
+    one = encode_anim("Tight", sprites, frames, wrap=False, controls=b"")
+    wide = encode_anim("Wide", sprites, frames, wrap=False, controls=b"", tolerance=2.5)
+    assert anim_invariants(wide) == []
+    assert _keys(wide) < _keys(one)
+    assert _max_error(one, frames) <= _bound(one)
+    assert _max_error(wide, frames) <= _bound(wide) * 2.5
+    assert one.scale == wide.scale and one.frame_count == wide.frame_count
+    back = _roundtrip_kmf(wide)
+    for f in (0, 99, 199):
+        for a, b in zip(evaluate_anim_frame(back.anim, f), evaluate_anim_frame(wide, f)):
+            np.testing.assert_allclose(a, b, atol=1e-6)
+
+
+def test_tolerance_below_one_step_is_refused():
+    rows = [[0, 1, 2]]
+    frames = _random_walk(10, rows, seed=3)
+    for bad in (0.5, 0.0, -1.0, float("nan")):
+        with pytest.raises(ValueError):
+            encode_anim("Bad", [_sprite(0, rows[0])], frames, False, b"", tolerance=bad)

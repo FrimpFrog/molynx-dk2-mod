@@ -2,7 +2,9 @@
 
 ## What you are testing
 
-Molynx is a new, 47th creature: a red horned brute with a mace. This test checks two things at once:
+Molynx is a new, 47th creature: a red, rocky, horned brute with a stone face and a mace (his new
+look: the Golem-style head, the rock skin and the Battlemage belt, as tall as the Horned Reaper).
+This test checks two things at once:
 
 - **Does the game accept a 47th creature?**
 - **Do his own model and animations work?**
@@ -35,7 +37,8 @@ back when you take the folder out).
 
 1. **Copy the folder.** Copy the folder `Molynx` from the zip into `<DK2>\flame\resources\`
    (next to `Quuz_LevelFixes`, `Quuz_HD` and the others). If the old `Molynx` folder from the first zip
-   is still there, delete it first.
+   is still there, delete it first (do not copy over it: the new look has two more texture files
+   and every model file is new).
 
 2. **Turn it on.** Open `<DK2>\flame\config.toml` in Notepad. Find the line that starts with
    `alt-resources` (in the `[flame]` part). Today it reads:
@@ -76,8 +79,11 @@ back when you take the folder out).
 5. **Look at these things.** For each point, "pass" means what is written after the dash. Build a
    lair, a hatchery, a workshop, a temple and a training room for him (you have the gold).
    - **The map loads** - you can play, and the game keeps running.
-   - **Find him** - a red horned brute with a mace, about 15% taller than a Bile Demon. (When you
-     hover over him the name may still say "Bile Demon"; that is expected in this test.)
+   - **Find him** - a red, rocky, horned brute with a stone face, glowing angry eyes, bottom teeth
+     over his lip and a mace on his shoulder, about as tall as the Horned Reaper (clearly bigger
+     than a Bile Demon). (When you hover over him the name may still say "Bile Demon"; that is
+     expected in this test.) If he has the old look (smooth skin, a harness with a skull), the old
+     folder is still being used.
    - **He walks, stands and fidgets** - he moves his legs when he walks, and stands and shifts about
      when he is idle. He is not invisible, not white or grey, not stretched or torn.
    - **Pick him up and drop him** - in your hand he dangles. Dropped, he stands dazed for a moment
@@ -91,12 +97,13 @@ back when you take the folder out).
    - **Pray** - in a temple he prays.
    - **Work** - in a workshop he works.
    - **Moods** - when he is happy or angry he shows it.
-   - **Dance** - if he dances, it is his own dance.
+   - **Dance** - if he dances, it is his own dance (a stompy Troll-style dance, mace on his shoulder).
    - **His creature panel opens** - click his picture or open his panel; the game does not crash.
 
    **Fail** is: a crash or freeze (while loading, or at one of the points above), or Molynx
-   invisible, white or grey. If he looks like a plain Bile Demon, the folder is probably not first
-   in the list (step 2).
+   invisible, white or grey, or his head or face missing, white or grey (his head has its own two
+   pictures, `Molynx_Head.png` and `Molynx_Neck.png`). If he looks like a plain Bile Demon, the
+   folder is probably not first in the list (step 2).
 
 6. **Send me:**
    - Which way you started the map (step 3), and whether Imps and Molynx were there at the start.
