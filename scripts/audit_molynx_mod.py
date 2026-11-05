@@ -37,8 +37,7 @@ Rules, each one PASS or FAIL line per map (per folder for g and h):
       index in range, and name only textures that exist as `Data/EngineTextures/<texture>.png` (exact
       case; a PNG whose sides are powers of two of at most MAX_TEXTURE = 128 px, the largest texture
       in the game's cache). Each file's loop flag must be the loop flag of the Bile Demon's own file in
-      that slot (for a slot whose Bile Demon file is a static mesh: a static mesh, or an animation that
-      loops), except the slots in WRAP_EXCEPTIONS, which the PASS line lists by name. A stage-3 folder
+      that slot (for a slot whose Bile Demon file is a static mesh: a static pose), except the slots in WRAP_EXCEPTIONS, which the PASS line lists by name. A stage-3 folder
       always FAILs (f): its icon and portrait files are not audited before Task 10.
   (g) the folder holds nothing else: `resource.toml`, the seven files of each map and, from stage 2,
       exactly the `Data/Meshes/<name>.kmf` files record 47 names and the `Data/EngineTextures/<t>.png`
@@ -54,9 +53,9 @@ The stages (written independently of the builder, from the Molynx design):
      renamed slot that plays one of Molynx's animation files follow the stage-2 rule, written out in
      `_expected_tail`: flags = the Bile Demon's without 0x8 / 0x10 (no Start / End files), frames =
      the file's frame count (minus 1 when the file loops), fps 30, type 6, startAf = endAf = 0,
-     startDist / endDist / sometimesOne the Bile Demon's when its slot was an animation (type 6), 0
-     when it was a static mesh (type 5). A slot whose Molynx file is a static mesh (a pose) and a slot
-     of type NONE (0, not loaded by the game) keep the Bile Demon's 20 bytes. The frame count and
+     startDist / endDist / sometimesOne the Bile Demon's. A static mesh slot (type 5: the poses,
+     stunnedPose and elec included) and a slot of type NONE (0, not loaded by the game) keep the
+     Bile Demon's 20 bytes. The frame count and
      loop flag are read from the folder's own file.
   3  + hp, meleeDamage, fear, threat, mass, pay above the Bile Demon's, icon1Resource
      `gui\\creatures\\evil\\molynx`, portraitResource `gui\\creatures\\evil\\molynx-bg`, and the five
@@ -118,8 +117,10 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # Slots whose Molynx file may end where the Bile Demon's file loops: slot -> (file, why).
 # Which Molynx file each animation slot names (stage 2), written out here from the design's slot
 # table (slot-table.md, plan Task 8) and the rulings on loop variants: entrance needs a walk that
-# ends (walk_once) and elec, a static pose in the Bile Demon, a getting_hit that loops
-# (getting_hit_loop). A slot not listed takes "stand"; a slot empty in the Bile Demon stays empty.
+# ends (walk_once); the static mesh slots stunnedPose and elec take static poses (StunnedPose, a
+# middle frame of staggering; ElecPose, the peak of getting_hit), like the game's creatures. A slot
+# not listed takes "stand"; a slot empty in the Bile Demon stays empty; a static mesh slot (type 5)
+# whose entry is staggering (dejectedPose in some maps) takes StunnedPose (MESH_SLOT_FILES).
 SLOT_FILES = {
     "animWalkResource": "walk", "animRunResource": "running",
     "animDraggedPoseResource": "DraggedPose", "animRecoilHffResource": "getting_hit",
@@ -131,15 +132,16 @@ SLOT_FILES = {
     "animBuildingResource": "manufacturing", "animPrayResource": "praying",
     "animFallbackResource": "knockback", "animGetUpResource": "waking_up",
     "animDanceResource": "celebrating", "animDrunkResource": "staggering",
-    "animDrunk2Resource": "staggering", "animStunnedPoseResource": "staggering",
+    "animDrunk2Resource": "staggering", "animStunnedPoseResource": "StunnedPose",
     "animDejectedPoseResource": "staggering", "animIdle1Resource": "stand",
     "animIdle2Resource": "fidgeting", "drunkIdle": "fidgeting",
     "animPoseFrameResource": "PoseFrame", "animWalk2Resource": "patrolling",
     "animEntranceResource": "walk_once", "animWalkbackResource": "walk",
     "animResearchResource": "interacting_with_objects", "animLootResource": "interacting_with_objects",
     "animMagicResource": "getting_hit", "animTortureResource": "getting_hit",
-    "animElecResource": "getting_hit_loop", "animElectrocuteResource": "getting_hit",
+    "animElecResource": "ElecPose", "animElectrocuteResource": "getting_hit",
 }
+MESH_SLOT_FILES = {"staggering": "StunnedPose"}
 DEFAULT_FILE = "stand"
 WRAP_EXCEPTIONS = {
     "animSleepResource": ("Molynx-sleeping", "a one-way clip (he lies down and stays down), so it "
@@ -341,27 +343,23 @@ def _expected_tail(bile_tail: dict[str, int], file: tuple | None) -> tuple[dict 
     kind = bile_tail["type"]
     if kind == TYPE_NONE:
         return dict(bile_tail), "type NONE (not loaded), kept"
-    if file is not None and file[0] == "mesh":
-        return dict(bile_tail), "a static mesh, kept"
-    keep = kind == TYPE_ANIM
-    frames = None if file is None else file[1] - (1 if file[2] else 0)
-    converted = {
-        "flags": bile_tail["flags"] & ~HAS_START_END, "frames": frames, "fps": MOLYNX_FPS,
-        "startDist": bile_tail["startDist"] if keep else 0,
-        "endDist": bile_tail["endDist"] if keep else 0, "type": TYPE_ANIM,
-        "startAf": 0, "endAf": 0, "sometimesOne": bile_tail["sometimesOne"] if keep else 0,
-    }
-    return converted, "an animation, rewritten"
+    if kind == TYPE_MESH:
+        return dict(bile_tail), "a static mesh (a pose), kept"
+    frames = None if file is None or file[0] != "anim" else file[1] - (1 if file[2] else 0)
+    rewritten = {**bile_tail, "flags": bile_tail["flags"] & ~HAS_START_END, "frames": frames,
+                 "fps": MOLYNX_FPS, "startAf": 0, "endAf": 0}
+    return rewritten, "an animation, rewritten"
 
 
 def _tail_problems(slot: str, name: str, found: dict, bile_tail: dict, file: tuple | None) -> list[str]:
-    if file is not None and file[0] == "mesh" and bile_tail["type"] == TYPE_ANIM:
-        return [f"{slot} names {name}, a static mesh, but the Bile Demon's slot plays an animation "
-                f"(type {TYPE_ANIM})"]
-    expected, _what = _expected_tail(bile_tail, file)
-    if file is None and bile_tail["type"] == TYPE_MESH and found == bile_tail:
-        return []  # the file is unreadable (rule f); the Bile Demon's mesh tail fits a pose
     problems = []
+    if file is not None and file[0] == "mesh" and bile_tail["type"] == TYPE_ANIM:
+        problems.append(f"{slot} names {name}, a static mesh, but the Bile Demon's slot plays an "
+                        f"animation (type {TYPE_ANIM})")
+    if file is not None and file[0] == "anim" and bile_tail["type"] == TYPE_MESH:
+        problems.append(f"{slot} names {name}, an animation, but the Bile Demon's slot is a static "
+                        f"mesh (type {TYPE_MESH}) and takes a static pose")
+    expected, _what = _expected_tail(bile_tail, file)
     for sub, _at, _fmt in TAIL:
         want = expected[sub]
         if want is None or found[sub] == want:
@@ -400,7 +398,10 @@ def _value_problems(molynx: Creature, bile: Creature, stage: int, order: int,
             if raw == _resource_bytes(bile, slot):
                 continue  # left as the Bile Demon's: already named as a missing stage-2 field
             start = FIELDS[slot].offset
-            expected = MOLYNX_PREFIX + SLOT_FILES.get(slot, DEFAULT_FILE)
+            stem = SLOT_FILES.get(slot, DEFAULT_FILE)
+            if _tail(_resource_bytes(bile, slot))["type"] == TYPE_MESH:
+                stem = MESH_SLOT_FILES.get(stem, stem)
+            expected = MOLYNX_PREFIX + stem
             if name != expected:
                 problems.append(f"{slot} name (record 47 bytes {start}-{start + RESOURCE_NAME_SIZE - 1}) "
                                 f"is {name!r}, expected {expected!r}")
@@ -411,7 +412,7 @@ def _value_problems(molynx: Creature, bile: Creature, stage: int, order: int,
             file = files.kind(expected)  # the tail describes the file the slot must name
             problems += _tail_problems(slot, expected, _tail(raw), bile_tail, file)
             what = _expected_tail(bile_tail, file)[1]
-            if file is None and bile_tail["type"] != TYPE_NONE:
+            if file is None and bile_tail["type"] == TYPE_ANIM:
                 counts["unchecked"] += 1
             else:
                 counts["rewritten" if what.endswith("rewritten") else "kept"] += 1
@@ -717,9 +718,9 @@ def _wrap_problems(slots: dict[str, str], bile: Creature, files: "_Files") -> tu
             continue
         theirs = _file_kind(data)
         if theirs[0] == "mesh":
-            if mine[0] == "anim" and not mine[2]:
-                problems.append(f"{slot}: {name} does not loop, but it replaces the Bile Demon's "
-                                f"static {bile_name}, which never ends")
+            if mine[0] != "mesh":
+                problems.append(f"{slot}: {name} is an animation, but it replaces the Bile Demon's "
+                                f"static {bile_name}: it must be a static pose")
             continue
         if mine[0] != "anim" or mine[2] == theirs[2]:
             continue  # a static mesh in an animation slot is a rule (b) problem
@@ -781,7 +782,7 @@ def _check_assets(stage: int, molynx: Creature, bile: Creature,
                f"Data/EngineTextures ({', '.join(sorted(textures))}; powers of two up to "
                f"{MAX_TEXTURE} px), and {len(kept)} Bile Demon names in the game's Meshes.WAD; each "
                f"file loops exactly when the Bile Demon's file in its slot does (where that file is "
-               f"a static mesh: a static pose, or an animation that loops)")
+               f"a static mesh: a static pose)")
     if exceptions:
         message += f", except {len(exceptions)} recorded exception(s): " + "; ".join(exceptions)
     return True, message, set(changed), textures

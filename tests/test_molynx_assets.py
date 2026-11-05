@@ -28,17 +28,17 @@ needs_data = pytest.mark.skipif(
 needs_portrait = pytest.mark.skipif(not have(assets.PORTRAIT_SRC),
                                     reason="the user's portrait image is not present")
 
-VARIANTS = ["walk_once", "getting_hit_loop"]  # what the real Bile Demon's slots need (see below)
+VARIANTS = ["walk_once"]  # what the real Bile Demon's slots need (see below)
 STEMS = list(CLIPS) + VARIANTS + list(POSE_STEMS)
 ANIMS = list(CLIPS) + VARIANTS
 # The loop flag each used file must have: its slots' Bile Demon files (walk / walkback loop,
-# entrance does not -> walk_once; elec is a static mesh -> a looping getting_hit_loop).
+# entrance does not -> walk_once; stunnedPose and elec take static poses, which have no flag).
 REQUIRED = {
-    "walk": True, "walk_once": False, "getting_hit": False, "getting_hit_loop": True,
+    "walk": True, "walk_once": False, "getting_hit": False,
     "stand": False, "fidgeting": False, "eating": False, "happy": False, "attack": False,
     "angry": False, "celebrating": False, "die": False, "being_slapped": False,
     "knockback": False, "waking_up": False, "sleeping": False, "being_picked_up": True,
-    "manufacturing": True, "praying": True, "staggering": True,
+    "manufacturing": True, "praying": True,
 }
 RATIO = 1.15
 GAME_FPS = 30
@@ -145,21 +145,56 @@ def test_clips_are_animations_that_pass_the_format_invariants(export):
         assert model.anim.frame_count >= 2, stem  # the game has no 1-frame animation
 
 
+# The largest GEOM (keyframe positions) of every animation file, reduced (reduce=True). The game's
+# largest animation has 34,816 (Mis-Idle1); 65,535 is the largest a u16 index could reach.
+GEOM = {
+    "stand": 1777, "walk": 7876, "walk_once": 7876, "attack": 11157, "die": 5427,
+    "fidgeting": 16040, "running": 15529, "eating": 20006, "praying": 16993, "happy": 22705,
+    "angry": 10227, "celebrating": 27974, "victory_celebration": 76606, "getting_hit": 6410,
+    "being_slapped": 10190, "staggering": 42185, "waking_up": 16569, "knockback": 26736,
+    "sleeping": 22146, "training": 33982, "fighting_another_creature": 44650, "patrolling": 17521,
+    "guarding": 1589, "manufacturing": 13954, "interacting_with_objects": 6201,
+    "being_picked_up": 6237,
+}
+GAME_MAX_GEOM = 34_816
+
+
 @needs_data
-def test_every_frame_is_keyed_like_the_bile_demons_files(export):
+def test_keyframes_are_reduced_like_661_game_files(export):
     for stem in ANIMS:
         anim = export["models"][stem].anim
-        assert len(anim.geom_xyz) - 1 == anim.index_count * (
-            anim.frame_count + (anim.frame_count - 1) // 128), stem
+        full = anim.index_count * (anim.frame_count + (anim.frame_count - 1) // 128)
+        keys = len(anim.geom_xyz) - 1
+        assert anim.index_count <= keys < full, stem  # at least one key per row, fewer than all
+        assert keys == GEOM[stem], stem
+
+
+@needs_data
+def test_shipped_animations_stay_within_the_index_range(export, bile):
+    """Every animation the record names stays below 65,535 keyframes. Above the game's own largest
+    animation (34,816) is only staggering (42,185, a known and accepted exception: it is shipped for
+    a type NONE slot of some maps' Bile Demons); the unshipped victory_celebration (76,606) and
+    fighting_another_creature (44,650) are never delivered."""
+    shipped = {s for s in stems_used(bile, assets.molynx_files(bile)) if s not in POSE_STEMS}
+    shipped.add("staggering")  # Siege's Bile Demon names it in dejectedPose (type NONE)
+    for stem in shipped:
+        assert GEOM[stem] <= 65_535, stem
+    assert {s for s in shipped if GEOM[s] > GAME_MAX_GEOM} == {"staggering"}
+    assert {s for s in GEOM if GEOM[s] > 65_535} == {"victory_celebration"}
+    assert "victory_celebration" not in shipped and "fighting_another_creature" not in shipped
 
 
 @needs_data
 def test_poses_follow_the_bile_demons_pose_files(export, bile):
     for stem, slot in (("PoseFrame", "poseFrame"), ("DiePose", "diePose"),
-                       ("DraggedPose", "draggedPose")):
+                       ("DraggedPose", "draggedPose"), ("StunnedPose", "stunnedPose"),
+                       ("ElecPose", "elec")):
         theirs, ours = _bile_file(bile, slot), export["models"][stem]
         assert ours.kind == theirs.kind == "mesh", stem
-        assert len(ours.mesh.controls) == len(theirs.mesh.controls)
+        if stem == "ElecPose":  # Bil-elec carries no CTRL entries; ours keep the same 20 as every file
+            assert theirs.mesh.controls == b"" and len(ours.mesh.controls) == 20 * 8
+        else:
+            assert len(ours.mesh.controls) == len(theirs.mesh.controls), stem
         assert {len(s.triangles) for s in ours.mesh.sprites} == {16}
         geom = np.array(ours.mesh.geometry)
         lo, hi = geom.min(0), geom.max(0)
@@ -205,7 +240,9 @@ def test_plan_frames_are_the_source_frames_scaled_mirrored_and_placed(export):
                 np.testing.assert_allclose(got, w, atol=1e-9)
     stand, die, picked = data["stand"]["frames"], data["die"]["frames"], data["being_picked_up"]
     for stem, frame in (("PoseFrame", stand[0]), ("DiePose", die[-1]),
-                        ("DraggedPose", picked["frames"][0])):
+                        ("DraggedPose", picked["frames"][0]),
+                        ("StunnedPose", data["staggering"]["frames"][48]),
+                        ("ElecPose", data["getting_hit"]["frames"][5])):
         for got, w in zip(plan.poses[stem], plan.to_sprites(plan.to_kmf(frame))):
             np.testing.assert_allclose(got, w, atol=1e-9)
 
@@ -495,7 +532,7 @@ RESAMPLED = ["stand", "walk", "attack", "die", "celebrating", "victory_celebrati
 # Files whose loop flag is not their source clip's: opened loops keep the loop's frames (timed as a
 # loop, ending on the copy of frame 0); closed ones are resampled as a loop.
 FLIPPED = ["stand", "fidgeting", "eating", "happy", "attack", "angry", "celebrating",
-           "walk_once", "getting_hit_loop"]
+           "walk_once"]
 
 
 def _axes(p):
@@ -641,10 +678,12 @@ def test_opened_loops_keep_the_loops_frames(export):
 
 @needs_data
 def test_closed_loops_end_on_frame_0_with_one_more_frame(export):
-    """getting_hit does not close in the source: the copy of frame 0 is appended."""
-    info, plan = export["result"]["info"], export["plan"]
-    assert (info["getting_hit_loop"]["frames"], info["getting_hit"]["frames"]) == (18, 17)
-    hit, loop = export["models"]["getting_hit"].anim, export["models"]["getting_hit_loop"].anim
+    """Closing a clip that does not close in the source (getting_hit, not shipped closed any more)
+    appends the copy of frame 0."""
+    plan = export["plan"]
+    hit = export["models"]["getting_hit"].anim
+    loop = assets.clip_kmf(plan, "getting_hit_loop", wrap=True).anim
+    assert (loop.frame_count, hit.frame_count) == (18, 17) and loop.wrap
     for f in range(hit.frame_count):
         for a, b in zip(evaluate_anim_frame(hit, f), evaluate_anim_frame(loop, f)):
             assert np.abs(a - b).max() <= max(hit.scale, loop.scale) / 511 * 2.02, f
@@ -694,7 +733,7 @@ def test_one_way_gaps_are_measured_on_the_source(export):
     assert set(far) == set(ONE_WAY_GAPS) == {"sleeping", "waking_up"}
     for clip, gap in far.items():
         assert gap == pytest.approx(ONE_WAY_GAPS[clip], abs=0.01), clip
-    assert gaps["getting_hit"] == pytest.approx(5.80, abs=0.01)  # closed into getting_hit_loop
+    assert gaps["getting_hit"] == pytest.approx(5.80, abs=0.01)  # could be closed (below 10)
 
 
 @needs_data
@@ -717,3 +756,29 @@ def test_sleeping_stays_one_way_and_is_reported(export, bile):
                                       ONE_WAY_GAPS["sleeping"])
     assert assets.required_wraps(bile)["sleeping"] is False  # reported, not raised
     assert assets.molynx_files(bile).wrap_exceptions == (exception,)
+
+
+# ---------------------------------------------------------------- static poses for mesh slots
+
+def _mean_distance(frame, first):
+    return float(np.mean([np.linalg.norm(np.asarray(a) - np.asarray(b), axis=1).mean()
+                          for a, b in zip(frame, first)]))
+
+
+@needs_data
+def test_stunned_and_elec_poses_are_the_middle_of_staggering_and_the_peak_of_getting_hit(export):
+    data, _ = export["plan"].source
+    assert assets.POSE_SOURCES["StunnedPose"] == ("staggering", len(data["staggering"]["frames"]) // 2) \
+        == ("staggering", 48)
+    hit = data["getting_hit"]["frames"]
+    peak = max(range(len(hit)), key=lambda f: _mean_distance(hit[f], hit[0]))
+    assert assets.POSE_SOURCES["ElecPose"] == ("getting_hit", peak) == ("getting_hit", 5)
+
+
+@needs_data
+def test_every_pose_but_the_rest_pose_differs_from_the_stand_frame(export):
+    rest = mesh_points(export["models"]["PoseFrame"])
+    for stem in ("StunnedPose", "ElecPose", "DiePose", "DraggedPose"):
+        points = mesh_points(export["models"][stem])
+        moved = max(float(np.abs(a - b).max()) for a, b in zip(points, rest))
+        assert moved > 0.02, stem  # 0.62 is his height

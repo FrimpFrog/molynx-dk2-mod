@@ -9,7 +9,7 @@ from scripts.dk2kwd_creatures import (
 from scripts.dk2paths import EDITOR_DIR, MAPS_DIR, have
 from molynx_files import ANIM_INFO, FILE_WRAPS
 from scripts.molynx_record import (
-    CLIPS, MAX_CLOSE_GAP, MULTIPLIERS, ONE_WAY_GAPS, POSE_STEMS, SLOT_CLIPS, SOURCE_WRAP,
+    CLIPS, MAX_CLOSE_GAP, MULTIPLIERS, ONE_WAY_GAPS, POSE_STEMS, SLOT_CLIPS, SOURCE_WRAP, STATIC_POSES,
     WrapException, build_molynx, file_plan, review_list, slot_assignment, stems_used,
 )
 
@@ -47,8 +47,8 @@ BILE_EMPTY_SLOTS = {
 
 # The real Bile Demon: slot -> (file stem, its 20-byte tail before, after). Before: the editor
 # record. After, by the stage-2 rule: flags lose 0x8 / 0x10; frames = file frames (- 1 when the file
-# loops); fps 30; startDist / endDist / sometimesOne kept from an animation slot, zeroed for a mesh
-# slot that becomes an animation; type 6; startAf = endAf = 0. Pose slots keep their tail.
+# loops); fps 30; startDist / endDist / sometimesOne and type 6 kept; startAf = endAf = 0. Pose slots
+# (static meshes, type 5: the three poses, stunnedPose and elec) keep their tail.
 TAILS = {
     "animWalkResource": ("walk", "19000000280000001e0000006e08560606282800",
                          "010000002e0000001e0000006e08560606000000"),
@@ -66,8 +66,8 @@ TAILS = {
                           "000000003b0000001e0000000000000006000000"),
     "animAngryResource": ("angry", "000000002d0000001e0000000000000006000000",
                           "00000000170000001e0000000000000006000000"),
-    "animStunnedPoseResource": ("staggering", "00000000001000000100000068049e0005000000",
-                                "000000005f0000001e0000000000000006000000"),
+    "animStunnedPoseResource": ("StunnedPose", "00000000001000000100000068049e0005000000",
+                                "00000000001000000100000068049e0005000000"),
     "animSwingResource": ("being_picked_up", "000000003c0000001e0000000000000006000000",
                           "000000003c0000001e0000000000000006000000"),
     "animSleepResource": ("sleeping", "00000000780000000f0000000000000006000000",
@@ -88,8 +88,8 @@ TAILS = {
                          "00000000780000001e0000000000000006000000"),
     "animFallbackResource": ("knockback", "01000000210000001e0000000000000006000000",
                              "010000003d0000001e0000000000000006000000"),
-    "animElecResource": ("getting_hit_loop", "0000000000100000010000006804c80005000000",
-                         "00000000110000001e0000000000000006000000"),
+    "animElecResource": ("ElecPose", "0000000000100000010000006804c80005000000",
+                         "0000000000100000010000006804c80005000000"),
     "animElectrocuteResource": ("getting_hit", "010000000a0000001e0000000000000006000000",
                                 "01000000110000001e0000000000000006000000"),
     "animGetUpResource": ("waking_up", "010000003f0000001e0000000000000006000000",
@@ -192,7 +192,8 @@ def test_multipliers_are_the_specified_ones():
 
 def test_clip_library_is_the_25_clips():
     assert len(CLIPS) == 25 and set(CLIPS) == CLIP_LIBRARY
-    assert set(POSE_STEMS) == {"PoseFrame", "DiePose", "DraggedPose"}
+    assert set(POSE_STEMS) == {"PoseFrame", "DiePose", "DraggedPose", "StunnedPose", "ElecPose"}
+    assert STATIC_POSES == {"staggering": "StunnedPose"}
 
 
 def test_every_slot_name_resolves_to_a_distinct_animation_slot():
@@ -219,11 +220,11 @@ def test_table_entries_from_the_brief():
         "swing": "being_picked_up", "sleep": "sleeping", "eat": "eating", "eatCorpse": "eating",
         "drink": "eating", "building": "manufacturing", "pray": "praying", "fallback": "knockback",
         "getUp": "waking_up", "dance": "celebrating", "drunk": "staggering", "drunk2": "staggering",
-        "stunnedPose": "staggering", "dejectedPose": "staggering", "idle1": "stand",
+        "stunnedPose": "StunnedPose", "dejectedPose": "staggering", "idle1": "stand",
         "idle2": "fidgeting", "drunkIdle": "fidgeting", "poseFrame": "PoseFrame",
         "walk2": "patrolling", "entrance": "walk", "walkback": "walk",
         "research": "interacting_with_objects", "loot": "interacting_with_objects",
-        "magic": "getting_hit", "torture": "getting_hit", "elec": "getting_hit",
+        "magic": "getting_hit", "torture": "getting_hit", "elec": "ElecPose",
         "electrocute": "getting_hit",
     }
     assert SLOT_CLIPS == expected
@@ -304,13 +305,14 @@ def test_stage2_differs_only_in_slot_names_and_the_tails_of_animation_slots(bile
     changed = _changed_tail_fields(stage1, stage2)
     assert {field for field, part in changed if part == "name"} == set(expected)
     tails = {(field, part) for field, part in changed if part != "name"}
-    poses = {"animPoseFrameResource", "animDiePoseResource", "animDraggedPoseResource"}
+    poses = {"animPoseFrameResource", "animDiePoseResource", "animDraggedPoseResource",
+             "animStunnedPoseResource", "animElecResource"}
     assert not {field for field, _ in tails} & poses  # pose tails stay the Bile Demon's
     assert {part for _, part in tails} <= set(TAIL_FIELDS.values())
     # Pinned per slot: walk loses Start/End and its start/end frames, its frames become 46 ...
     assert ("animWalkResource", "flags") in tails and ("animWalkResource", "startAf") in tails
     assert ("animWalkResource", "startDist") not in tails  # kept: walk was an animation
-    assert {("animElecResource", p) for p in ("frames", "fps", "startDist", "endDist", "type")} <= tails
+    assert not any(part in ("type", "startDist", "endDist", "sometimesOne") for _, part in tails)
     assert bytes(stage2.raw[RECORD_SIZE:]) == bytes(bile.raw[RECORD_SIZE:])
 
 
@@ -336,12 +338,9 @@ def test_stage2_tail_rule_written_out(bile):
         assert new.flags == old.flags & ~0x18, field
         assert new.frames == info["frames"] - (1 if info["wrap"] else 0), field
         assert (new.fps, new.type, new.start_af, new.end_af) == (30, 6, 0, 0), field
-        if old.type == 6:
-            assert (new.start_dist, new.end_dist, new.sometimes_one) == (
-                old.start_dist, old.end_dist, old.sometimes_one), field
-        else:
-            assert old.type == 5 and field in ("animStunnedPoseResource", "animElecResource")
-            assert (new.start_dist, new.end_dist, new.sometimes_one) == (0, 0, 0), field
+        assert old.type == 6, field  # every clip goes into an animation slot
+        assert (new.start_dist, new.end_dist, new.sometimes_one) == (
+            old.start_dist, old.end_dist, old.sometimes_one), field
 
 
 @needs_data
@@ -356,8 +355,8 @@ def test_stage2_slot_names_for_the_real_bile_demon(bile):
         "diePose": "Molynx-DiePose", "swing": "Molynx-being_picked_up", "idle1": "Molynx-stand",
         "idle2": "Molynx-fidgeting", "drunkIdle": "Molynx-fidgeting", "entrance": "Molynx-walk_once",
         "walkback": "Molynx-walk", "magic": "Molynx-getting_hit", "building": "Molynx-manufacturing",
-        "stunnedPose": "Molynx-staggering", "recoilHfb": "Molynx-being_slapped",
-        "elec": "Molynx-getting_hit_loop", "recoilHff": "Molynx-getting_hit",
+        "stunnedPose": "Molynx-StunnedPose", "recoilHfb": "Molynx-being_slapped",
+        "elec": "Molynx-ElecPose", "recoilHff": "Molynx-getting_hit",
     }
 
 
@@ -377,15 +376,16 @@ def test_source_wrap_is_the_clip_librarys():
 def test_file_plan_for_the_real_bile_demon(bile):
     plan = file_plan(bile, FILE_WRAPS)
     assert plan.slots == {field: stem for field, (stem, _, _) in TAILS.items()}
-    # walk loops in walk / walkback and is opened for entrance; getting_hit stays a one-shot and
-    # loops (a static pose never ends) for elec; every other stem is needed one way only.
+    # walk loops in walk / walkback and is opened for entrance; every other stem is needed one way
+    # only (stunnedPose and elec take static poses, which have no loop flag).
     assert plan.wraps == {
-        "walk": True, "walk_once": False, "getting_hit": False, "getting_hit_loop": True,
+        "walk": True, "walk_once": False, "getting_hit": False,
         "stand": False, "fidgeting": False, "eating": False, "happy": False, "attack": False,
         "angry": False, "celebrating": False, "die": False, "being_slapped": False,
         "knockback": False, "waking_up": False, "sleeping": False, "being_picked_up": True,
-        "manufacturing": True, "praying": True, "staggering": True,
+        "manufacturing": True, "praying": True,
     }
+    assert "staggering" not in stems_used(bile, plan)  # the editor's Bile Demon has no staggering slot
     assert stems_used(bile, plan) == set(plan.slots.values()) == set(plan.wraps) | set(POSE_STEMS)
     for stem in stems_used(bile, plan):
         assert len(("Molynx-" + stem).encode("ascii")) < RESOURCE_NAME_SIZE
@@ -455,8 +455,10 @@ def test_file_plan_refuses_unknown_files_and_mismatched_kinds(bile):
         file_plan(bile, missing)
     with pytest.raises(ValueError, match="animWalkResource"):
         file_plan(bile, {**FILE_WRAPS, "bile_demon-walk": None})  # type 6 slot, mesh file
-    with pytest.raises(ValueError, match="animElecResource"):
-        file_plan(bile, {**FILE_WRAPS, "bil-elec": False})  # type 5 slot, animation file
+    idle1 = bile.art_tail("animIdle1Resource")
+    bile.set_art_tail("animIdle1Resource", idle1._replace(type=5))
+    with pytest.raises(ValueError, match="animIdle1Resource"):
+        file_plan(bile, FILE_WRAPS)  # a static mesh slot that would take a clip (stand)
 
 
 @needs_data
@@ -478,6 +480,18 @@ def test_a_named_slot_of_type_none_is_renamed_but_keeps_its_tail(bile):
     assert tail_hex(stage2, "animDejectedPoseResource") == "00" * 20
 
 
+@needs_data
+def test_a_static_mesh_dejected_pose_slot_takes_the_stunned_pose(bile):
+    # 24 shipped maps name Bile_Demon-Dejected_Pose in a static mesh slot (type 5).
+    bile.set_anim_name("dejectedPose", "Bile_Demon-Dejected_Pose")
+    stunned = bile.art_tail("animStunnedPoseResource")
+    bile.set_art_tail("animDejectedPoseResource", stunned)
+    assert file_plan(bile, FILE_WRAPS).slots["animDejectedPoseResource"] == "StunnedPose"
+    stage2 = build(bile, 2)
+    assert stage2.anim_name("dejectedPose") == "Molynx-StunnedPose"
+    assert stage2.art_tail("animDejectedPoseResource") == stunned
+
+
 # ---- anim_info and file_wraps are required from stage 2 -----------------------------------------
 
 @needs_data
@@ -497,7 +511,7 @@ def test_stage1_ignores_anim_info_and_file_wraps(bile):
 
 @needs_data
 def test_anim_info_must_cover_every_used_file_and_extra_entries_are_fine(bile):
-    for stem in ("walk_once", "getting_hit_loop", "stand"):
+    for stem in ("walk_once", "getting_hit", "stand"):
         short = {k: v for k, v in ANIM_INFO.items() if k != stem}
         with pytest.raises(ValueError, match=stem):
             build(bile, 2, anim_info=short)
@@ -570,15 +584,16 @@ def test_slot_assignment_and_stems_used(bile):
     assert {slot: "Molynx-" + stem for slot, stem in assignment.items()} == expected_slot_names(bile)
     assert stems_used(bile) == set(assignment.values())
     assert stems_used(bile) <= CLIP_LIBRARY | set(POSE_STEMS)
-    # What Task 8 has to deliver for the real Bile Demon: 18 of the 25 clips and the 3 poses.
+    # What Task 8 has to deliver for the editor's Bile Demon: 17 of the 25 clips and the 5 poses
+    # (staggering only where a map's Bile Demon names dejectedPose in a type NONE slot, e.g. Siege).
     assert stems_used(bile) == {
         "walk", "DraggedPose", "getting_hit", "being_slapped", "attack", "die", "DiePose", "happy",
         "angry", "being_picked_up", "sleeping", "eating", "manufacturing", "praying", "knockback",
-        "waking_up", "celebrating", "staggering", "stand", "fidgeting", "PoseFrame",
+        "waking_up", "celebrating", "StunnedPose", "ElecPose", "stand", "fidgeting", "PoseFrame",
     }
     assert set(CLIPS) - stems_used(bile) == {
         "running", "victory_celebration", "training", "fighting_another_creature", "patrolling",
-        "guarding", "interacting_with_objects",
+        "guarding", "interacting_with_objects", "staggering",
     }
 
 

@@ -44,13 +44,13 @@ The zip holds two folders. Use **only one at a time**:
    (You can do the same in the Flame start window: double-click `Molynx` so it moves to *Enabled*,
    then drag it to the top.)
 
-3. **Start the test map.** The test maps are **Siege** and **Dead Walking**. Start with Siege.
-   - Quickest: in `config.toml`, in the `[dk2]` part, find the line `Level = ""` and make it
-     `Level = "Siege"`. Start the game as usual. It should go straight into the map.
+3. **Start the test map.** The test maps are **Dead Walking** and **Siege**. Start with Dead Walking.
+   - Pick **Dead Walking** in the Skirmish list.
+   - Or: in `config.toml`, in the `[dk2]` part, find the line `Level = ""` and make it
+     `Level = "Dead Walking"`. Start the game as usual. It should go straight into the map.
      (I could not try this myself, so it may just show the menu.)
-   - Or pick **Siege** in the Skirmish list. It may not be listed on your install.
-   - If Siege does not start, use **Dead Walking** the same way: `Level = "Dead Walking"`, or pick it
-     in the Skirmish list.
+   - Second map: **Siege**, the same way (`Level = "Siege"`). If Siege is not in the Skirmish list,
+     skip it.
 
 4. **Look at these things.** Molynx starts in **your** dungeon (Keeper 1). For each point, "pass"
    means what is written after the dash.
@@ -59,8 +59,8 @@ The zip holds two folders. Use **only one at a time**:
      hover over him the name may still say "Bile Demon"; that is expected in this test.)
    - **He walks, stands and fidgets** - he moves his legs when he walks, and stands and shifts about
      when he is idle. He is not invisible, not white or grey, not stretched or torn.
-   - **Pick him up and drop him** - in your hand he dangles. Dropped, he staggers dazed for a moment,
-     then carries on.
+   - **Pick him up and drop him** - in your hand he dangles. Dropped, he stands dazed for a moment
+     (one still pose), then carries on.
    - **Slap him** - he flinches.
    - **Make him fight** - he swings his mace, flinches when he is hit, can be knocked back and gets
      up again. If he is killed, he falls and lies there.
@@ -105,9 +105,8 @@ Some of his actions borrow the nearest animation he has. These are expected in t
 
 - **Sleeping** plays once: he lies down and stays lying until he wakes up. If he keeps standing up
   and lying down again, or freezes standing, tell me.
-- **Dazed after a drop** (and when stunned) uses his staggering animation.
-- **Being electrocuted, tortured, or casting a spell** uses his flinch (being hit). When electrocuted
-  the flinch repeats.
+- **Dazed or stunned**, he holds one still pose (from his staggering).
+- **Electrocuted**, he holds one still flinch pose. **Tortured or casting a spell** uses his flinch.
 - **Coming out of the portal** uses his walk once; **walking backwards** uses his normal walk.
 - **Drinking** uses his eating animation; **drunk** uses his fidgeting.
 - His feet may slide a little when he walks.

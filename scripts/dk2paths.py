@@ -22,6 +22,9 @@ BEHEMOTH_DIR = Path(__file__).resolve().parent.parent / "megaglest_behemoth"
 CHARACTER_PICKLE = _SCRATCH / "char_full.pkl"
 QUUZ_MAPS_DIR = (_SCRATCH / "up" / "flame" / "flame" / "resources" / "Quuz_LevelFixes"
                  / "Data" / "editor" / "maps")
+# The user's picture of Molynx (the source of his portraits).
+PORTRAIT_SRC = Path("/mnt/user-data/attachments/76eb4112-412f-58e4-a30a-b275f992be89/"
+                    "8582356e-image.png")
 
 
 def have(p: Path) -> bool:

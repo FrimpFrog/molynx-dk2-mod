@@ -25,22 +25,25 @@ fields (hp, meleeDamage, fear, threat, pay), 2**31 - 1 for the int32 mass.
 
 Animation slots. SLOT_CLIPS maps an animation slot (short name, as `anim_slot` accepts) to the key
 of the Molynx clip that drives it: a clip name as in the clip library (lowercase, underscores,
-e.g. `being_picked_up`) or one of the pose stems PoseFrame, DiePose, DraggedPose. The resource name
+e.g. `being_picked_up`) or one of the pose stems (POSE_STEMS: PoseFrame, DiePose, DraggedPose,
+StunnedPose, ElecPose; static meshes, one frame of a clip each). The resource name
 written to the slot is "Molynx-" + that stem (walk -> `Molynx-walk`, draggedPose ->
 `Molynx-DraggedPose`). RULING F: a slot that is empty in the Bile Demon record stays empty (the game
 leaves it unused: the real record empties run, research, special, eatCorpse, loot, melee2, walk2,
 dejectedPose, drunk, drunk2 and unused / extra slots), `unk_1` is never touched, and every other
-non-empty slot not in SLOT_CLIPS takes `stand`. `slot_assignment(bile)` is the resulting
-slot -> stem map and `stems_used(bile)` its set of stems.
+non-empty slot not in SLOT_CLIPS takes `stand`. Static mesh slots get static poses: the game puts a
+static mesh (type 5) in animStunnedPoseResource for 44 of 44 creatures and in animElecResource for
+38 of 39, and the Bile Demon's are type 5, so stunnedPose takes `StunnedPose` and elec `ElecPose`.
+A static mesh slot whose clip has a static pose of its own (STATIC_POSES: staggering ->
+StunnedPose; dejectedPose is type 5 in 24 shipped maps) takes that pose. `slot_assignment(bile)` is
+the resulting slot -> stem map and `stems_used(bile)` its set of stems.
 
 File plan (`file_plan(bile, file_wraps)`, the one source of truth for the record and the exporter).
 The engine's idle / job logic keys on a file looping or ending, so each slot's Molynx file must loop
 exactly when the Bile Demon's file in that slot does (`file_wraps`: the Bile Demon's file name,
 any case -> its KMF wrap flag, None for a static mesh; molynx_assets.bile_file_wraps reads them). A
-slot that is a static mesh (type 5) in the record and becomes an animation (stunnedPose, elec)
-needs a LOOPING file: a static pose never ends, and a clip that never ends cannot trigger an early
-"finished" state. A slot that names a file but whose type is NONE (0; 63 shipped maps name
-Bile_Demon-Dejected_Pose so) is not loaded by the game: it is renamed but needs nothing and keeps
+static mesh slot (type 5) takes a pose and needs no flag. A slot that names a file but whose type
+is NONE (0; 63 shipped maps name Bile_Demon-Dejected_Pose so) is not loaded by the game: it is renamed but needs nothing and keeps
 its tail. One-way clips are never looped: a clip whose source does not loop and whose last frame
 is more than MAX_CLOSE_GAP = 10 median frame steps from frame 0 (ONE_WAY_GAPS, measured on the
 source and checked by molynx_assets.plan_molynx: sleeping 37.09, which lies down and stays down,
@@ -53,9 +56,8 @@ with that flag (stand, fidgeting, eating, happy, attack, angry, celebrating are 
 needed BOTH ways keeps
 its plain file for the flag that equals its source flag (SOURCE_WRAP) and the slots that need the
 other flag name a variant, `<stem>_once` (not looping) or `<stem>_loop` (looping): for the real
-Bile Demon `entrance` -> `walk_once` (walk / walkback loop, the entrance file ends) and `elec` ->
-`getting_hit_loop`. `FilePlan.slots` is slot -> file stem, `FilePlan.wraps` file stem -> wrap for the
-animation files; the exporter writes exactly those flags (molynx_assets.required_wraps).
+Bile Demon `entrance` -> `walk_once` (walk / walkback loop, the entrance file ends).
+`FilePlan.slots` is slot -> file stem, `FilePlan.wraps` file stem -> wrap for the animation files; the exporter writes exactly those flags (molynx_assets.required_wraps).
 
 Slot tails (dk2kwd_creatures.ArtTail; resource.bt ArtResource after the 64-byte name): flags u32
 @+0, frames u32 @+4, fps u32 @+8, startDist u16 @+12, endDist u16 @+14, type u8 @+16 (5 mesh,
@@ -70,10 +72,9 @@ type 5 meshes); startDist / endDist are non-zero almost only on movement slots. 
 writes, for every slot that plays one of Molynx's animation files: flags without 0x8 and 0x10 (he
 has no Start / End files; every other bit stays the Bile Demon's), frames = the file's frames (- 1
 when it loops), fps 30 (every file is resampled to 30), type 6, startAf = endAf = 0, and keeps
-startDist / endDist / sometimesOne when the slot already was an animation (type 6) or zeroes them
-when a mesh slot becomes one (stunnedPose, elec, whose +4 held a scale of 4096 and +8 a mesh frame
-count). Pose slots (PoseFrame, DiePose, DraggedPose) are type 5 meshes and keep their tail exactly
-(a pose slot of another type is refused). `anim_info` ({file stem: {frames, fps, wrap}}, as
+startDist / endDist / sometimesOne. Pose slots (type 5 static meshes: poseFrame, diePose,
+draggedPose, stunnedPose, elec) keep their tail exactly (a pose in a slot of another type, or a
+clip in a type-5 slot, is refused). `anim_info` ({file stem: {frames, fps, wrap}}, as
 molynx_assets.export_molynx_assets returns it) must cover every animation file the plan uses and
 agree with its flags; extra entries are ignored.
 
@@ -113,7 +114,8 @@ CLIPS = (
     "sleeping", "training", "fighting_another_creature", "patrolling", "guarding", "manufacturing",
     "interacting_with_objects", "being_picked_up",
 )
-POSE_STEMS = ("PoseFrame", "DiePose", "DraggedPose")
+POSE_STEMS = ("PoseFrame", "DiePose", "DraggedPose", "StunnedPose", "ElecPose")
+STATIC_POSES = {"staggering": "StunnedPose"}  # a type-5 slot assigned this clip takes this pose
 # Whether each clip loops in the clip library itself (molynx_assets checks it against the source).
 SOURCE_WRAP: dict[str, bool] = {clip: clip not in (
     "die", "victory_celebration", "getting_hit", "being_slapped", "waking_up", "knockback",
@@ -134,13 +136,13 @@ SLOT_CLIPS: dict[str, str] = {
     "eat": "eating", "eatCorpse": "eating", "drink": "eating",
     "building": "manufacturing", "pray": "praying", "fallback": "knockback",
     "getUp": "waking_up", "dance": "celebrating",
-    "drunk": "staggering", "drunk2": "staggering", "stunnedPose": "staggering",
+    "drunk": "staggering", "drunk2": "staggering", "stunnedPose": "StunnedPose",
     "dejectedPose": "staggering",
     "idle1": "stand", "idle2": "fidgeting", "drunkIdle": "fidgeting",
     "poseFrame": "PoseFrame", "walk2": "patrolling",
     "entrance": "walk", "walkback": "walk",
     "research": "interacting_with_objects", "loot": "interacting_with_objects",
-    "magic": "getting_hit", "torture": "getting_hit", "elec": "getting_hit",
+    "magic": "getting_hit", "torture": "getting_hit", "elec": "ElecPose",
     "electrocute": "getting_hit",
 }
 
@@ -148,7 +150,8 @@ SLOT_CLIPS: dict[str, str] = {
 _NEAREST_ONLY = {
     "magic": "No spell-casting clip in the library; a hit reaction is the nearest.",
     "torture": "No torture clip in the library; flinching (getting_hit) is the nearest.",
-    "elec": "No electrocution clip in the library; flinching (getting_hit) is the nearest.",
+    "elec": ("No electrocution pose in the library; the peak frame of flinching (getting_hit) is "
+             "the nearest."),
     "electrocute": "No electrocution clip in the library; flinching (getting_hit) is the nearest.",
     "research": "No studying clip in the library; interacting_with_objects is the nearest.",
     "loot": "No looting clip in the library; interacting_with_objects is the nearest.",
@@ -158,7 +161,7 @@ _NEAREST_ONLY = {
     "melee2": "No second melee clip in the library; the ordinary attack is reused.",
     "drink": "No drinking clip in the library; eating is the nearest.",
     "eatCorpse": "No corpse-eating clip in the library; ordinary eating is reused.",
-    "stunnedPose": "No stunned pose in the library; staggering is the nearest.",
+    "stunnedPose": "No stunned pose in the library; a middle frame of staggering is the nearest.",
     "dejectedPose": "No dejected pose in the library; staggering is the nearest.",
     "drunkIdle": "No drunken idle in the library; fidgeting is the nearest.",
 }
@@ -172,10 +175,18 @@ def review_list() -> list[tuple[str, str, str]]:
 
 def slot_assignment(bile: Creature) -> dict[str, str]:
     """Animation slot field name -> stem, for every slot that is non-empty in `bile` (RULING F).
-    `unk_1` is excluded; a slot not in SLOT_CLIPS takes `stand`."""
+    `unk_1` is excluded; a slot not in SLOT_CLIPS takes `stand`; a static mesh slot whose clip has
+    a static pose (STATIC_POSES) takes that pose."""
     table = {anim_slot(short): stem for short, stem in SLOT_CLIPS.items()}
-    return {slot: table.get(slot, DEFAULT_STEM) for slot in ANIM_SLOTS
-            if slot != "unk_1" and bile.resource_name(slot)}
+    out = {}
+    for slot in ANIM_SLOTS:
+        if slot == "unk_1" or not bile.resource_name(slot):
+            continue
+        stem = table.get(slot, DEFAULT_STEM)
+        if bile.art_tail(slot).type == ART_TYPE_MESH:
+            stem = STATIC_POSES.get(stem, stem)
+        out[slot] = stem
+    return out
 
 
 class WrapException(NamedTuple):
@@ -219,9 +230,7 @@ def _slot_need(bile: Creature, slot: str, stem: str, files: dict) -> bool | None
         raise ValueError(f"file_wraps has no entry for {name} (slot {slot})")
     wrap = files[name.lower()]
     if kind == ART_TYPE_MESH:
-        if wrap is not None:
-            raise ValueError(f"{slot} is a mesh slot (type 5) but {name} is an animation")
-        return True  # a static pose never ends: the animation that replaces it must loop
+        raise ValueError(f"{slot} is a static mesh slot (type 5) but takes the clip {stem}, not a pose")
     if kind == ART_TYPE_ANIMATING_MESH:
         if wrap is None:
             raise ValueError(f"{slot} is an animation slot (type 6) but {name} is a static mesh")
@@ -315,12 +324,9 @@ def _write_slots(molynx: Creature, bile: Creature, plan: FilePlan, anim_info: Ma
         if stem in POSE_STEMS or old.type == ART_TYPE_NONE:
             continue  # a pose keeps its mesh tail; a type NONE slot is not loaded by the game
         frames = _anim_frames(stem, plan.wraps[stem], anim_info)
-        keep = old.type == ART_TYPE_ANIMATING_MESH  # else a mesh slot becomes an animation
         molynx.set_art_tail(slot, old._replace(
             flags=old.flags & ~(ART_FLAG_HAS_START_ANIMATION | ART_FLAG_HAS_END_ANIMATION),
-            frames=frames, fps=GAME_FPS, type=ART_TYPE_ANIMATING_MESH, start_af=0, end_af=0,
-            start_dist=old.start_dist if keep else 0, end_dist=old.end_dist if keep else 0,
-            sometimes_one=old.sometimes_one if keep else 0))
+            frames=frames, fps=GAME_FPS, start_af=0, end_af=0))
 
 
 def build_molynx(bile: Creature, stage: int, order_in_editor: int,

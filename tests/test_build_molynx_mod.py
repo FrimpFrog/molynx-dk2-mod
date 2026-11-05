@@ -45,9 +45,10 @@ SECOND = "Dead Walking"  # the skirmish map whose first keeper Bile Demon is Kee
 MAPS = ["Siege", SECOND]
 TEXT_IDS = {"name": 3001, "tooltip": 3002, "general": 3003, "strength": 3004, "weakness": 3005}
 # The files a stage-2 folder delivers (literal; the record's file plan for the test maps' Bile Demons):
-# 18 clips, the variants walk_once and getting_hit_loop, the 3 poses, and the 2 textures.
+# 18 clips (staggering only for Siege's type NONE dejectedPose slot), the variant walk_once, the 5
+# poses (stunnedPose and elec take static poses), and the 2 textures.
 STAGE2_MESHES = sorted(f"Molynx-{stem}.kmf" for stem in (
-    "walk", "walk_once", "DraggedPose", "getting_hit", "getting_hit_loop", "attack", "die",
+    "walk", "walk_once", "DraggedPose", "getting_hit", "StunnedPose", "ElecPose", "attack", "die",
     "DiePose", "happy", "angry", "staggering", "being_picked_up", "sleeping", "eating", "stand",
     "being_slapped", "manufacturing", "praying", "knockback", "waking_up", "celebrating",
     "fidgeting", "PoseFrame"))
@@ -58,7 +59,8 @@ TAIL_AT = {"flags": (0, 4), "frames": (4, 4), "fps": (8, 4), "startDist": (12, 2
            "endDist": (14, 2), "type": (16, 1), "startAf": (17, 1), "endAf": (18, 1),
            "sometimesOne": (19, 1)}  # the 20 bytes after a slot's name: (offset, size)
 # slot-table.md (plan Task 8), copied here independently of the record module and the audit, plus
-# the loop-variant rulings (entrance -> walk_once, elec -> getting_hit_loop); other slots: stand.
+# the rulings (entrance -> walk_once; the static mesh slots stunnedPose and elec take the static
+# poses StunnedPose and ElecPose); other slots: stand.
 SLOT_TABLE = """walk->walk, run->running, draggedPose->DraggedPose, recoilHff->getting_hit,
 recoilHfb->being_slapped, melee1/melee2/special->attack, die->die, diePose->DiePose, happy->happy,
 angry->angry, swing->being_picked_up, sleep->sleeping, eat/eatCorpse/drink->eating,
@@ -66,7 +68,7 @@ building->manufacturing, pray->praying, fallback->knockback, getUp->waking_up, d
 drunk/drunk2/stunnedPose/dejectedPose->staggering, idle1->stand, idle2/drunkIdle->fidgeting,
 poseFrame->PoseFrame, walk2->patrolling, entrance/walkback->walk,
 research/loot->interacting_with_objects, magic/torture/elec/electrocute->getting_hit"""
-VARIANTS = {"entrance": "walk_once", "elec": "getting_hit_loop"}
+VARIANTS = {"entrance": "walk_once", "stunnedPose": "StunnedPose", "elec": "ElecPose"}
 
 
 def expected_slot_files() -> dict[str, str]:
@@ -916,7 +918,7 @@ def test_stage2_folder_holds_exactly_the_files_the_record_names(stage2_full):
                        *(f"Data/Meshes/{f}" for f in STAGE2_MESHES),
                        *(f"Data/EngineTextures/{f}" for f in STAGE2_TEXTURES)])
     assert found == expected
-    assert len(STAGE2_MESHES) == 23
+    assert len(STAGE2_MESHES) == 24
     for clip in UNUSED_CLIPS:
         assert not (meshes(stage2_full) / f"Molynx-{clip}.kmf").exists(), clip
 
@@ -924,8 +926,19 @@ def test_stage2_folder_holds_exactly_the_files_the_record_names(stage2_full):
 @needs_data
 @needs_assets
 def test_stage2_names_every_delivered_mesh_in_record_47_of_each_map(stage2_full):
-    for name in MAPS:
-        assert {n + ".kmf" for n in renamed_slots(stage2_full, name)} == set(STAGE2_MESHES), name
+    named = {name: {n + ".kmf" for n in renamed_slots(stage2_full, name)} for name in MAPS}
+    assert named["Siege"] == set(STAGE2_MESHES)
+    assert named[SECOND] == set(STAGE2_MESHES) - {"Molynx-staggering.kmf"}  # no dejectedPose there
+
+
+@needs_data
+@needs_assets
+def test_stage2_delivers_the_union_of_the_maps_file_plans(stage2_full):
+    from scripts.molynx_assets import molynx_files
+    from scripts.molynx_record import stems_used
+    plans = [molynx_files(source_bile(name)) for name in MAPS]
+    stems = set().union(*(stems_used(source_bile(n), p) for n, p in zip(MAPS, plans)))
+    assert {f"Molynx-{stem}.kmf" for stem in stems} == set(files_under(meshes(stage2_full)))
 
 
 @needs_data
@@ -940,14 +953,19 @@ def test_stage2_files_are_byte_copies_of_the_export(stage2_full, assets_dir):
 @needs_data
 @needs_assets
 def test_stage2_record_frames_come_from_the_files(stage2_dir):
-    """A few literal values: walk loops (47 frames -> 46), sleeping does not (136), elec is the
-    looping getting_hit (18 -> 17) and became an animation (type 6), poses stay meshes (type 5)."""
+    """A few literal values: walk loops (47 frames -> 46), sleeping does not (136); stunnedPose and
+    elec name static poses and keep the Bile Demon's mesh tails (type 5, scale 4096)."""
     molynx = record_47(stage2_dir, "Siege")
     assert get_tail(molynx, "animWalkResource", "frames") == 46
     assert get_tail(molynx, "animSleepResource", "frames") == 136
     assert get_tail(molynx, "animSleepResource", "fps") == 30
-    assert get_tail(molynx, "animElecResource", "frames") == 17
-    assert get_tail(molynx, "animElecResource", "type") == 6
+    bile = source_bile("Siege")
+    for slot in ("animElecResource", "animStunnedPoseResource"):
+        start = FIELDS[slot].offset
+        assert molynx.raw[start + 64:start + 84] == bile.raw[start + 64:start + 84], slot
+        assert get_tail(molynx, slot, "type") == 5 and get_tail(molynx, slot, "frames") == 4096
+    assert molynx.resource_name("animElecResource") == "Molynx-ElecPose"
+    assert molynx.resource_name("animStunnedPoseResource") == "Molynx-StunnedPose"
     assert get_tail(molynx, "animPoseFrameResource", "type") == 5
     assert get_tail(molynx, "animWalkResource", "flags") & 0x18 == 0
 
@@ -1094,16 +1112,16 @@ def test_stage2_audit_of_the_handed_over_folder_passes_every_rule(stage2_full):
         for rule in "abcdef":
             assert len(pass_lines(report, rule, name)) == 1, (rule, name)
         (line,) = pass_lines(report, "b", name)
-        assert "stage 2" in line and "26 rewritten" in line
+        assert "stage 2" in line and "24 rewritten" in line
     (g,) = [line for line in report.lines if line.startswith("PASS (g) folder:")]
-    assert "23 meshes" in g and "2 textures" in g
+    assert "24 meshes" in g and "2 textures" in g
 
 
 @needs_data
 @needs_assets
 def test_stage2_audit_passes_with_every_renamed_animation_present(mod2):
     names = renamed_slots(mod2, "Siege")
-    assert "Molynx-walk" in names and len(names) == 23
+    assert "Molynx-walk" in names and len(names) == 24
     report = audit(mod2)
     assert report.ok, "\n".join(report.lines)
     assert any("stage 2" in line for line in report.lines if line.startswith("PASS (b)"))
@@ -1256,11 +1274,11 @@ def test_stage2_start_and_end_flag_bits_left_set_fail(mod2):
 @needs_data
 @needs_assets
 @pytest.mark.parametrize("slot", ["animStunnedPoseResource", "animElecResource"])
-def test_stage2_a_mesh_slot_left_as_type_5_fails(mod2, slot):
-    set_tail(mod2, "Siege", slot, "type", 5)
+def test_stage2_a_pose_slot_turned_into_type_6_fails(mod2, slot):
+    set_tail(mod2, "Siege", slot, "type", 6)
     (line,) = fail_lines(audit(mod2))
     assert line.startswith("FAIL (b) Siege:")
-    assert f"{slot} type ({tail_range(slot, 'type')}) is 5, expected 6" in line
+    assert f"{slot} type ({tail_range(slot, 'type')}) is 6, expected 5" in line
 
 
 @needs_data
@@ -1382,12 +1400,17 @@ def test_stage2_a_looped_sleeping_file_is_no_exception_but_breaks_its_frame_coun
 
 @needs_data
 @needs_assets
-def test_stage2_a_mesh_slot_animation_that_does_not_loop_fails(mod2):
-    """elec replaces the Bile Demon's static Bil-Elec, which never ends: its animation must loop."""
-    rewrite_kmf(meshes(mod2) / "Molynx-getting_hit_loop.kmf", lambda m: setattr(m.anim, "wrap", False))
+def test_stage2_an_animation_in_a_static_pose_slot_fails(mod2):
+    """elec replaces the Bile Demon's static Bil-Elec: its file must be a static pose, not an
+    animation (here getting_hit, delivered under the pose's name)."""
+    shutil.copyfile(meshes(mod2) / "Molynx-getting_hit.kmf", meshes(mod2) / "Molynx-ElecPose.kmf")
+    rewrite_kmf(meshes(mod2) / "Molynx-ElecPose.kmf", lambda m: setattr(m.anim, "name", "Molynx-ElecPose"))
     report = audit(mod2)
     (f,) = fail_lines(report, "f")
-    assert "animElecResource: Molynx-getting_hit_loop does not loop" in f and "Bil-Elec" in f
+    assert "animElecResource: Molynx-ElecPose is an animation" in f and "Bil-Elec" in f
+    (b,) = fail_lines(report, "b")
+    assert "animElecResource names Molynx-ElecPose, an animation" in b
+    assert len(fail_lines(report)) == 2
 
 
 @needs_data
@@ -1492,10 +1515,11 @@ def test_stage2_swapped_whole_resources_of_two_slots_fail(mod2):
     ("animWalkResource", "endAf", 40, 0),               # no End file
     ("drunkIdle", "sometimesOne", 0, 1),                # kept
     ("animIdle1Resource", "sometimesOne", 1, 0),
-    ("animStunnedPoseResource", "startDist", 1128, 0),  # a mesh slot became an animation: zeroed
-    ("animStunnedPoseResource", "endDist", 158, 0),
-    ("animElecResource", "endDist", 200, 0),
+    ("animStunnedPoseResource", "startDist", 0, 1128),  # a pose slot keeps the Bile Demon's tail
+    ("animStunnedPoseResource", "endDist", 0, 158),
+    ("animElecResource", "endDist", 0, 200),
     ("animElecResource", "sometimesOne", 1, 0),
+    ("animElecResource", "frames", 17, 4096),
 ])
 def test_stage2_every_tail_sub_field_is_checked(mod2, slot, sub, value, expected):
     set_tail(mod2, "Siege", slot, sub, value)

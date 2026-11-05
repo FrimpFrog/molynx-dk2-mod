@@ -16,9 +16,9 @@ his files, copied byte for byte from an export folder (`assets_dir`, written by
 molynx_assets.export_molynx_assets; the builder never runs that export itself):
 
   <name>/Data/Meshes/Molynx-<stem>.kmf   exactly the files the record names (the file plan of each
-                                         map's Bile Demon: 20 clips incl. the variants walk_once and
-                                         getting_hit_loop, and the 3 poses; the 7 clips no slot uses
-                                         stay out)
+                                         map's Bile Demon, `stems_used`: for the test
+                                         maps 18 clips, the variant walk_once and the 5
+                                         static poses; the clips no slot uses stay out)
   <name>/Data/EngineTextures/<t>.png     the textures those files' materials name (Molynx_Body,
                                          Molynx_Mace), where the user's Flame texture mods put theirs
 
@@ -61,8 +61,8 @@ from scripts.dk2kld_splice import (BILE_DEMON_ID, BILE_DEMON_NAME, MAP_SUFFIXES,
 from scripts.dk2kmf import parse_kmf
 from scripts.dk2kwd_blocks import read_blocks
 from scripts.dk2kwd_creatures import Creature, read_creatures
-from scripts.molynx_assets import GAME_FPS, MAX_TEXTURE, bile_file_wraps
-from scripts.molynx_record import CREATURE_ID, POSE_STEMS, PREFIX, file_plan
+from scripts.molynx_assets import MAX_TEXTURE, bile_file_wraps
+from scripts.molynx_record import CREATURE_ID, GAME_FPS, POSE_STEMS, PREFIX, file_plan
 
 # Flame lists mods by folder name: names are split at ';' in alt-resources, the launcher skips a
 # folder whose name has a '.', and a name is also a path component. So: letters, digits, _ and -.

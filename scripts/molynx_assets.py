@@ -5,10 +5,14 @@ Behemoth dressed by custom_character.build_character, with the 21 DK2 clips reta
 behemoth_anims.build_all), turns every clip into a game animation and writes
 
   Molynx-<clip>.kmf      the 25 clips of molynx_record.CLIPS (animation files)
-  Molynx-<clip>_once.kmf / _loop.kmf  variants the slots need (Bile Demon: walk_once, getting_hit_loop)
+  Molynx-<clip>_once.kmf / _loop.kmf  variants the slots need (Bile Demon: walk_once)
   Molynx-PoseFrame.kmf   `stand` frame 0          (static mesh files, like the Bile Demon's poses)
   Molynx-DiePose.kmf     `die` last frame
   Molynx-DraggedPose.kmf `being_picked_up` frame 0
+  Molynx-StunnedPose.kmf `staggering` frame 48 of 96 (the middle frame)
+  Molynx-ElecPose.kmf    `getting_hit` frame 5 of 17 (the peak: the largest mean vertex distance
+                         from frame 0; the largest single-vertex distance is at the last frame, 16,
+                         where one arm drifts, not the flinch)
   Molynx_Body.png, Molynx_Mace.png      the textures the materials name
   molynx-bg.png (64x128), molynx.png (64x64), portraits_preview.png
 
@@ -49,7 +53,10 @@ Bile Demon's poses copy idle1's values) tracks texture-space size per model size
 lengths) (median fit, log IQR 0.35, so not the game's exact formula); it is set that way from
 `stand` frame 0. Its role is not known; it looks like a mip-map hint.
 
-Animations. Every frame is keyed (encode_anim reduce=False), as in 17 of the 21 Bile Demon files.
+Animations. Keyframes are reduced (encode_anim reduce=True: a vertex keeps only the keyframes it
+needs within one quantisation step), as in 661 game files and 4 of the 21 Bile Demon files; fully
+keyed files (reduce=False, like the other 17) would be far larger than any game animation (see
+"Size").
 A KMF has no rate: the creature record gives each slot (frames, fps) and the Bile Demon's slots all
 say 30 fps (sleep 15). Every clip is resampled to 30 fps by linear interpolation of the vertices,
 over the clip's own duration ((n - 1) / fps; a looping clip n / fps, or (n - 1) / fps when its last
@@ -57,7 +64,7 @@ frame already closes the loop), stretched by at most half a frame so the first a
 frames are kept exactly. Clips at 30 fps are unchanged. A looping (`wrap`) clip ends on a copy of
 frame 0, as all 209 looping game files do. A loop "already closes" (`loop_closes`) when its last
 frame is within LOOP_GAP = 0.3 x the median frame-to-frame step of frame 0: that last frame is
-REPLACED by the copy (frame count unchanged; the 9 retargeted loops that close exactly and
+REPLACED by the copy (frame count unchanged; the 8 retargeted loops that close exactly and
 fidgeting, staggering, interacting_with_objects at 0.16 / 0.22 / 0.21 of a step), so the loop has
 no near-duplicate frame; any other loop gets the copy appended. `plan.info` gives each clip's own
 frame count, fps and wrap.
@@ -78,7 +85,7 @@ own flag. `file_clip` changes a clip's flag:
     frame 0 replaces a nearly closing last frame, else is appended). The step from the last source
     frame back to frame 0 is then played as one frame, so only a clip that ends near where it began
     is ever closed: its `loop_gap` (last-to-first gap / median step) must be at most
-    MAX_CLOSE_GAP = 10 (getting_hit 5.8 -> getting_hit_loop). The one-way clips above it
+    MAX_CLOSE_GAP = 10 (getting_hit 5.8 could be closed; no slot of the Bile Demon needs it now). The one-way clips above it
     (molynx_record.ONE_WAY_GAPS: sleeping 37.1, waking_up 25.3) are never closed; plan_molynx
     checks that list against the source, and a slot that wanted one looped is reported in
     `wrap_exceptions` (the real Bile Demon: sleeping in the sleep slot).
@@ -86,14 +93,15 @@ The returned `info` gives the FINAL frames, fps and wrap of every animation file
 stage-2 record turns it into each slot's frames (file frames - 1 for looping files, as the Bile
 Demon's record does: walk 41 -> 40; = file frames otherwise: idle1 190).
 
-Size (a known risk, kept on purpose). Fully keyed files are large: the biggest GEOM is 136,344
-keyframe positions (Molynx-victory_celebration: 552 rows x 247, its 246 frames plus the block
-seam), against 34,816 in the largest game animation (Mis-Idle1), and DraggedPose has 552 GEOM
-positions against 311 in the largest game mesh. If the game rejects or mis-handles them, `export_molynx_assets(reduce=True)`
-writes the reduced family instead (one quantisation step of tolerance), like 661 game files.
+Size. Fully keyed (reduce=False), the biggest GEOM would be 136,344 keyframe positions
+(Molynx-victory_celebration, 552 rows x 247) against 34,816 in the largest game animation
+(Mis-Idle1), with five shipped clips above 34,816 and two above 65,535; reduced, every shipped
+animation stays below 65,535 and only `staggering` is above 34,816 (an accepted exception; the
+test pins the numbers). DraggedPose has 552 GEOM positions against 311 in the largest game mesh.
 
-Poses. The Bile Demon's PoseFrame / DiePose / Dragged_Pose files are static meshes (kind 1, three
-sprites, 20 CTRL entries, record type byte 5 = mesh), so Molynx's three are static meshes too:
+Poses. The Bile Demon's PoseFrame / DiePose / Dragged_Pose / Stunned_Pose / Elec files are static
+meshes (kind 1, three sprites, 20 CTRL entries, record type byte 5 = mesh), so Molynx's five are
+static meshes too:
 GEOM holds each distinct position once, `pos` is its bounding-box centre and `scale` the largest
 distance from it (862 of 862 game meshes).
 
@@ -146,13 +154,10 @@ from scripts.dk2kmf import Kmf, Material, Mesh, Sprite, Vertex, evaluate_anim_fr
 from scripts.dk2kmf_write import encode_anim, write_kmf
 from scripts.dk2kwd_blocks import read_blocks
 from scripts.dk2kwd_creatures import ART_TYPE_NONE, Creature, read_creatures
-from scripts.dk2paths import BEHEMOTH_DIR, EDITOR_DIR, GAME_DIR, MESHES_DIR
-from scripts.molynx_record import (CLIPS, MAX_CLOSE_GAP, ONE_WAY_GAPS, POSE_STEMS, PREFIX,
+from scripts.dk2paths import BEHEMOTH_DIR, EDITOR_DIR, GAME_DIR, MESHES_DIR, PORTRAIT_SRC
+from scripts.molynx_record import (CLIPS, GAME_FPS, MAX_CLOSE_GAP, ONE_WAY_GAPS, POSE_STEMS, PREFIX,
                                    SOURCE_WRAP, FilePlan, clip_of, file_plan, slot_assignment)
 
-PORTRAIT_SRC = Path("/mnt/user-data/attachments/76eb4112-412f-58e4-a30a-b275f992be89/"
-                    "8582356e-image.png")
-GAME_FPS = 30
 VERSION = 17
 LODS = 16
 MAX_SPRITE_VERTICES = 255
@@ -163,7 +168,8 @@ MM_PER_RATIO = 2.33
 BODY_TEXTURE, MACE_TEXTURE = "Molynx_Body", "Molynx_Mace"
 TEXTURE_NAMES = {"custom_character/body": BODY_TEXTURE, "custom_character/mace": MACE_TEXTURE}
 PART_NAMES = {BODY_TEXTURE: "Body", MACE_TEXTURE: "Mace"}
-POSE_SOURCES = {"PoseFrame": ("stand", 0), "DiePose": ("die", -1), "DraggedPose": ("being_picked_up", 0)}
+POSE_SOURCES = {"PoseFrame": ("stand", 0), "DiePose": ("die", -1), "DraggedPose": ("being_picked_up", 0),
+                "StunnedPose": ("staggering", 48), "ElecPose": ("getting_hit", 5)}  # see the docstring
 FRAME = 7                       # the game portraits' frame, pixels on every side
 FACE_BOX = (0.503, 0.355, 0.508)  # the face square in the user's image: centre x, y and side, as
                                   # fractions of the image width, height and width
@@ -535,7 +541,7 @@ def _file_wraps(plan: MolynxPlan, wraps: dict) -> dict:
     return files
 
 
-def clip_kmf(plan: MolynxPlan, stem: str, reduce: bool = False, wrap: bool | None = None) -> Kmf:
+def clip_kmf(plan: MolynxPlan, stem: str, reduce: bool = True, wrap: bool | None = None) -> Kmf:
     """The animation file `stem` (a clip, or a variant with `wrap`); `wrap` None = the clip's own."""
     clip = plan.clips[stem] if wrap is None else file_clip(plan, stem, wrap)
     rows = _rows(clip.frames)
@@ -640,15 +646,17 @@ def _preview(images: list[tuple[str, Image.Image]]) -> Image.Image:
 
 def export_molynx_assets(out_dir: Path, height_ratio: float = 1.15,
                          portrait_src: Path | None = PORTRAIT_SRC, *, plan: MolynxPlan | None = None,
-                         body_size: int = MAX_TEXTURE, reduce: bool = False,
+                         body_size: int = MAX_TEXTURE, reduce: bool = True,
                          editor_dir: Path = EDITOR_DIR, game_dir: Path = GAME_DIR,
                          meshes_dir: Path = MESHES_DIR, wraps: dict | None = None) -> dict:
-    """Write Molynx's .kmf files (the 25 clips, the variants `wraps` names and the 3 poses), 2
+    """Write Molynx's .kmf files (the 25 clips, the variants `wraps` names and the 5 poses), 2
     textures and (with `portrait_src`) 2 portraits plus a preview into `out_dir`, which must not
-    exist or be empty (nothing is ever deleted). Every input is checked before the first file is
-    written. `wraps` ({file stem: loop flag}, default `required_wraps` of the editor's Bile Demon)
-    sets the loop flag of the files it names (see the module docstring). `reduce=True` keeps only
-    the keyframes each vertex needs (the fallback if the fully keyed files prove too big).
+    exist or be empty (nothing is ever deleted). `out_dir`, the portrait source, the plan's height
+    ratio and `wraps` are checked before the first file is written; an encoding error can still
+    stop the export part-way. `wraps` ({file stem: loop flag}, default `required_wraps` of the
+    editor's Bile Demon) sets the loop flag of the files it names (see the module docstring).
+    `reduce=True` (the default) keeps only the keyframes each vertex needs; `reduce=False` keys
+    every frame.
     -> {"meshes": {stem: path}, "textures": {name: path}, "portraits": {name: path},
         "preview": path | None, "info": {file stem: {frames, fps, wrap}} (final files),
         "wrap_exceptions": [molynx_record.WrapException] (default wraps only, else []),
