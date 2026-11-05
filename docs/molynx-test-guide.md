@@ -1,4 +1,4 @@
-# Molynx - Test B (the flat test map)
+# Molynx - Test A, map 2 (the flat test map)
 
 ## What you are testing
 
@@ -7,11 +7,12 @@ Molynx is a new, 47th creature: a red horned brute with a mace. This test checks
 - **Does the game accept a 47th creature?**
 - **Do his own model and animations work?**
 
-In Test A he did not show up at the start. So this zip brings a new map made only for this test:
-**Molynx Test**. It is flat and open. You have a Dungeon Heart, a Portal, 6 Imps, a few gems and
+On the first Test A maps he did not show up at the start. So this zip brings a new map made only
+for this test: **Molynx Test**. It is flat and open. You have a Dungeon Heart, a Portal, 6 Imps, a few gems and
 gold, 100000 gold to start, and every room, door, trap and spell. Molynx stands **right next to
 your heart**. The enemy keeper is shut in behind thick Impenetrable Rock, so nobody attacks you and
-there is nothing to dig. There is no win or lose, so the game does not end by itself.
+there is nothing to dig except the gems and gold. There is no win or lose, so the game does not
+end by itself.
 
 He lives by the same rules as the Bile Demon in this test: what he likes, when he gets angry, how
 long he stays stunned, his strength and his pay are all copied from the Bile Demon. His name and
@@ -26,15 +27,15 @@ The zip holds two folders. Use **only one at a time**:
 - `Molynx` - the real test (start with this one).
 - `Molynx_slot_only` - a backup test, only for step 8.
 
-Each folder has three maps: **Molynx Test**, **Molynx Test Portal** (step 7) and **Siege** (the
-Test A map). While the folder is on, **Dead Walking** is also the flat test map (its own map is
+Each folder has three maps: **Molynx Test**, **Molynx Test Portal** (step 7) and **Siege** (as in
+the first zip). While the folder is on, **Dead Walking** is also the flat test map (its own map is
 back when you take the folder out).
 
 ## What to do
 
 1. **Copy the folder.** Copy the folder `Molynx` from the zip into `<DK2>\flame\resources\`
-   (next to `Quuz_LevelFixes`, `Quuz_HD` and the others). If the old `Molynx` folder from Test A is
-   still there, delete it first.
+   (next to `Quuz_LevelFixes`, `Quuz_HD` and the others). If the old `Molynx` folder from the first zip
+   is still there, delete it first.
 
 2. **Turn it on.** Open `<DK2>\flame\config.toml` in Notepad. Find the line that starts with
    `alt-resources` (in the `[flame]` part). Today it reads:
@@ -84,7 +85,7 @@ back when you take the folder out).
    - **Slap him** - he flinches.
    - **Make him fight** - in the training room he swings his mace. There are no enemies on this
      map, so being hit, knocked back, getting up and dying are hard to see here; if you do see
-     them (in Siege, for example), tell me how they looked.
+     them anywhere, tell me how they looked.
    - **Put him to sleep** - in a lair he lies down and stays lying (see the quirks below).
    - **Eat** - in the hatchery he eats.
    - **Pray** - in a temple he prays.
@@ -108,6 +109,7 @@ back when you take the folder out).
 7. **Second map: "Molynx Test Portal".** The same flat map, but here Molynx can also **come through
    the portal**, like any creature. Start it the same way: `Level = "Molynx Test Portal"`, or pick
    **Molynx Test Portal** in the Skirmish list. Build a lair and a hatchery and wait at the portal.
+   If you cannot find "Molynx Test Portal" in the list, skip this step and tell me.
    - Does a second Molynx walk out of the portal?
    - **Tell me if the game crashes then** (when he comes out, or when his panel or the creature list
      opens). That is a real answer: this is the riskiest part of the test.

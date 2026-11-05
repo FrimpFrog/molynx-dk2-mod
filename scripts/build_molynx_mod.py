@@ -40,7 +40,7 @@ the Skirmish list and puts Molynx in Keeper 1's dungeon, "Dead Walking" (see dk2
 `pick_skirmish_test_map`). On both maps the Molynx thing is owned by player 3, "Keeper 1". These
 are "copied" maps: the map's own files with the two changes above.
 
-Flat maps (`FLAT_MAPS`, Test B): the flat test map of dk2_testmap (Keeper 1 on a big claimed floor
+Flat maps (`FLAT_MAPS`, the flat test map of Test A, map 2): the flat test map of dk2_testmap (Keeper 1 on a big claimed floor
 with a portal, gems, gold, six Imps and Molynx beside the heart; Keeper 2 sealed in Impenetrable
 Rock) under three names: "Molynx Test", "Molynx Test Portal" (Molynx also in the portal pool) and
 "Dead Walking" (the same map as "Molynx Test" under the shipped name, so the game finds it even if

@@ -43,7 +43,7 @@ MULTIPLAYER_FLAG = 1 << 10
 FOLDER = "Molynx_slot_only"
 SECOND = "Dead Walking"  # the skirmish map whose first keeper Bile Demon is Keeper 1's
 MAPS = ["Siege", SECOND]  # the Test A maps (built with maps=MAPS: both copied and retargeted)
-# The folders as handed over (Test B): Siege as in Test A, and the flat test map under three names;
+# The folders as handed over (Test A, map 2): Siege as in Test A, and the flat test map under three names;
 # stem -> (Molynx in the portal pool, the name the level file shows).
 FLAT = {"Molynx Test": (False, "Molynx Test"), "Molynx Test Portal": (True, "Molynx Test Portal"),
         SECOND: (False, "Molynx Test")}
@@ -1622,7 +1622,7 @@ def test_bundle_refuses_a_missing_folder(tmp_path):
     assert not (tmp_path / "a.zip").exists()
 
 
-# ---- Test B: the flat test map in the folders (builder) -----------------------------------------
+# ---- the flat test map in the folders (builder) -------------------------------------------------
 # Offsets used below (written out here, from the Task 1 reconnaissance): Map.kld header 36 bytes,
 # then 69 x 69 tiles of 4 bytes (terrain, player, flag, unknown); Things.kld header 56 bytes (count
 # u32 at 20, file size at 8, content size at 52), records u32 type, u32 size, data (a creature: x, y
@@ -1790,11 +1790,15 @@ def test_a_map_both_copied_and_flat_is_refused(tmp_path):
 
 
 @needs_data
-def test_flat_maps_alone_can_be_built_and_pass_the_audit(tmp_path):
-    out = build_mod(1, tmp_path, maps=[], flat_maps={"Molynx Test": False, "Molynx Test Portal": True,
-                                                     SECOND: False})
+def test_explicit_maps_and_flat_maps_build_the_handed_over_layout(tmp_path):
+    out = build_mod(1, tmp_path, maps=["Siege"], flat_maps={"Molynx Test": False, "Molynx Test Portal": True,
+                                                            SECOND: False})
     report = audit(out)
     assert report.ok, "\n".join(report.lines)
+    alone = build_mod(1, tmp_path / "alone", maps=[], flat_maps={"Molynx Test": False,
+                                                                 "Molynx Test Portal": True, SECOND: False})
+    (line,) = fail_lines(audit(alone))
+    assert line.startswith("FAIL (g) folder:") and "map Siege is missing" in line
 
 
 @needs_data
@@ -1805,7 +1809,7 @@ def test_shipped_resource_toml_names_the_flat_maps(shipped1):
     assert "Enable only one Molynx folder at a time." in one["description"]
 
 
-# ---- Test B: the audit of the flat maps ---------------------------------------------------------
+# ---- the audit of the flat maps -----------------------------------------------------------------
 
 FLAT_RULES = [f"m{i}" for i in range(1, 13)]
 
@@ -1826,6 +1830,9 @@ def test_shipped_audit_is_ok_with_every_flat_map_rule(shipped1):
     assert [line for line in report.lines if line.startswith("PASS (m13) folder:")]
     (m5,) = pass_lines(report, "m5", "Molynx Test")
     assert "6 tiles thick" in m5
+    (m10,) = pass_lines(report, "m10", "Molynx Test")
+    assert "its 6 map paths name its own files, all in the folder; the 7th is the game's " \
+           "GlobalVariables.kwd" in m10
 
 
 @needs_data
@@ -1843,6 +1850,52 @@ def test_the_audit_does_not_use_the_map_generator():
     source = Path(audit_module.__file__).read_text()
     for forbidden in ("dk2_testmap", "testmap_files", "validate_testmap", "preview_png"):
         assert forbidden not in source, forbidden
+
+
+def test_importing_the_audit_does_not_load_the_map_generator():
+    """A fresh interpreter: importing the audit (and everything it imports) leaves dk2_testmap unloaded."""
+    import os
+    import subprocess
+    import sys
+    root = Path(audit_module.__file__).resolve().parent.parent
+    code = ("import sys, scripts.audit_molynx_mod; "
+            "assert 'scripts.audit_molynx_mod' in sys.modules; "
+            "assert 'scripts.dk2_testmap' not in sys.modules, 'dk2_testmap was imported'; print('ok')")
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    done = subprocess.run([sys.executable, "-I", "-c", f"import sys; sys.path.insert(0, {str(root)!r}); {code}"],
+                          cwd=root, env=env, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "ok"
+
+
+@needs_data
+def test_a_flipped_path_record_type_fails_m10(flat_mod):
+    path = maps_dir(flat_mod) / "Molynx Test.kwd"
+    flip_byte(path, PATHS_AT + 72 * 1)  # the u32 type of the second path record (180, Players)
+    (line,) = fail_lines(audit(flat_mod), "m10", "Molynx Test")
+    assert "path record" in line
+
+
+@needs_data
+@pytest.mark.parametrize("at,what", [(56 + 2 * len("Molynx Test") + 4, "name"),
+                                     (184 + 2 * 70, "description"),
+                                     (PATHS_AT + 72 * 2 + 8 + 60, "path")])
+def test_a_byte_after_the_nul_of_a_text_field_fails_m10(flat_mod, at, what):
+    path = maps_dir(flat_mod) / f"{SECOND}.kwd"
+    data = bytearray(path.read_bytes())
+    assert data[at] == 0
+    data[at] = 0x41
+    path.write_bytes(bytes(data))
+    (line,) = fail_lines(audit(flat_mod), "m10", SECOND)
+    assert "after its NUL" in line and what in line
+
+
+@needs_data
+def test_a_flat_map_folder_without_siege_fails_rule_g(flat_mod):
+    for suffix in MAP_SUFFIXES:
+        (maps_dir(flat_mod) / f"Siege{suffix}").unlink()
+    (line,) = fail_lines(audit(flat_mod), "g")
+    assert "Siege" in line
 
 
 @needs_data

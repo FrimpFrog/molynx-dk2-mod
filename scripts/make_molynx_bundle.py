@@ -1,5 +1,6 @@
-"""The Molynx test bundle: one zip with the two mod folders and the guide (Test A sent as
-`Molynx_test_bundle.zip`; Test B, with the flat test map, as `Molynx_test_bundle_v2.zip`).
+"""The Molynx test bundle: one zip with the two mod folders and the guide (Test A on the shipped
+maps was sent as `Molynx_test_bundle.zip`; Test A with the flat test map as
+`Molynx_test_bundle_v2.zip`).
 
 `make_bundle(mods_dir, guide, out)` writes `out` holding exactly
 

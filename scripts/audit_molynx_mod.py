@@ -39,16 +39,16 @@ Rules, each one PASS or FAIL line per map (per folder for g and h):
       in the game's cache). Each file's loop flag must be the loop flag of the Bile Demon's own file in
       that slot (for a slot whose Bile Demon file is a static mesh: a static pose), except the slots in WRAP_EXCEPTIONS, which the PASS line lists by name. A stage-3 folder
       always FAILs (f): its icon and portrait files are not audited before Task 10.
-  (g) the folder holds nothing else: `resource.toml`, the seven files of each map (a Test B folder:
+  (g) the folder holds nothing else: `resource.toml`, the seven files of each map (a folder with the flat test map:
       all three flat maps, below) and, from stage 2,
       exactly the `Data/Meshes/<name>.kmf` files record 47 names and the `Data/EngineTextures/<t>.png`
       files those meshes name (no unreferenced mesh or texture).
   (h) `resource.toml` is valid TOML with a [resource] table of name, version, authors, description,
       and its name is the name of the folder.
 
-The flat test map (Test B). A folder that holds "Molynx Test" or "Molynx Test Portal" is a Test B
+The flat test map. A folder that holds "Molynx Test" or "Molynx Test Portal" is a flat-test-map
 folder: it must hold the three flat maps "Molynx Test", "Molynx Test Portal" and "Dead Walking"
-(rule g), and in it "Dead Walking" is the flat map under the shipped name, not the shipped map, so
+and the copied map "Siege" (rule g), and in it "Dead Walking" is the flat map under the shipped name, not the shipped map, so
 rules (d) and (e) no longer apply to it (an `N/A (d, e)` line says so; the same for the two new
 names). Rules (a), (b), (c) and (f) apply to their Globals files with the shipped Dead Walking's
 Globals as the source (the folder's record 47 spliced exactly as on a copied map). The map files are
@@ -82,8 +82,10 @@ the user's Quuz copy of Siege for the portal, and the editor's AutoSaveTriggers.
   (m9)  Triggers: the editor's empty AutoSaveTriggers.kld byte for byte, except the timestamps,
         which are Dead Walking's.
   (m10) the level file: Dead Walking's, changed only in the name ("Molynx Test"; "Molynx Test
-        Portal" for the variant), the description (FLAT_DESCRIPTION) and the path records, which
-        name the stem's own seven files (Dead Walking: the shipped paths), all present in the folder.
+        Portal" for the variant), the description (FLAT_DESCRIPTION) and the path texts, which
+        name the stem's own files (Dead Walking: the shipped paths), all present in the folder; the
+        path record heads (u32 type, u32 0) are Dead Walking's, and every text field (name,
+        description, each path) holds only zero bytes after its NUL.
   (m11) containers: each file one block that read_blocks accepts, Dead Walking's signature, header
         size, check words and timestamps, consistent file size, content size and item count.
   (m12) exactly one creature thing has id 47, and it is owned by player 3.
@@ -917,7 +919,7 @@ def _audit_globals(mod_dir: Path, name: str, source: Path, lines: _Lines, files:
     return None, set(), set()
 
 
-# ---- the flat test map (Test B) -----------------------------------------------------------------
+# ---- the flat test map -------------------------------------------------------------------------
 # Written from the test-map design and the layout rules, independently of the map generator: the
 # audit parses every file itself and takes its expectations from the shipped files (Dead Walking in
 # the editor folder, the user's Quuz copy of Siege for the portal, the editor's empty
@@ -929,6 +931,7 @@ FLAT_VARIANTS = {"Molynx Test": (False, "Molynx Test"),
                  "Molynx Test Portal": (True, "Molynx Test Portal"),
                  FLAT_BASE: (False, "Molynx Test")}
 FLAT_PLAIN, FLAT_PORTAL = "Molynx Test", "Molynx Test Portal"
+FLAT_WITH = ("Siege",)  # the copied map a flat-test-map folder also holds (the shipped-map round's)
 FLAT_SIX = (".kwd", "Map.kld", "Things.kld", "Players.kld", "Triggers.kld", "Variables.kld")
 FLAT_DESCRIPTION = "Flat test map: Keeper 2 is sealed in, no enemies, no script."
 FLAT_RULES = tuple(f"m{i}" for i in range(1, 13))
@@ -1056,6 +1059,15 @@ def _records(data: bytes, size: int, what: str) -> list[bytes]:
 
 def _wtext(data: bytes, at: int, size: int) -> str:
     return data[at:at + size].decode("utf-16-le").split("\0")[0]
+
+
+def _bytes_after_nul(field: bytes, unit: int) -> bool:
+    """True when a NUL-terminated text field (`unit` 1: char, 2: wchar) has a non-zero byte after
+    its first NUL (or has no NUL at all)."""
+    for i in range(0, len(field) - unit + 1, unit):
+        if field[i:i + unit] == bytes(unit):
+            return any(field[i:])
+    return True
 
 
 def _level_paths(kwd: bytes) -> tuple[int, list[str]]:
@@ -1422,6 +1434,16 @@ class _Flat:
             problems.append(f"the level name is {name!r}, expected {self.shown!r}")
         if desc != FLAT_DESCRIPTION:
             problems.append(f"the description is {desc!r}, expected {FLAT_DESCRIPTION!r}")
+        heads = [i for i in range(len(bpaths)) if data[first + PATH_RECORD * i:first + PATH_RECORD * i + 8]
+                 != base[first + PATH_RECORD * i:first + PATH_RECORD * i + 8]]
+        if heads:
+            problems.append(f"path record {heads[0]}: its first 8 bytes (u32 type, u32 0) are not "
+                            f"{FLAT_BASE}'s")
+        fields = [("name", LEVEL_NAME_AT, LEVEL_NAME_BYTES, 2), ("description", LEVEL_DESC_AT, LEVEL_DESC_BYTES, 2)]
+        fields += [(f"path {i}", first + PATH_RECORD * i + 8, PATH_TEXT, 1) for i in range(len(paths))]
+        for what, at, size, unit in fields:
+            if _bytes_after_nul(data[at:at + size], unit):
+                problems.append(f"the {what} field (bytes {at}-{at + size - 1}) has non-zero bytes after its NUL")
         prefix = EDITOR_MAPS + FLAT_BASE
         want = [EDITOR_MAPS + self.stem + p[len(prefix):] if p.startswith(prefix) else p for p in bpaths]
         if paths != want:
@@ -1435,9 +1457,13 @@ class _Flat:
         if problems:
             return False, "; ".join(problems)
         flags = struct.unpack_from("<H", data, LEVEL_FLAGS)[0]
+        own = [p for p in paths if p.startswith(EDITOR_MAPS)]
+        others = ", ".join(p.rsplit("\\", 1)[-1] for p in paths if not p.startswith(EDITOR_MAPS))
         return True, (f"{FLAT_BASE}'s level file (flags 0x{flags:X} kept) named {name!r} with the test "
-                      f"map's description; its {len(paths)} paths name "
-                      f"{'the shipped' if self.stem == FLAT_BASE else 'its own'} files, all in the folder")
+                      f"map's description, every text field zero after its NUL, every path record head "
+                      f"{FLAT_BASE}'s; its {len(own)} map paths name "
+                      f"{'the shipped' if self.stem == FLAT_BASE else 'its own'} files, all in the folder; "
+                      f"the {len(own) + 1}th is the game's {others}")
 
     # rule m11: containers
     def m11(self):
@@ -1566,7 +1592,7 @@ def _map_names(files: list[str]) -> list[str]:
 def _check_layout(mod_dir: Path, names: list[str], stage: int | None, meshes: set[str],
                   textures: set[str], required: tuple[str, ...] = ()) -> tuple[bool, str]:
     """Rule (g): `meshes` / `textures` are the names record 47 and its meshes use (stage >= 2);
-    `required` are maps the folder must hold (the three flat maps of a Test B folder)."""
+    `required` are maps the folder must hold (the three flat maps of a flat-test-map folder)."""
     maps_rel = MAPS_PATH.as_posix()
     expected_maps = {name + suffix for name in names for suffix in MAP_SUFFIXES}
     stage2 = stage is not None and stage >= 2
@@ -1649,7 +1675,7 @@ def audit(mod_dir: Path) -> AuditReport:
     names = _map_names(sorted(os.listdir(maps_dir)) if maps_dir.is_dir() else [])
     maps = _Lines()
     files = _Files(mod_dir)
-    # A folder with "Molynx Test" or "Molynx Test Portal" is a Test B folder: its Dead Walking is
+    # A folder with "Molynx Test" or "Molynx Test Portal" is a flat-test-map folder: its Dead Walking is
     # the flat test map too, and all three flat maps must be there.
     flat = any(name in (FLAT_PLAIN, FLAT_PORTAL) for name in names)
     results = {name: (_audit_flat if flat and name in FLAT_VARIANTS else _audit_map)(mod_dir, name, maps, files)
@@ -1660,7 +1686,7 @@ def audit(mod_dir: Path) -> AuditReport:
 
     distinct = {s for s in stages.values() if s is not None}
     stage = next(iter(distinct)) if len(distinct) == 1 and None not in stages.values() else None
-    required = tuple(sorted(FLAT_VARIANTS)) if flat else ()
+    required = tuple(sorted([*FLAT_VARIANTS, *FLAT_WITH])) if flat else ()
     ok, message = _safe(_check_layout, mod_dir, names, stage, meshes, textures, required)
     folder.add(ok, "g", "folder", message)
     if flat:
