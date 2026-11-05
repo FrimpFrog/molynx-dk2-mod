@@ -1,6 +1,6 @@
 # Molynx (custom DK2 creature, 47th slot) — design
 
-Date: 2026-11-04. Status: awaiting user review. (/home/claude is not a git repo, so this file is not committed.)
+Date: 2026-11-04. Status: approved; Tasks 1-8 built (see Amendments at the end). (/home/claude is a git repo; this file is committed.)
 
 ## Purpose
 
@@ -57,7 +57,7 @@ A reader and writer for the Creatures block in both record sizes.
 ### 3. Map data
 
 - A splice tool replaces or appends the Creatures block inside a `*Globals.kld` and rewrites that block's header. Every other block is copied byte for byte.
-- Test map: a small existing skirmish map, patched with the 47-record block and one Molynx placed in its Things file. The original map is never modified; a copy goes in the resource folder.
+- Test maps: Dead Walking and Siege (see Amendments), patched with the 47-record block and one Molynx placed in its Things file. The original map is never modified; a copy goes in the resource folder.
 - The edited `Creatures.kwd` is also written for the user's map editor, if the editor accepts it.
 
 ### 4. Model and animation (`scripts/dk2kmf_write.py`)
@@ -66,7 +66,7 @@ A reader and writer for the Creatures block in both record sizes.
 - Check: decode the encoder's output with the existing reader and require the original frames within the format's precision. A second check re-encodes one existing creature animation from the game and compares it with the original.
 - Molynx's 25 clips become named animations on a shared mesh with the body part and the mace part.
 - Output: loose `.kmf` files in `Data/Meshes/` of the resource folder.
-- Texture: one PNG for the body and one for the mace in `Data/EngineTextures/`, sized to what the engine accepts (confirmed by the tests, with 256 px as the fallback).
+- Texture: one PNG for the body and one for the mace in `Data/EngineTextures/`, sized to what the engine accepts (confirmed by the tests, with 128 px as the ceiling, see Amendments).
 
 ### 5. Icons
 
@@ -96,5 +96,16 @@ If Test 1 fails on the creature ID, the cause is found in the game program's cod
 
 - Another table sized to 46 creatures may crash the game when ID 47 appears. Test 1 finds it; the analysis then decides between patching and the fallback.
 - A loose `.kmf` may not load. If so, the model goes into a rebuilt `Meshes.WAD` using the WAD reader we already have plus a writer.
-- Texture size limits. The fallback is 256 px.
+- Texture size limits. 128 px is the engine ceiling (see Amendments).
 - The writer's animation encoding can be wrong in a way the reader cannot see. The re-encode check on a game animation covers this.
+
+## Amendments (as built, Tasks 1-8)
+
+Where the text above differs, this section is what was built:
+
+- The file is committed (the repo is `/home/claude`, base 1826ae7).
+- **Animation slots (section 2):** a slot that is empty in the Bile Demon stays empty; every filled slot names a Molynx file and gets its tail (frames, fps 30, flags, type) rewritten to describe that file. `stunnedPose` and `elec` stay static pose slots (type 5) like all game creatures.
+- **Test maps (section 3):** Dead Walking and Siege (Siege is multiplayer only). The edited editor `Creatures.kwd` is NOT written yet (pending, after Test A).
+- **Model and animation (section 4):** one KMF per clip (24 shipped), keyframes reduced like 661 game files; poses are static meshes. Textures are 128 x 128 (the ceiling; there is no 256 px fallback).
+- **Test ladder (section 6):** Tests 1 and 2 are bundled as Test A: two folders, `Molynx_slot_only` (exact Bile Demon copy) and `Molynx` (his model and animations), enabled ONE at a time. The folder must be listed FIRST in `alt-resources`, because Flame uses the first listed folder that has a file.
+- Risks: loose `.kmf` loading and `Level =` with the test maps are untested in the game; a loose texture with a brand-new name is likely fine (Quuz_UniqueBatTex already loads `Unique_Bat.png`, which is in no cache).
