@@ -714,11 +714,14 @@ def validate_testmap(files: dict[str, bytes], stem: str, *, molynx_in_pool: bool
     errors += _variable_errors(f["Variables.kld"], base["Variables.kld"], molynx_in_pool)
 
     # rule 9
-    tr = f["Triggers.kld"]
-    if tr != _empty_triggers(base["Triggers.kld"]):
-        auto = (EDITOR_DIR / "AutoSaveTriggers.kld").read_bytes()
+    # The editor's empty file byte for byte, except its timestamps, which are the base file's.
+    tr, auto, btr = f["Triggers.kld"], (EDITOR_DIR / "AutoSaveTriggers.kld").read_bytes(), base["Triggers.kld"]
+    stamps = slice(header_size(auto) - 28, header_size(auto) - 8)
+    if len(tr) != len(auto) or tr[:stamps.start] != auto[:stamps.start] or tr[stamps.stop:] != auto[stamps.stop:]:
         errors.append(f"rule 9: Triggers is not the editor's empty file ({len(tr)} bytes, "
                       f"editor's {len(auto)})")
+    elif tr[stamps] != btr[stamps]:
+        errors.append("rule 9: Triggers timestamps are not the base file's")
 
     # rule 10
     errors += _level_errors(f[".kwd"], base[".kwd"], stem)
@@ -793,6 +796,8 @@ def _level_errors(new: bytes, base: bytes, stem: str) -> list[str]:
         errors.append("rule 10: level flags differ from the base")
     if not level_name(new):
         errors.append("rule 10: empty display name")
+    if _wstr(new, LEVEL_DESC_AT, LEVEL_DESC_CHARS) != DESCRIPTION:
+        errors.append(f"rule 10: the description is not {DESCRIPTION!r}")
     lv, blv = read_level(new), read_level(base)
     want_paths = [_repath(p, BASE, stem) for p in blv.paths]
     if list(lv.paths) != want_paths:

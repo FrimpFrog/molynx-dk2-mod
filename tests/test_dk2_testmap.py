@@ -395,6 +395,27 @@ def test_rule9_empty_triggers_like_the_editor(files):
     assert tr[32:52] == base[32:52]
 
 
+@needs_maps
+def test_rule9_validator_compares_with_the_editors_file(tm, files):
+    tr = _f(files, STEM, "Triggers.kld")
+    auto = (EDITOR_DIR / "AutoSaveTriggers.kld").read_bytes()
+    bad = bytearray(tr)
+    bad[28] = 2  # the editor's file has 1 here (the u32 after the two counts)
+    errors = tm.validate_testmap(_with(files, STEM, "Triggers.kld", bytes(bad)), STEM, molynx_in_pool=False)
+    assert any("rule 9" in e for e in errors)
+    # the editor's own file is not enough: rule 9 keeps the base's timestamps
+    assert auto[32:52] != tr[32:52]
+    errors = tm.validate_testmap(_with(files, STEM, "Triggers.kld", auto), STEM, molynx_in_pool=False)
+    assert any("rule 9" in e for e in errors)
+
+
+@needs_maps
+def test_rule9_validator_does_not_use_the_generators_helper(tm):
+    import inspect
+    body = inspect.getsource(tm.validate_testmap)
+    assert "_empty_triggers" not in body and "AutoSaveTriggers.kld" in body
+
+
 # ---- rule 10: level file -------------------------------------------------------------------------
 
 @needs_maps
@@ -422,6 +443,34 @@ def test_rule10_base_stem_keeps_base_paths(tm):
     k = tm.testmap_files("Dead Walking", molynx_in_pool=False)["Dead Walking.kwd"]
     base = _base()[".kwd"]
     assert k[56 + 25683:] == base[56 + 25683:]
+    # only the name (wchar[64] at 56) and the description (wchar[1024] at 184) differ from the base
+    changed = {i for i in range(len(k)) if k[i] != base[i]}
+    assert changed and changed <= set(range(56, 56 + 128)) | set(range(184, 184 + 2048))
+    assert k[56:56 + 128].decode("utf-16-le").split("\0")[0] == "Molynx Test"
+    assert k[184:184 + 2048].decode("utf-16-le").split("\0")[0] == tm.DESCRIPTION
+
+
+def _with_wstr(kwd: bytes, at: int, chars: int, text: str) -> bytes:
+    out = bytearray(kwd)
+    out[at:at + 2 * chars] = text.encode("utf-16-le").ljust(2 * chars, b"\0")
+    return bytes(out)
+
+
+@needs_maps
+def test_rule10_validator_checks_the_description(tm, files):
+    bad = _with_wstr(files[STEM + ".kwd"], 184, 1024, "Some other text.")
+    errors = tm.validate_testmap(_with(files, STEM, ".kwd", bad), STEM, molynx_in_pool=False)
+    assert any("rule 10" in e and "description" in e for e in errors)
+    empty = _with_wstr(files[STEM + ".kwd"], 184, 1024, "")
+    errors = tm.validate_testmap(_with(files, STEM, ".kwd", empty), STEM, molynx_in_pool=False)
+    assert any("rule 10" in e and "description" in e for e in errors)
+
+
+@needs_maps
+def test_rule10_validator_rejects_an_empty_name(tm, files):
+    bad = _with_wstr(files[STEM + ".kwd"], 56, 64, "")
+    errors = tm.validate_testmap(_with(files, STEM, ".kwd", bad), STEM, molynx_in_pool=False)
+    assert any("rule 10" in e and "name" in e for e in errors)
 
 
 # ---- rule 11: containers -------------------------------------------------------------------------
