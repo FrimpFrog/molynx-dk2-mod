@@ -106,7 +106,7 @@ Some of his actions borrow the nearest animation he has. These are expected in t
 - **Sleeping** plays once: he lies down and stays lying until he wakes up. If he keeps standing up
   and lying down again, or freezes standing, tell me.
 - **Dazed or stunned**, he holds one still pose (from his staggering).
-- **Electrocuted**, he holds one still flinch pose. **Tortured or casting a spell** uses his flinch.
+- **Electrocuted**, he holds a still flinch pose or flinches. **Tortured or casting a spell** uses his flinch.
 - **Coming out of the portal** uses his walk once; **walking backwards** uses his normal walk.
 - **Drinking** uses his eating animation; **drunk** uses his fidgeting.
 - His feet may slide a little when he walks.
