@@ -37,7 +37,20 @@ this folder has to be listed BEFORE Quuz_LevelFixes: the guide tells the user to
 
 Test maps (`test_maps`): the smallest suitable map, "Siege", and a second one that certainly shows in
 the Skirmish list and puts Molynx in Keeper 1's dungeon, "Dead Walking" (see dk2kld_splice,
-`pick_skirmish_test_map`). On both maps the Molynx thing is owned by player 3, "Keeper 1".
+`pick_skirmish_test_map`). On both maps the Molynx thing is owned by player 3, "Keeper 1". These
+are "copied" maps: the map's own files with the two changes above.
+
+Flat maps (`FLAT_MAPS`, Test B): the flat test map of dk2_testmap (Keeper 1 on a big claimed floor
+with a portal, gems, gold, six Imps and Molynx beside the heart; Keeper 2 sealed in Impenetrable
+Rock) under three names: "Molynx Test", "Molynx Test Portal" (Molynx also in the portal pool) and
+"Dead Walking" (the same map as "Molynx Test" under the shipped name, so the game finds it even if
+it lists no new map name). The six files come from `testmap_files` (checked by `validate_testmap`
+before anything is written); the level file shows "Molynx Test" for both "Molynx Test" and "Dead
+Walking", "Molynx Test Portal" for the variant, and its path records name the stem's own files
+(for "Dead Walking" the shipped paths). The level file names a Globals file too and the game opens
+it, so `<stem>Globals.kld` is the base map's (Dead Walking's) Globals spliced with this folder's
+record 47, exactly as for a copied map. The default build (`maps` and `flat_maps` both left out)
+is Siege copied plus the three flat maps.
 
 Nothing is ever deleted or overwritten: `build_mod` refuses an existing `out_dir/<name>`, builds all
 file contents in memory before it creates the folder, and so leaves no half-built folder behind when
@@ -55,6 +68,7 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
+from scripts.dk2_testmap import BASE as FLAT_BASE, testmap_files, validate_testmap
 from scripts.dk2kld_splice import (BILE_DEMON_ID, BILE_DEMON_NAME, MAP_SUFFIXES, first_player_bile_thing,
                                    map_source_dir, molynx_for_map, pick_skirmish_test_map,
                                    pick_test_map, retarget_creature_thing, splice_creatures)
@@ -71,6 +85,10 @@ MAPS_PATH = "Data/editor/maps"
 MESHES_PATH = "Data/Meshes"
 TEXTURES_PATH = "Data/EngineTextures"
 STAGE1_FOLDER = "Molynx_slot_only"
+# The flat maps of the handed-over folders: stem -> Molynx also in the portal pool.
+FLAT_MAPS = {"Molynx Test": False, "Molynx Test Portal": True, FLAT_BASE: False}
+# The name the level file shows in the Skirmish list (default: the stem).
+FLAT_DISPLAY_NAMES = {FLAT_BASE: "Molynx Test"}
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 _DESCRIPTIONS = {
@@ -105,18 +123,28 @@ def _check_name(name) -> None:
                          "'_' and '-' (alt-resources is split at ';' and a '.' hides the folder)")
 
 
-def _check_maps(maps: list[str]) -> None:
-    if not maps or len(set(maps)) != len(maps):
-        raise ValueError(f"maps must be a non-empty list without repeats, not {maps!r}")
-    for name in maps:
+def _check_maps(maps: list[str], flat: Mapping[str, bool]) -> None:
+    if not isinstance(flat, Mapping):
+        raise ValueError(f"flat_maps must be a mapping of map name -> bool, not {flat!r}")
+    if not maps and not flat or len(set(maps)) != len(maps):
+        raise ValueError(f"maps must be a list without repeats, and maps and flat_maps together "
+                         f"must name at least one map, not {maps!r} and {dict(flat)!r}")
+    both = sorted(set(maps) & set(flat))
+    if both:
+        raise ValueError(f"{', '.join(both)}: a map is either copied (maps) or flat (flat_maps), "
+                         "not both")
+    for name in [*maps, *flat]:
         if not isinstance(name, str) or name in ("", ".", "..") or "/" in name or "\\" in name:
             raise ValueError(f"maps: {name!r} is not a plain map name")
 
 
-def _resource_toml(name: str, stage: int, maps: list[str]) -> bytes:
+def _resource_toml(name: str, stage: int, maps: list[str], flat: list[str] = ()) -> bytes:
     """resource.toml in the format of the real mods: CRLF lines, the keys name, version, authors,
     description (a multi-line string). The description is ASCII without backslashes or quotes."""
-    description = _DESCRIPTIONS[stage].format(maps=", ".join(maps))
+    description = _DESCRIPTIONS[stage].format(maps=", ".join([*maps, *flat]))
+    if flat:
+        description += (" The maps " + ", ".join(flat) + " are the flat test map: Keeper 2 is "
+                        "sealed in, Molynx stands next to your heart.")
     lines = ["[resource]", f'name = "{name}"', 'version = ""', 'authors = ""',
              'description = """', description, '"""']
     return ("\r\n".join(lines) + "\r\n").encode("ascii")
@@ -235,6 +263,27 @@ def _map_files(name: str, stage: int, text_ids: dict[str, int] | None, assets: _
     return files, stems
 
 
+def _flat_map_files(stem: str, in_pool: bool, stage: int, text_ids: dict[str, int] | None,
+                    assets: _Assets | None, anim_info: dict | None,
+                    file_wraps: dict | None) -> tuple[dict[str, bytes], set[str]]:
+    """The seven files of the flat map `stem` (relative path -> bytes) and the Molynx file stems its
+    record names: the generator's six files and the base map's Globals with record 47."""
+    files = testmap_files(stem, molynx_in_pool=in_pool,
+                          display_name=FLAT_DISPLAY_NAMES.get(stem, stem))
+    errors = validate_testmap(files, stem, molynx_in_pool=in_pool)
+    if errors:
+        raise ValueError(f"the flat map {stem!r} breaks its layout rules: " + "; ".join(errors))
+    globals_kld = (map_source_dir(FLAT_BASE) / f"{FLAT_BASE}Globals.kld").read_bytes()
+    stems: set[str] = set()
+    info = wraps = None
+    if stage >= 2:
+        info, wraps, stems = _files_for(_map_bile(globals_kld), assets, anim_info, file_wraps)
+    out = {f"{MAPS_PATH}/{name}": data for name, data in files.items()}
+    out[f"{MAPS_PATH}/{stem}Globals.kld"] = splice_creatures(globals_kld, [molynx_for_map(
+        globals_kld, stage, text_ids, anim_info=info, file_wraps=wraps)])
+    return out, stems
+
+
 def _asset_files(assets: _Assets, stems: set[str]) -> dict[str, bytes]:
     """Data/Meshes/<file> for every stem and Data/EngineTextures/<t>.png for every texture they name."""
     files, textures = {}, set()
@@ -249,15 +298,18 @@ def _asset_files(assets: _Assets, stems: set[str]) -> dict[str, bytes]:
 
 def build_mod(stage: int, out_dir: Path, name: str = "Molynx", maps: list[str] | None = None,
               text_ids: dict[str, int] | None = None, *, anim_info: dict | None = None,
-              file_wraps: dict | None = None, assets_dir: Path | None = None) -> Path:
+              file_wraps: dict | None = None, assets_dir: Path | None = None,
+              flat_maps: Mapping[str, bool] | None = None) -> Path:
     """Create `out_dir/<name>/` (see the module docstring) and return its path.
 
     `stage` is 1, 2 or 3 (molynx_record); stage 3 needs `text_ids`; stages 2 and 3 need
     `assets_dir`, an export folder of molynx_assets.export_molynx_assets: the frame counts and loop
     flags the record gives each slot are read from its files, and the Bile Demon files' loop flags
     from the game's meshes. `anim_info` / `file_wraps`, when given, must agree with what is read
-    (ValueError otherwise). `maps` defaults to `test_maps()`. ValueError for a bad stage, folder
-    name, map list, record or asset; FileExistsError when `out_dir/<name>` already exists (nothing is
+    (ValueError otherwise). `maps` are the copied maps, `flat_maps` the flat ones (stem -> Molynx
+    also in the portal pool); when both are left out the folder holds Siege copied and the three
+    `FLAT_MAPS`, when one is given the other defaults to none. ValueError for a bad stage, folder
+    name, map list (a name in both, or no map at all), record or asset; FileExistsError when `out_dir/<name>` already exists (nothing is
     deleted or overwritten); FileNotFoundError for a map that has no complete set of seven files.
     Nothing is created unless the whole build succeeded.
     """
@@ -274,14 +326,24 @@ def build_mod(stage: int, out_dir: Path, name: str = "Molynx", maps: list[str] |
     target = Path(out_dir) / name
     if target.exists() or target.is_symlink():
         raise FileExistsError(f"{target} already exists; it is never overwritten or deleted")
-    maps = test_maps() if maps is None else list(maps)
-    _check_maps(maps)
+    if maps is None and flat_maps is None:
+        flat_maps = dict(FLAT_MAPS)
+        maps = [m for m in test_maps() if m not in flat_maps]
+    maps = [] if maps is None else list(maps)
+    flat_maps = {} if flat_maps is None else flat_maps
+    _check_maps(maps, flat_maps)
+    flat_maps = dict(flat_maps)
     assets = _Assets(assets_dir) if stage >= 2 else None
 
-    files = {"resource.toml": _resource_toml(name, stage, maps)}
+    files = {"resource.toml": _resource_toml(name, stage, maps, list(flat_maps))}
     stems: set[str] = set()
     for map_name in maps:
         map_files, used = _map_files(map_name, stage, text_ids, assets, anim_info, file_wraps)
+        files.update(map_files)
+        stems |= used
+    for stem, in_pool in flat_maps.items():
+        map_files, used = _flat_map_files(stem, bool(in_pool), stage, text_ids, assets, anim_info,
+                                          file_wraps)
         files.update(map_files)
         stems |= used
     if assets is not None:
@@ -305,7 +367,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--assets", type=Path,
                         help="stage 2 only: the folder molynx_assets.export_molynx_assets wrote")
     parser.add_argument("--name", help=f"mod folder name (default {STAGE1_FOLDER} at stage 1, else Molynx)")
-    parser.add_argument("--maps", nargs="+", help="map names (default: the test maps)")
+    parser.add_argument("--maps", nargs="+",
+                        help="copied map names only, no flat map (default: Siege copied and the "
+                             "flat maps " + ", ".join(FLAT_MAPS) + ")")
     args = parser.parse_args(argv)
     if args.stage == 2 and args.assets is None:
         parser.error("--stage 2 needs --assets (the export folder with Molynx's files)")

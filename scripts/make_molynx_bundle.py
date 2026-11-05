@@ -1,4 +1,5 @@
-"""The Molynx Test A bundle: one zip with the two mod folders and the guide.
+"""The Molynx test bundle: one zip with the two mod folders and the guide (Test A sent as
+`Molynx_test_bundle.zip`; Test B, with the flat test map, as `Molynx_test_bundle_v2.zip`).
 
 `make_bundle(mods_dir, guide, out)` writes `out` holding exactly
 
@@ -14,7 +15,8 @@ symbolic link, or a missing folder or `resource.toml`; it never overwrites `out`
 (FileExistsError). It does not judge the contents: audit both folders first
 (`python -m scripts.audit_molynx_mod <folder>`).
 
-`python -m scripts.make_molynx_bundle --mods DIR --guide docs/molynx-test-guide.md --out ZIP`
+`python -m scripts.make_molynx_bundle --mods deliverables/molynx_mod --guide docs/molynx-test-guide.md
+--out deliverables/molynx_mod/Molynx_test_bundle_v2.zip`
 
 LICENCE: GPL-3.0.
 """
@@ -73,7 +75,7 @@ def make_bundle(mods_dir: Path, guide: Path, out: Path) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Zip the Molynx Test A bundle (two mod folders and "
+    parser = argparse.ArgumentParser(description="Zip the Molynx test bundle (two mod folders and "
                                                  "the guide), deterministically.")
     parser.add_argument("--mods", type=Path, required=True,
                         help="folder holding Molynx and Molynx_slot_only")

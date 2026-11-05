@@ -39,11 +39,57 @@ Rules, each one PASS or FAIL line per map (per folder for g and h):
       in the game's cache). Each file's loop flag must be the loop flag of the Bile Demon's own file in
       that slot (for a slot whose Bile Demon file is a static mesh: a static pose), except the slots in WRAP_EXCEPTIONS, which the PASS line lists by name. A stage-3 folder
       always FAILs (f): its icon and portrait files are not audited before Task 10.
-  (g) the folder holds nothing else: `resource.toml`, the seven files of each map and, from stage 2,
+  (g) the folder holds nothing else: `resource.toml`, the seven files of each map (a Test B folder:
+      all three flat maps, below) and, from stage 2,
       exactly the `Data/Meshes/<name>.kmf` files record 47 names and the `Data/EngineTextures/<t>.png`
       files those meshes name (no unreferenced mesh or texture).
   (h) `resource.toml` is valid TOML with a [resource] table of name, version, authors, description,
       and its name is the name of the folder.
+
+The flat test map (Test B). A folder that holds "Molynx Test" or "Molynx Test Portal" is a Test B
+folder: it must hold the three flat maps "Molynx Test", "Molynx Test Portal" and "Dead Walking"
+(rule g), and in it "Dead Walking" is the flat map under the shipped name, not the shipped map, so
+rules (d) and (e) no longer apply to it (an `N/A (d, e)` line says so; the same for the two new
+names). Rules (a), (b), (c) and (f) apply to their Globals files with the shipped Dead Walking's
+Globals as the source (the folder's record 47 spliced exactly as on a copied map). The map files are
+checked by these rules, written from the test-map design without the map generator (no import of
+it: own parsing, own literals; the references are the shipped Dead Walking in the editor folder,
+the user's Quuz copy of Siege for the portal, and the editor's AutoSaveTriggers.kld):
+
+  (m1)  69 x 69 like Dead Walking; the Map header and the outer ring of tiles are Dead Walking's.
+  (m2)  two Dungeon Hearts, of players 3 and 4, each Dead Walking's heart of that player (tiles in
+        shape and bytes, and the things on it, its one type-204 room thing, moved with it); Keeper
+        1's heart where Dead Walking has it (the Players file's camera looks there).
+  (m3)  one Portal of player 3, Siege's Keeper 1 portal (9 tiles, its things: none), connected by
+        floor to the heart.
+  (m4)  Keeper 1's open area (the flood fill from its heart over its Claimed Path, Portal, heart and
+        Dirt Path) has at least 900 floor tiles, 300 of them Claimed Path, holds the heart and the
+        portal and encloses nothing else; 4 to 6 Gems and 2 Gold tiles, each touching the area and
+        otherwise set in Rock; no terrain beyond the design's.
+  (m5)  Keeper 2 is sealed: the flood fill over every passable tile (all but Impenetrable Rock, Rock,
+        Gold, Gems, Reinforced Wall, Edge of Map) from its heart reaches no Keeper 1 tile; the
+        chamber is only its heart and Claimed Path; Impenetrable Rock at least 2 tiles thick all
+        round (the PASS line gives the thickness).
+  (m6)  things: the two heart room things, Keeper 1's 6 Imps and Molynx, Keeper 2's 4 Imps, nothing
+        else; each creature a copy of a Dead Walking creature thing of its player (Molynx of its
+        Bile Demon) on its keeper's floor; Molynx on floor next to Keeper 1's heart.
+  (m7)  Players: Dead Walking's records, Keeper 1 with starting gold 100000 and isAi 0.
+  (m8)  Variables: Dead Walking's entries in order (player 3's availability values may change), then
+        only player-3 entries; no duplicates; player 3 has exactly rooms 1-4 and 6-17, doors 1-6,
+        traps 1-11 and 16, spells 1-11 and 13, all ENABLE (3); the creature pool and creature
+        availability of Siege's player 3 (ids 3, 4, 5, 6, 7, 10, 12, 22, 23, 24, 45, with Siege's
+        values), plus Molynx (47, pool 50, ENABLE) only in "Molynx Test Portal".
+  (m9)  Triggers: the editor's empty AutoSaveTriggers.kld byte for byte, except the timestamps,
+        which are Dead Walking's.
+  (m10) the level file: Dead Walking's, changed only in the name ("Molynx Test"; "Molynx Test
+        Portal" for the variant), the description (FLAT_DESCRIPTION) and the path records, which
+        name the stem's own seven files (Dead Walking: the shipped paths), all present in the folder.
+  (m11) containers: each file one block that read_blocks accepts, Dead Walking's signature, header
+        size, check words and timestamps, consistent file size, content size and item count.
+  (m12) exactly one creature thing has id 47, and it is owned by player 3.
+  (m13) (folder) "Dead Walking" holds "Molynx Test"'s Map, Things, Players, Triggers, Variables and
+        Globals byte for byte; "Molynx Test Portal" differs from "Molynx Test" only in its level
+        file and its Variables, by exactly the two creature-47 entries.
 
 The stages (written independently of the builder, from the Molynx design):
   1  record 47 = Bile Demon with name "Molynx", creatureId 47, orderInEditor = the source's largest + 1.
@@ -77,7 +123,7 @@ from scripts.dk2kmf import parse_kmf
 from scripts.dk2kmf_write import anim_invariants
 from scripts.dk2kwd_blocks import HEADER_SIZE, read_blocks
 from scripts.dk2kwd_creatures import ANIM_SLOTS, FIELDS, RESOURCE_NAME_SIZE, RESOURCE_SIZE, Creature
-from scripts.dk2paths import GAME_DIR, MESHES_DIR
+from scripts.dk2paths import EDITOR_DIR, GAME_DIR, MAPS_DIR, MESHES_DIR, QUUZ_MAPS_DIR
 from scripts.dk2wad import read_wad
 
 CREATURES = 0xAA
@@ -161,6 +207,10 @@ class _Lines:
 
     def add(self, ok: bool, rule: str, scope: str, message: str) -> None:
         self.items.append((ok, f"{'PASS' if ok else 'FAIL'} ({rule}) {scope}: {message}"))
+
+    def note(self, rules: str, scope: str, message: str) -> None:
+        """A line for rules that do not apply here (it does not fail the audit)."""
+        self.items.append((True, f"N/A ({rules}) {scope}: {message}"))
 
 
 def _block_label(index: int, signature: int) -> str:
@@ -797,19 +847,43 @@ def _safe(check, *args) -> tuple:
 
 
 def _audit_map(mod_dir: Path, name: str, lines: _Lines, files: _Files) -> tuple:
-    """Rules (a) to (f) for one map; returns (the stage found in record 47 or None, the Molynx mesh
-    names its record uses, the texture names those meshes use)."""
+    """Rules (a) to (f) for one copied map; returns (the stage found in record 47 or None, the
+    Molynx mesh names its record uses, the texture names those meshes use)."""
     try:
         source_dir = map_source_dir(name)
     except FileNotFoundError as err:
         for rule in "abcdef":
             lines.add(False, rule, name, f"no source files to compare with: {err}")
         return None, set(), set()
+    return _audit_globals(mod_dir, name, source_dir / f"{name}Globals.kld", lines, files,
+                          later=lambda: _audit_things_and_files(mod_dir, name, source_dir, lines))
+
+
+def _audit_things_and_files(mod_dir: Path, name: str, source_dir: Path, lines: _Lines) -> None:
+    """Rules (d) and (e) of a copied map."""
+    maps = mod_dir / MAPS_PATH
+    mod_things = _read(maps / f"{name}Things.kld")
+    src_things = _read(source_dir / f"{name}Things.kld")
+    if mod_things is None or src_things is None:
+        lines.add(False, "d", name, f"{name}Things.kld is missing" if mod_things is None
+                  else "the source Things file is missing")
+    else:
+        ok, message = _safe(_check_things, src_things, mod_things)
+        lines.add(ok, "d", name, message)
+
+    ok, message = _safe(_check_other_files, mod_dir, name, source_dir)
+    lines.add(ok, "e", name, message)
+
+
+def _audit_globals(mod_dir: Path, name: str, source: Path, lines: _Lines, files: _Files,
+                   later=None) -> tuple:
+    """Rules (a), (b), (c) of `<name>Globals.kld` against the Globals file `source`, then `later()`
+    (rules d and e of a copied map), then rule (f); returns what `_audit_map` returns."""
     maps = mod_dir / MAPS_PATH
     info = None
 
     mod_globals = _read(maps / f"{name}Globals.kld")
-    src_globals = _read(source_dir / f"{name}Globals.kld")
+    src_globals = _read(source)
     if mod_globals is None or src_globals is None:
         which = f"{name}Globals.kld is missing" if mod_globals is None else "the source Globals is missing"
         for rule in "abc":
@@ -830,17 +904,8 @@ def _audit_map(mod_dir: Path, name: str, lines: _Lines, files: _Files) -> tuple:
             ok, message = _safe(_check_headers, src_blocks, mod_blocks, record_size)
             lines.add(ok, "c", name, message)
 
-    mod_things = _read(maps / f"{name}Things.kld")
-    src_things = _read(source_dir / f"{name}Things.kld")
-    if mod_things is None or src_things is None:
-        lines.add(False, "d", name, f"{name}Things.kld is missing" if mod_things is None
-                  else "the source Things file is missing")
-    else:
-        ok, message = _safe(_check_things, src_things, mod_things)
-        lines.add(ok, "d", name, message)
-
-    ok, message = _safe(_check_other_files, mod_dir, name, source_dir)
-    lines.add(ok, "e", name, message)
+    if later is not None:
+        later()
 
     if info:
         stage, molynx, bile, _size = info
@@ -850,6 +915,640 @@ def _audit_map(mod_dir: Path, name: str, lines: _Lines, files: _Files) -> tuple:
         return stage, meshes, textures
     lines.add(False, "f", name, "not checked because record 47 could not be read")
     return None, set(), set()
+
+
+# ---- the flat test map (Test B) -----------------------------------------------------------------
+# Written from the test-map design and the layout rules, independently of the map generator: the
+# audit parses every file itself and takes its expectations from the shipped files (Dead Walking in
+# the editor folder, the user's Quuz copy of Siege for the portal, the editor's empty
+# AutoSaveTriggers.kld) and from the literals below.
+
+FLAT_BASE = "Dead Walking"
+# stem -> (Molynx also in the portal pool, the name the level file shows)
+FLAT_VARIANTS = {"Molynx Test": (False, "Molynx Test"),
+                 "Molynx Test Portal": (True, "Molynx Test Portal"),
+                 FLAT_BASE: (False, "Molynx Test")}
+FLAT_PLAIN, FLAT_PORTAL = "Molynx Test", "Molynx Test Portal"
+FLAT_SIX = (".kwd", "Map.kld", "Things.kld", "Players.kld", "Triggers.kld", "Variables.kld")
+FLAT_DESCRIPTION = "Flat test map: Keeper 2 is sealed in, no enemies, no script."
+FLAT_RULES = tuple(f"m{i}" for i in range(1, 13))
+# Terrain ids of Map.kld (1-based in Terrain.kwd).
+T_IMPENETRABLE, T_ROCK, T_DIRT, T_GOLD, T_GEMS, T_CLAIMED = 1, 2, 3, 6, 7, 8
+T_REINFORCED, T_PORTAL, T_HEART, T_EDGE = 9, 12, 14, 30
+SOLID_TERRAIN = frozenset({T_IMPENETRABLE, T_ROCK, T_GOLD, T_GEMS, T_REINFORCED, T_EDGE})
+FLAT_TERRAIN = frozenset({T_IMPENETRABLE, T_ROCK, T_DIRT, T_GOLD, T_GEMS, T_CLAIMED, T_PORTAL,
+                          T_HEART, T_EDGE})
+TERRAIN_NAMES = {T_IMPENETRABLE: "Impenetrable Rock", T_ROCK: "Rock", T_DIRT: "Dirt Path",
+                 T_GOLD: "Gold", T_GEMS: "Gems", T_CLAIMED: "Claimed Path", T_PORTAL: "Portal",
+                 T_HEART: "Dungeon Heart", T_EDGE: "Edge of Map"}
+KEEPER_2 = 4
+IMP_ID = 1
+OBJECT_THING, ROOM_THING = 194, 204
+FLAT_CREATURES = {(IMP_ID, HUMAN_PLAYER): 6, (MOLYNX_ID, HUMAN_PLAYER): 1, (IMP_ID, KEEPER_2): 4}
+MIN_FLOOR, MIN_CLAIMED, MIN_WALL = 900, 300, 2
+GEMS_RANGE, GOLD_COUNT = range(4, 7), 2
+STARTING_GOLD = 100000
+PLAYER_RECORD = 205
+VARIABLE_ENTRY = 16
+POOL_VARIABLE, AVAILABILITY_VARIABLE = 1, 2
+AV_ROOM, AV_CREATURE, AV_TRAP, AV_DOOR, AV_SPELL = 1, 2, 3, 4, 5
+AV_NAMES = {AV_ROOM: "room", AV_CREATURE: "creature", AV_TRAP: "trap", AV_DOOR: "door",
+            AV_SPELL: "spell"}
+ENABLE = 3
+# What Keeper 1 must have ENABLE: every keeper room, door, trap and spell of the game.
+KEEPER_1_ITEMS = {AV_ROOM: frozenset({1, 2, 3, 4, *range(6, 18)}), AV_DOOR: frozenset(range(1, 7)),
+                  AV_TRAP: frozenset({*range(1, 12), 16}), AV_SPELL: frozenset({*range(1, 12), 13})}
+# Siege's creature pool for player 3 (creature id -> pool value), copied into the flat map.
+SIEGE_POOL = {7: 50, 5: 50, 12: 10, 10: 50, 6: 50, 4: 50, 24: 50, 3: 50, 22: 50, 23: 20, 45: 20}
+MOLYNX_POOL = 50
+LEVEL_NAME_AT, LEVEL_NAME_BYTES = 56, 128
+LEVEL_DESC_AT, LEVEL_DESC_BYTES = 184, 2048
+LEVEL_FLAGS = 56 + 25484
+PATH_LIST, PATH_RECORD, PATH_TEXT = 222, 72, 64
+EDITOR_MAPS = "Data\\Editor\\Maps\\"
+
+
+def _header_end(data: bytes) -> int:
+    """The header size of a map file: 28 + the u32 at byte 16 (56; 36 for Map, 60 for Triggers)."""
+    return 28 + struct.unpack_from("<I", data, 16)[0]
+
+
+@functools.cache
+def _flat_sources() -> dict:
+    """The shipped files the flat maps are compared with (read once)."""
+    base = {s: (MAPS_DIR / (FLAT_BASE + s)).read_bytes() for s in (*FLAT_SIX, "Globals.kld")}
+    siege = {s: (QUUZ_MAPS_DIR / ("Siege" + s)).read_bytes() for s in ("Map.kld", "Things.kld")}
+    return {"base": base, "siege": siege,
+            "auto": (EDITOR_DIR / "AutoSaveTriggers.kld").read_bytes()}
+
+
+class _Grid:
+    """A Map.kld: width, height and 4-byte tiles (terrain, player, flag, unknown)."""
+
+    def __init__(self, data: bytes) -> None:
+        if struct.unpack_from("<I", data, 0)[0] != 0x64:
+            raise ValueError("Map.kld signature is not 0x64")
+        self.header = data[:_header_end(data)]
+        self.w, self.h = struct.unpack_from("<II", data, 20)
+        if len(data) != len(self.header) + 4 * self.w * self.h:
+            raise ValueError(f"Map.kld of {len(data)} bytes does not hold {self.w} x {self.h} tiles")
+        at = len(self.header)
+        self.tiles = [data[at + 4 * i:at + 4 * i + 4] for i in range(self.w * self.h)]
+
+    def at(self, x: int, y: int) -> bytes:
+        return self.tiles[y * self.w + x]
+
+    def inside(self, x: int, y: int) -> bool:
+        return 0 <= x < self.w and 0 <= y < self.h
+
+    def cells(self, terrain: int, owner: int | None = None) -> list[tuple[int, int]]:
+        return [(i % self.w, i // self.w) for i, t in enumerate(self.tiles)
+                if t[0] == terrain and (owner is None or t[1] == owner)]
+
+    def flood(self, starts, ok) -> set[tuple[int, int]]:
+        """Tiles 4-connected to `starts` through tiles for which `ok(tile)` holds."""
+        seen, todo = set(starts), list(starts)
+        while todo:
+            x, y = todo.pop()
+            for c in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if self.inside(*c) and c not in seen and ok(self.at(*c)):
+                    seen.add(c)
+                    todo.append(c)
+        return seen
+
+
+def _things_of(data: bytes) -> list[tuple[int, bytes]]:
+    """(type, data) of every record of a Things file."""
+    return [(kind, data[pos + 8:pos + 8 + size]) for pos, kind, size in _thing_records(data)]
+
+
+def _xy(thing_data: bytes) -> tuple[int, int]:
+    return struct.unpack_from("<ii", thing_data, 0)
+
+
+def _moved(thing_data: bytes, dx: int, dy: int) -> bytes:
+    x, y = _xy(thing_data)
+    return struct.pack("<ii", x + dx, y + dy) + thing_data[8:]
+
+
+def _shape(grid: _Grid, terrain: int, owner: int, things) -> tuple:
+    """(top-left corner, sorted (dx, dy, tile), sorted (type, data) of the object and room things
+    on its bounding box, moved to the corner (0, 0)) of the tiles of one terrain and owner."""
+    cells = grid.cells(terrain, owner)
+    if not cells:
+        return None, [], []
+    x0, y0 = min(c[0] for c in cells), min(c[1] for c in cells)
+    x1, y1 = max(c[0] for c in cells), max(c[1] for c in cells)
+    tiles = sorted((x - x0, y - y0, grid.at(x, y)) for x, y in cells)
+    on = sorted((kind, _moved(d, -x0, -y0)) for kind, d in things
+                if kind in (OBJECT_THING, ROOM_THING) and x0 <= _xy(d)[0] <= x1 and y0 <= _xy(d)[1] <= y1)
+    return (x0, y0), tiles, on
+
+
+def _records(data: bytes, size: int, what: str) -> list[bytes]:
+    hsz = _header_end(data)
+    content = data[hsz:]
+    if len(content) % size or len(content) // size != struct.unpack_from("<I", data, 20)[0]:
+        raise ValueError(f"{what}: {len(content)} content bytes are not the {struct.unpack_from('<I', data, 20)[0]} "
+                         f"records of {size} bytes its header counts")
+    return [content[i:i + size] for i in range(0, len(content), size)]
+
+
+def _wtext(data: bytes, at: int, size: int) -> str:
+    return data[at:at + size].decode("utf-16-le").split("\0")[0]
+
+
+def _level_paths(kwd: bytes) -> tuple[int, list[str]]:
+    """(byte offset of the first path record, the paths) of a level file."""
+    hsz = _header_end(kwd)
+    end = hsz + struct.unpack_from("<I", kwd, hsz - 4)[0]
+    if struct.unpack_from("<I", kwd, end)[0] != PATH_LIST:
+        raise ValueError(f"the level file has no path list ({PATH_LIST}) after its content")
+    first = end + 8
+    count = struct.unpack_from("<H", kwd, 20)[0]
+    return first, [kwd[first + PATH_RECORD * i + 8:first + PATH_RECORD * (i + 1)].split(b"\0")[0]
+                   .decode("latin-1") for i in range(count)]
+
+
+class _Flat:
+    """One flat map of the folder, parsed once; each `m<n>` method is one rule: (ok, message)."""
+
+    def __init__(self, mod_dir: Path, stem: str) -> None:
+        self.mod_dir, self.stem = mod_dir, stem
+        self.in_pool, self.shown = FLAT_VARIANTS[stem]
+        self.src = _flat_sources()
+        self.files = {s: _read(mod_dir / MAPS_PATH / (stem + s)) for s in FLAT_SIX}
+        self._parsed = None
+
+    def parsed(self):
+        """(map, things, base map, base things, Keeper 1's area, Keeper 2's chamber)."""
+        if self._parsed is None:
+            missing = [self.stem + s for s, d in self.files.items() if d is None]
+            if missing:
+                raise ValueError(f"missing {', '.join(missing)}")
+            grid, base = _Grid(self.files["Map.kld"]), _Grid(self.src["base"]["Map.kld"])
+            things, bthings = _things_of(self.files["Things.kld"]), _things_of(self.src["base"]["Things.kld"])
+            heart = grid.cells(T_HEART, HUMAN_PLAYER)
+            area = grid.flood(heart, lambda t: (t[0] in (T_CLAIMED, T_PORTAL, T_HEART)
+                                                and t[1] == HUMAN_PLAYER) or t[0] == T_DIRT)
+            chamber = grid.flood(grid.cells(T_HEART, KEEPER_2), lambda t: t[0] not in SOLID_TERRAIN)
+            self._parsed = grid, things, base, bthings, area, chamber
+        return self._parsed
+
+    def file(self, suffix: str) -> bytes:
+        data = self.files[suffix]
+        if data is None:
+            raise ValueError(f"{self.stem}{suffix} is missing")
+        return data
+
+    # rule m1: size and border
+    def m1(self):
+        grid, _t, base, *_ = self.parsed()
+        if (grid.w, grid.h) != (base.w, base.h):
+            return False, f"the map is {grid.w} x {grid.h}, {FLAT_BASE} is {base.w} x {base.h}"
+        problems = []
+        if grid.header != base.header:
+            problems.append(f"the Map header differs from {FLAT_BASE}'s")
+        ring = [(x, y) for y in range(grid.h) for x in range(grid.w)
+                if x in (0, grid.w - 1) or y in (0, grid.h - 1)]
+        bad = [c for c in ring if grid.at(*c) != base.at(*c)]
+        if bad:
+            problems.append(f"{len(bad)} tiles of the outer ring differ from {FLAT_BASE}'s, e.g. "
+                            f"{bad[0]} is {grid.at(*bad[0]).hex()}, {FLAT_BASE} has {base.at(*bad[0]).hex()}")
+        if problems:
+            return False, "; ".join(problems)
+        return True, (f"{grid.w} x {grid.h} with the Map header and all {len(ring)} outer ring tiles "
+                      f"of {FLAT_BASE}, byte for byte")
+
+    # rule m2: two Dungeon Hearts made as the base makes them
+    def m2(self):
+        grid, things, base, bthings, *_ = self.parsed()
+        problems = []
+        owners = sorted({t[1] for t in grid.tiles if t[0] == T_HEART})
+        if owners != [HUMAN_PLAYER, KEEPER_2]:
+            problems.append(f"Dungeon Heart tiles belong to players {owners}, expected [3, 4]")
+        corners = {}
+        for owner in (HUMAN_PLAYER, KEEPER_2):
+            corner, tiles, on = _shape(grid, T_HEART, owner, things)
+            bcorner, btiles, bon = _shape(base, T_HEART, owner, bthings)
+            corners[owner] = corner
+            if tiles != btiles:
+                problems.append(f"player {owner}'s heart tiles are not {FLAT_BASE}'s heart "
+                                f"({len(btiles)} tiles) in shape and bytes")
+            if on != bon:
+                problems.append(f"the things on player {owner}'s heart are not {FLAT_BASE}'s "
+                                f"({len(bon)} room thing(s)) moved with it")
+            if owner == HUMAN_PLAYER and corner != bcorner:
+                problems.append(f"Keeper 1's heart is at {corner}, not where {FLAT_BASE} has it "
+                                f"({bcorner}, the Players file's camera)")
+        rooms = sorted(d[19] for kind, d in things if kind == ROOM_THING and d[18] == T_HEART)
+        if rooms != [HUMAN_PLAYER, KEEPER_2]:
+            problems.append(f"heart room things belong to players {rooms}, expected one each for 3 and 4")
+        if problems:
+            return False, "; ".join(problems)
+        return True, (f"two Dungeon Hearts, Keeper 1's at {corners[HUMAN_PLAYER]} (as in {FLAT_BASE}) "
+                      f"and Keeper 2's at {corners[KEEPER_2]}, each {FLAT_BASE}'s 25 tiles with its "
+                      f"one heart room thing at the centre")
+
+    # rule m3: one Keeper 1 portal, Siege's, connected to the heart
+    def m3(self):
+        grid, things, _b, _bt, area, _c = self.parsed()
+        siege = _Grid(self.src["siege"]["Map.kld"])
+        corner, tiles, on = _shape(grid, T_PORTAL, HUMAN_PLAYER, things)
+        _sc, stiles, son = _shape(siege, T_PORTAL, HUMAN_PLAYER, _things_of(self.src["siege"]["Things.kld"]))
+        problems = []
+        cells = grid.cells(T_PORTAL)
+        if len(cells) != len(stiles) or any(grid.at(*c)[1] != HUMAN_PLAYER for c in cells):
+            problems.append(f"{len(cells)} Portal tiles, expected one portal of {len(stiles)} tiles of player 3")
+        if tiles != stiles:
+            problems.append("the Portal tiles are not Siege's Keeper 1 portal in shape and bytes")
+        if on != son:
+            problems.append(f"the things on the portal are not Siege's ({len(son)})")
+        if cells and not set(cells) <= area:
+            problems.append("the portal is not connected by floor to Keeper 1's heart")
+        if problems:
+            return False, "; ".join(problems)
+        return True, (f"one {len(stiles)}-tile Portal of Keeper 1 at {corner}, Siege's tiles and "
+                      f"things ({len(son)}), connected by floor to the heart")
+
+    # rule m4: Keeper 1's open area, gems and gold
+    def m4(self):
+        grid, _t, _b, _bt, area, _c = self.parsed()
+        problems = []
+        floor = [c for c in area if grid.at(*c)[0] in (T_DIRT, T_CLAIMED)]
+        claimed = [c for c in area if grid.at(*c)[:2] == bytes([T_CLAIMED, HUMAN_PLAYER])]
+        if len(floor) < MIN_FLOOR:
+            problems.append(f"Keeper 1's open area has {len(floor)} floor tiles, fewer than {MIN_FLOOR}")
+        if len(claimed) < MIN_CLAIMED:
+            problems.append(f"Keeper 1's open area has {len(claimed)} Claimed Path tiles, fewer than {MIN_CLAIMED}")
+        everything = {(x, y) for y in range(grid.h) for x in range(grid.w)}
+        outside = everything - area
+        reach, todo = {(0, 0)} & outside, [c for c in [(0, 0)] if c in outside]
+        while todo:
+            x, y = todo.pop()
+            for c in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if c in outside and c not in reach:
+                    reach.add(c)
+                    todo.append(c)
+        if reach != outside:
+            inner = sorted(outside - reach)
+            problems.append(f"{len(inner)} tiles inside Keeper 1's area are not floor, e.g. {inner[0]} "
+                            f"({TERRAIN_NAMES.get(grid.at(*inner[0])[0], grid.at(*inner[0])[0])})")
+        gems, gold = grid.cells(T_GEMS), grid.cells(T_GOLD)
+        if len(gems) not in GEMS_RANGE:
+            problems.append(f"{len(gems)} Gems tiles, expected 4 to 6")
+        if len(gold) != GOLD_COUNT:
+            problems.append(f"{len(gold)} Gold tiles, expected {GOLD_COUNT}")
+        for x, y in gems + gold:
+            near = [c for c in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)) if grid.inside(*c)]
+            if not any(c in area for c in near):
+                problems.append(f"the Gems/Gold tile {x},{y} does not touch Keeper 1's open area")
+            if not all(c in area or grid.at(*c)[0] in (T_ROCK, T_GEMS, T_GOLD) for c in near):
+                problems.append(f"the Gems/Gold tile {x},{y} is not set in Rock")
+        other = sorted({t[0] for t in grid.tiles} - FLAT_TERRAIN)
+        if other:
+            problems.append(f"the map holds other terrain: ids {other}")
+        if problems:
+            return False, "; ".join(problems)
+        return True, (f"Keeper 1's open area: {len(area)} tiles ({len(floor)} floor, {len(claimed)} "
+                      f"Claimed Path of Keeper 1) holding the heart and the portal, nothing enclosed "
+                      f"in it; {len(gems)} Gems and {len(gold)} Gold tiles set in Rock, each touching "
+                      f"the area; only the terrain of the design")
+
+    # rule m5: Keeper 2 sealed in
+    def m5(self):
+        grid, _t, _b, _bt, area, chamber = self.parsed()
+        if not chamber:
+            return False, "Keeper 2 has no Dungeon Heart"
+        problems = []
+        if chamber & area or any(grid.at(*c)[1] == HUMAN_PLAYER for c in chamber):
+            problems.append("Keeper 2's chamber reaches Keeper 1's tiles (a flood fill over every "
+                            "passable tile from Keeper 2's heart)")
+        foreign = sorted(c for c in chamber
+                         if grid.at(*c)[:2] not in (bytes([T_CLAIMED, KEEPER_2]), bytes([T_HEART, KEEPER_2])))
+        if foreign:
+            t = grid.at(*foreign[0])
+            problems.append(f"Keeper 2's chamber holds {len(foreign)} tiles other than its Claimed Path "
+                            f"and heart, e.g. {foreign[0]} ({TERRAIN_NAMES.get(t[0], t[0])} of player {t[1]})")
+        # the wall: the distance to the nearest tile that is neither chamber nor Impenetrable Rock
+        nearest = None
+        for y in range(grid.h):
+            for x in range(grid.w):
+                if (x, y) in chamber or grid.at(x, y)[0] == T_IMPENETRABLE:
+                    continue
+                d = min(max(abs(x - cx), abs(y - cy)) for cx, cy in chamber)
+                if nearest is None or d < nearest[0]:
+                    nearest = (d, (x, y))
+        thick = grid.w + grid.h if nearest is None else nearest[0] - 1
+        on_edge = any(not grid.inside(cx + dx, cy + dy) for cx, cy in chamber
+                      for dx in range(-MIN_WALL, MIN_WALL + 1) for dy in range(-MIN_WALL, MIN_WALL + 1))
+        if thick < MIN_WALL or on_edge:
+            where = "" if nearest is None else (f", e.g. {nearest[1]} "
+                                                f"({TERRAIN_NAMES.get(grid.at(*nearest[1])[0], '?')})")
+            problems.append(f"the wall around Keeper 2's chamber is {max(thick, 0)} tiles of "
+                            f"Impenetrable Rock thick, at least {MIN_WALL} needed{where}")
+        if problems:
+            return False, "; ".join(problems)
+        return True, (f"Keeper 2's chamber ({len(chamber)} tiles: its heart and Claimed Path) is "
+                      f"sealed: no passable path to Keeper 1, walled by Impenetrable Rock at least "
+                      f"{thick} tiles thick on every side, no Gems or Gold inside")
+
+    # rule m6: things
+    def m6(self):
+        grid, things, base, bthings, area, chamber = self.parsed()
+        siege = _Grid(self.src["siege"]["Map.kld"])
+        sthings = _things_of(self.src["siege"]["Things.kld"])
+        allowed = []
+        for owner in (HUMAN_PLAYER, KEEPER_2):
+            corner, _tl, _on = _shape(grid, T_HEART, owner, things)
+            bcorner, _btl, bon = _shape(base, T_HEART, owner, bthings)
+            if corner is not None:
+                allowed += [(kind, _moved(d, *corner)) for kind, d in bon]
+        corner, _tl, _on = _shape(grid, T_PORTAL, HUMAN_PLAYER, things)
+        if corner is not None:
+            allowed += [(kind, _moved(d, *corner))
+                        for kind, d in _shape(siege, T_PORTAL, HUMAN_PLAYER, sthings)[2]]
+        base_creatures = [d for kind, d in bthings if kind == CREATURE_THING]
+        problems, counts, others = [], {}, []
+        for kind, d in things:
+            if kind != CREATURE_THING:
+                if (kind, d) in allowed:
+                    allowed.remove((kind, d))
+                else:
+                    others.append(kind)
+                continue
+            cid, owner = d[26], d[27]
+            counts[(cid, owner)] = counts.get((cid, owner), 0) + 1
+            x, y = _xy(d)
+            region = area if owner == HUMAN_PLAYER else chamber if owner == KEEPER_2 else set()
+            if (x, y) not in region or grid.at(x, y)[0] in SOLID_TERRAIN:
+                problems.append(f"creature {cid} of player {owner} at {x},{y} is not on its keeper's floor")
+            source_id = BILE_DEMON_ID if cid == MOLYNX_ID else cid
+            like = d[:26] + bytes([source_id]) + d[27:]  # Molynx is a retargeted Bile Demon
+            if not any(b[8:] == like[8:] and b[27] == owner for b in base_creatures):
+                problems.append(f"creature {cid} of player {owner} at {x},{y} is not a copy of one of "
+                                f"{FLAT_BASE}'s creature {source_id} things of that player")
+            if cid == MOLYNX_ID:
+                beside = any(grid.inside(x + dx, y + dy)
+                             and grid.at(x + dx, y + dy)[:2] == bytes([T_HEART, HUMAN_PLAYER])
+                             for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+                if grid.at(x, y)[0] not in (T_DIRT, T_CLAIMED) or not beside:
+                    problems.append(f"Molynx at {x},{y} is not on floor next to Keeper 1's heart")
+        if others:
+            problems.append(f"unexpected things of types {sorted(others)} (only the hearts' room "
+                            f"things and the creatures belong on the map)")
+        if allowed:
+            problems.append(f"{len(allowed)} heart or portal thing(s) missing")
+        if counts != FLAT_CREATURES:
+            shown = ", ".join(f"{n} x creature {c} of player {o}" for (c, o), n in sorted(counts.items()))
+            problems.append(f"creatures: {shown}; expected 6 Imps and Molynx of player 3, 4 Imps of player 4")
+        if problems:
+            return False, "; ".join(problems)
+        return True, (f"{len(things)} things: the 2 heart room things, 6 Imps and Molynx (next to the "
+                      f"heart) of Keeper 1 on its floor, 4 Imps of Keeper 2 in its chamber, each a copy "
+                      f"of a {FLAT_BASE} creature thing; nothing else")
+
+    # rule m7: players
+    def m7(self):
+        new = _records(self.file("Players.kld"), PLAYER_RECORD, "Players.kld")
+        old = _records(self.src["base"]["Players.kld"], PLAYER_RECORD, f"{FLAT_BASE}Players.kld")
+        if len(new) != len(old):
+            return False, f"{len(new)} player records, {FLAT_BASE} has {len(old)}"
+        problems = []
+        for a, b in zip(new, old):
+            player = b[-37]
+            if player == HUMAN_PLAYER:
+                gold, is_ai = struct.unpack_from("<iI", a, 0)
+                if gold != STARTING_GOLD or is_ai != 0 or a[8:] != b[8:]:
+                    problems.append(f"Keeper 1 (player 3) is not {FLAT_BASE}'s record with starting gold "
+                                    f"{STARTING_GOLD} and isAi 0 (has {gold}, {is_ai})")
+            elif a != b:
+                problems.append(f"player {player}'s record differs from {FLAT_BASE}'s at byte "
+                                f"{_first_difference(a, b)}")
+        if problems:
+            return False, "; ".join(problems)
+        return True, (f"{len(new)} player records, {FLAT_BASE}'s, except Keeper 1's starting gold "
+                      f"{STARTING_GOLD} (Keeper 1 human: isAi 0)")
+
+    # rule m8: variables
+    def m8(self):
+        new = [struct.unpack("<i12s", e) for e in _records(self.file("Variables.kld"), VARIABLE_ENTRY, "Variables.kld")]
+        old = [struct.unpack("<i12s", e) for e in _records(self.src["base"]["Variables.kld"], VARIABLE_ENTRY,
+                                                           f"{FLAT_BASE}Variables.kld")]
+        problems = []
+
+        def av(rest):
+            av_type, player, type_id, value = struct.unpack("<HHii", rest)
+            return (av_type, player, type_id), value
+
+        if len(new) < len(old):
+            return False, f"{len(new)} entries, fewer than {FLAT_BASE}'s {len(old)}"
+        for i, ((vid, rest), (bvid, brest)) in enumerate(zip(new, old)):
+            k1_av = bvid == AVAILABILITY_VARIABLE and av(brest)[0][1] == HUMAN_PLAYER
+            if (vid, rest[:8] if k1_av else rest) != (bvid, brest[:8] if k1_av else brest):
+                problems.append(f"entry {i} of {FLAT_BASE}'s Variables moved or changed")
+                break
+        for vid, rest in new[len(old):]:
+            if vid == AVAILABILITY_VARIABLE and av(rest)[0][1] == HUMAN_PLAYER:
+                continue
+            if vid == POOL_VARIABLE and struct.unpack("<iii", rest)[2] == HUMAN_PLAYER:
+                continue
+            problems.append(f"an added entry (variable {vid}) is not a pool or availability entry of player 3")
+        keys = [av(rest)[0] for vid, rest in new if vid == AVAILABILITY_VARIABLE]
+        dup = sorted({k for k in keys if keys.count(k) > 1})
+        if dup:
+            problems.append(f"duplicate availability entries (type, player, id) {dup}")
+        pool = [struct.unpack("<iii", rest) for vid, rest in new if vid == POOL_VARIABLE]
+        pool_keys = [(c, p) for c, _v, p in pool]
+        pdup = sorted({k for k in pool_keys if pool_keys.count(k) > 1})
+        if pdup:
+            problems.append(f"duplicate creature pool entries (creature, player) {pdup}")
+        k1 = {k: v for k, v in (av(rest) for vid, rest in new if vid == AVAILABILITY_VARIABLE)
+              if k[1] == HUMAN_PLAYER}
+        for av_type, ids in KEEPER_1_ITEMS.items():
+            have = {k[2] for k in k1 if k[0] == av_type}
+            if have != ids:
+                problems.append(f"player 3 has {AV_NAMES[av_type]} availability for {sorted(have)}, "
+                                f"expected {sorted(ids)}")
+        not_enabled = sorted((AV_NAMES.get(k[0], k[0]), k[2], v) for k, v in k1.items() if v != ENABLE)
+        for what, type_id, value in not_enabled:
+            problems.append(f"player 3's {what} {type_id} is {value}, not ENABLE ({ENABLE})")
+        want_pool = {**SIEGE_POOL, **({MOLYNX_ID: MOLYNX_POOL} if self.in_pool else {})}
+        got_pool = {c: v for c, v, p in pool if p == HUMAN_PLAYER}
+        if got_pool != want_pool:
+            problems.append(f"player 3's creature pool is {dict(sorted(got_pool.items()))}, expected "
+                            f"{dict(sorted(want_pool.items()))}")
+        got_av = {k[2] for k in k1 if k[0] == AV_CREATURE}
+        if got_av != set(want_pool):
+            problems.append(f"player 3's creature availability is {sorted(got_av)}, expected {sorted(want_pool)}")
+        if problems:
+            return False, "; ".join(problems)
+        molynx = " and Molynx (47, pool 50)" if self.in_pool else ", not Molynx"
+        return True, (f"{len(new)} entries: {FLAT_BASE}'s {len(old)} in order (player 3's availability "
+                      f"values set to ENABLE) then {len(new) - len(old)} added for player 3; every keeper "
+                      f"room, door, trap and spell ENABLE; Siege's creature pool and availability "
+                      f"({len(SIEGE_POOL)} creatures){molynx}; no duplicates")
+
+    # rule m9: the editor's empty Triggers file
+    def m9(self):
+        data, auto, base = self.file("Triggers.kld"), self.src["auto"], self.src["base"]["Triggers.kld"]
+        stamps = slice(_header_end(auto) - 28, _header_end(auto) - 8)
+        if len(data) != len(auto) or data[:stamps.start] != auto[:stamps.start] or data[stamps.stop:] != auto[stamps.stop:]:
+            return False, (f"{self.stem}Triggers.kld ({len(data)} bytes) is not the editor's empty "
+                           f"AutoSaveTriggers.kld ({len(auto)} bytes) outside its timestamps")
+        if data[stamps] != base[stamps]:
+            return False, f"the Triggers timestamps (bytes {stamps.start}-{stamps.stop - 1}) are not {FLAT_BASE}'s"
+        return True, (f"the editor's empty {len(auto)}-byte Triggers file (no script) with "
+                      f"{FLAT_BASE}'s timestamps")
+
+    # rule m10: the level file
+    def m10(self):
+        data, base = self.file(".kwd"), self.src["base"][".kwd"]
+        if len(data) != len(base):
+            return False, f"the level file is {len(data)} bytes, {FLAT_BASE}'s {len(base)}"
+        problems = []
+        first, paths = _level_paths(data)
+        _bfirst, bpaths = _level_paths(base)
+        regions = [(LEVEL_NAME_AT, LEVEL_NAME_AT + LEVEL_NAME_BYTES),
+                   (LEVEL_DESC_AT, LEVEL_DESC_AT + LEVEL_DESC_BYTES),
+                   (first, first + PATH_RECORD * len(bpaths))]
+        stray = [i for i in range(len(data)) if data[i] != base[i]
+                 and not any(a <= i < b for a, b in regions)]
+        if stray:
+            problems.append(f"the level file differs from {FLAT_BASE}'s outside the name, description "
+                            f"and paths (first at byte {stray[0]})")
+        name, desc = _wtext(data, LEVEL_NAME_AT, LEVEL_NAME_BYTES), _wtext(data, LEVEL_DESC_AT, LEVEL_DESC_BYTES)
+        if name != self.shown:
+            problems.append(f"the level name is {name!r}, expected {self.shown!r}")
+        if desc != FLAT_DESCRIPTION:
+            problems.append(f"the description is {desc!r}, expected {FLAT_DESCRIPTION!r}")
+        prefix = EDITOR_MAPS + FLAT_BASE
+        want = [EDITOR_MAPS + self.stem + p[len(prefix):] if p.startswith(prefix) else p for p in bpaths]
+        if paths != want:
+            problems.append(f"the paths are {paths}, expected {want}")
+        present = set(os.listdir(self.mod_dir / MAPS_PATH))
+        absent = [p for p in paths if p.startswith(EDITOR_MAPS) and p[len(EDITOR_MAPS):] not in present]
+        if absent:
+            problems.append(f"the level file names files the folder lacks: {absent}")
+        if any(len(p) >= PATH_TEXT for p in paths):
+            problems.append("a path does not fit its 64-byte field")
+        if problems:
+            return False, "; ".join(problems)
+        flags = struct.unpack_from("<H", data, LEVEL_FLAGS)[0]
+        return True, (f"{FLAT_BASE}'s level file (flags 0x{flags:X} kept) named {name!r} with the test "
+                      f"map's description; its {len(paths)} paths name "
+                      f"{'the shipped' if self.stem == FLAT_BASE else 'its own'} files, all in the folder")
+
+    # rule m11: containers
+    def m11(self):
+        problems = []
+        for suffix in FLAT_SIX:
+            data, like, name = self.files[suffix], self.src["base"][suffix], self.stem + suffix
+            if data is None:
+                problems.append(f"{name} is missing")
+                continue
+            try:
+                read_blocks(data)
+            except ValueError as err:
+                problems.append(f"{name}: read_blocks refuses it ({err})")
+                continue
+            hsz, sig = _header_end(data), struct.unpack_from("<I", data, 0)[0]
+            if hsz != _header_end(like) or sig != struct.unpack_from("<I", like, 0)[0]:
+                problems.append(f"{name}: signature or header size is not {FLAT_BASE}'s")
+                continue
+            checks = [
+                (struct.unpack_from("<I", data, 12)[0] == sig + 1, "check word at byte 12 is not signature + 1"),
+                (data[hsz - 8:hsz - 4] == like[hsz - 8:hsz - 4], f"check word at byte {hsz - 8} is not {FLAT_BASE}'s"),
+                (struct.unpack_from("<I", data, 8)[0] == len(data), "file size field is not the file's size"),
+            ]
+            if suffix == ".kwd":
+                checks.append((data[hsz - 4:hsz] == like[hsz - 4:hsz], "content size is not the base's"))
+            else:
+                checks.append((struct.unpack_from("<I", data, hsz - 4)[0] == len(data) - hsz,
+                               "content size field is wrong"))
+            if suffix != "Map.kld":
+                checks.append((data[hsz - 28:hsz - 8] == like[hsz - 28:hsz - 8],
+                               f"timestamps differ from {FLAT_BASE}'s"))
+            if suffix == "Things.kld":
+                checks.append((struct.unpack_from("<I", data, 20)[0] == len(_thing_records(data)), "item count"))
+            problems += [f"{name}: {text}" for ok, text in checks if not ok]
+            try:
+                if suffix == "Players.kld":
+                    _records(data, PLAYER_RECORD, name)
+                elif suffix == "Variables.kld":
+                    _records(data, VARIABLE_ENTRY, name)
+            except ValueError as err:
+                problems.append(str(err))
+        if problems:
+            return False, "; ".join(problems)
+        return True, (f"all six files are one block each that read_blocks accepts, with {FLAT_BASE}'s "
+                      f"signatures, header sizes, check words and timestamps, and consistent sizes and counts")
+
+    # rule m12: one Molynx
+    def m12(self):
+        _g, things, *_ = self.parsed()
+        molynx = [d for kind, d in things if kind == CREATURE_THING and d[26] == MOLYNX_ID]
+        if len(molynx) != 1 or molynx[0][27] != HUMAN_PLAYER:
+            owners = [d[27] for d in molynx]
+            return False, (f"{len(molynx)} creature things with id {MOLYNX_ID} (owners {owners}), "
+                           f"expected exactly one, owned by player {HUMAN_PLAYER}")
+        x, y = _xy(molynx[0])
+        return True, f"exactly one creature thing with id {MOLYNX_ID}, owned by Keeper 1 (player 3), at {x},{y}"
+
+
+def _audit_flat(mod_dir: Path, stem: str, lines: "_Lines", files: "_Files") -> tuple:
+    """Rules (a), (b), (c), (f) on the Globals file against the base map's, and m1 to m12."""
+    result = _audit_globals(mod_dir, stem, MAPS_DIR / f"{FLAT_BASE}Globals.kld", lines, files)
+    if stem == FLAT_BASE:
+        note = (f"rules (d) and (e) no longer apply: {FLAT_BASE} is no longer the shipped map but "
+                f"the flat test map (rules m1 to m13)")
+    else:
+        note = (f"rules (d) and (e) do not apply: {stem} is the flat test map, built from "
+                f"{FLAT_BASE} (rules m1 to m13)")
+    lines.note("d, e", stem, note)
+    flat = _Flat(mod_dir, stem)
+    for rule in FLAT_RULES:
+        ok, message = _safe(getattr(flat, rule))
+        lines.add(ok, rule, stem, message)
+    return result
+
+
+def _check_flat_variants(mod_dir: Path) -> tuple[bool, str]:
+    """Rule m13: Dead Walking is Molynx Test under the shipped name; the portal variant differs
+    from Molynx Test only in its Variables (the creature-47 entries) and its level file."""
+    maps = mod_dir / MAPS_PATH
+    same = ("Map.kld", "Things.kld", "Players.kld", "Triggers.kld", "Globals.kld")
+    problems = []
+
+    def read(stem, suffix):
+        data = _read(maps / (stem + suffix))
+        if data is None:
+            raise ValueError(f"{stem}{suffix} is missing, so the maps cannot be compared")
+        return data
+
+    for suffix in (*same, "Variables.kld"):
+        if read(FLAT_BASE, suffix) != read(FLAT_PLAIN, suffix):
+            problems.append(f"{FLAT_BASE}{suffix} is not {FLAT_PLAIN}{suffix}")
+    for suffix in same:
+        if read(FLAT_PORTAL, suffix) != read(FLAT_PLAIN, suffix):
+            problems.append(f"{FLAT_PORTAL}{suffix} is not {FLAT_PLAIN}{suffix}")
+    plain, portal = read(FLAT_PLAIN, "Variables.kld"), read(FLAT_PORTAL, "Variables.kld")
+    entries = lambda d: [d[i:i + VARIABLE_ENTRY] for i in range(_header_end(d), len(d), VARIABLE_ENTRY)]  # noqa: E731
+    pool_47 = struct.pack("<iiii", POOL_VARIABLE, MOLYNX_ID, MOLYNX_POOL, HUMAN_PLAYER)
+    av_47 = struct.pack("<iHHii", AVAILABILITY_VARIABLE, AV_CREATURE, HUMAN_PLAYER, MOLYNX_ID, ENABLE)
+    added = [e for e in entries(portal) if e in (pool_47, av_47)]
+    rest = [e for e in entries(portal) if e not in (pool_47, av_47)]
+    hsz = _header_end(plain)
+    sizes = {*range(8, 12), *range(20, 24), *range(hsz - 4, hsz)}
+    header_ok = len(portal) >= hsz and all(portal[i] == plain[i] for i in range(hsz) if i not in sizes)
+    if sorted(added) != sorted([pool_47, av_47]) or rest != entries(plain) or not header_ok:
+        problems.append(f"{FLAT_PORTAL}Variables.kld is not {FLAT_PLAIN}Variables.kld plus exactly the "
+                        f"two creature-47 entries (pool 50 and availability ENABLE for player 3)")
+    if problems:
+        return False, "; ".join(problems)
+    return True, (f"{FLAT_BASE} holds {FLAT_PLAIN}'s Map, Things, Players, Triggers, Variables and Globals "
+                  f"byte for byte; {FLAT_PORTAL} differs from {FLAT_PLAIN} only in its level file and in "
+                  f"its Variables, by exactly the two creature-47 entries")
 
 
 # ---- the folder ---------------------------------------------------------------------------------
@@ -865,8 +1564,9 @@ def _map_names(files: list[str]) -> list[str]:
 
 
 def _check_layout(mod_dir: Path, names: list[str], stage: int | None, meshes: set[str],
-                  textures: set[str]) -> tuple[bool, str]:
-    """Rule (g): `meshes` / `textures` are the names record 47 and its meshes use (stage >= 2)."""
+                  textures: set[str], required: tuple[str, ...] = ()) -> tuple[bool, str]:
+    """Rule (g): `meshes` / `textures` are the names record 47 and its meshes use (stage >= 2);
+    `required` are maps the folder must hold (the three flat maps of a Test B folder)."""
     maps_rel = MAPS_PATH.as_posix()
     expected_maps = {name + suffix for name in names for suffix in MAP_SUFFIXES}
     stage2 = stage is not None and stage >= 2
@@ -900,6 +1600,10 @@ def _check_layout(mod_dir: Path, names: list[str], stage: int | None, meshes: se
     if not names:
         problems.append(f"no map files in {maps_rel}")
     present = set(files)
+    for name in required:
+        if name not in names:
+            problems.append(f"map {name} is missing (all {len(MAP_SUFFIXES)} files): a folder with the "
+                            f"flat test map holds all of " + ", ".join(required))
     for name in names:
         missing = [name + s for s in MAP_SUFFIXES if f"{maps_rel}/{name}{s}" not in present]
         if missing:
@@ -945,15 +1649,23 @@ def audit(mod_dir: Path) -> AuditReport:
     names = _map_names(sorted(os.listdir(maps_dir)) if maps_dir.is_dir() else [])
     maps = _Lines()
     files = _Files(mod_dir)
-    results = {name: _audit_map(mod_dir, name, maps, files) for name in names}
+    # A folder with "Molynx Test" or "Molynx Test Portal" is a Test B folder: its Dead Walking is
+    # the flat test map too, and all three flat maps must be there.
+    flat = any(name in (FLAT_PLAIN, FLAT_PORTAL) for name in names)
+    results = {name: (_audit_flat if flat and name in FLAT_VARIANTS else _audit_map)(mod_dir, name, maps, files)
+               for name in names}
     stages = {name: result[0] for name, result in results.items()}
     meshes = set().union(*(result[1] for result in results.values()))
     textures = set().union(*(result[2] for result in results.values()))
 
     distinct = {s for s in stages.values() if s is not None}
     stage = next(iter(distinct)) if len(distinct) == 1 and None not in stages.values() else None
-    ok, message = _safe(_check_layout, mod_dir, names, stage, meshes, textures)
+    required = tuple(sorted(FLAT_VARIANTS)) if flat else ()
+    ok, message = _safe(_check_layout, mod_dir, names, stage, meshes, textures, required)
     folder.add(ok, "g", "folder", message)
+    if flat:
+        ok, message = _safe(_check_flat_variants, mod_dir)
+        folder.add(ok, "m13", "folder", message)
     ok, message = _safe(_check_resource_toml, mod_dir)
     folder.add(ok, "h", "folder", message)
     if len(distinct) > 1:

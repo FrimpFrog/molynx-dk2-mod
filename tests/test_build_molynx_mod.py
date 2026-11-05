@@ -42,7 +42,12 @@ SKIRMISH_FLAG = 1 << 11
 MULTIPLAYER_FLAG = 1 << 10
 FOLDER = "Molynx_slot_only"
 SECOND = "Dead Walking"  # the skirmish map whose first keeper Bile Demon is Keeper 1's
-MAPS = ["Siege", SECOND]
+MAPS = ["Siege", SECOND]  # the Test A maps (built with maps=MAPS: both copied and retargeted)
+# The folders as handed over (Test B): Siege as in Test A, and the flat test map under three names;
+# stem -> (Molynx in the portal pool, the name the level file shows).
+FLAT = {"Molynx Test": (False, "Molynx Test"), "Molynx Test Portal": (True, "Molynx Test Portal"),
+        SECOND: (False, "Molynx Test")}
+SHIPPED_MAPS = sorted(["Siege", *FLAT])
 TEXT_IDS = {"name": 3001, "tooltip": 3002, "general": 3003, "strength": 3004, "weakness": 3005}
 # The files a stage-2 folder delivers (literal; the record's file plan for the test maps' Bile Demons):
 # 18 clips (staggering only for Siege's type NONE dejectedPose slot), the variant walk_once, the 5
@@ -171,7 +176,8 @@ def renamed_slots(mod: Path, map_name: str) -> set[str]:
 
 @pytest.fixture(scope="module")
 def stage1_dir(tmp_path_factory):
-    return build_mod(1, tmp_path_factory.mktemp("stage1"), FOLDER)
+    """Test A at stage 1: Siege and Dead Walking, both copied and retargeted (no flat map)."""
+    return build_mod(1, tmp_path_factory.mktemp("stage1"), FOLDER, maps=MAPS)
 
 
 @pytest.fixture
@@ -206,7 +212,7 @@ def stage2_dir(tmp_path_factory, assets_dir):
 
 @pytest.fixture(scope="module")
 def stage2_full(tmp_path_factory, assets_dir):
-    """The stage-2 folder as it is handed over: name Molynx, both test maps."""
+    """The stage-2 folder as it is handed over: name Molynx, Siege and the three flat maps."""
     return build_mod(2, tmp_path_factory.mktemp("stage2_full"), assets_dir=assets_dir)
 
 
@@ -428,7 +434,7 @@ def test_resource_toml_has_the_format_of_the_real_mods(stage1_dir):
 
 @needs_data
 def test_building_twice_gives_identical_bytes(stage1_dir, tmp_path):
-    again = build_mod(1, tmp_path, FOLDER)
+    again = build_mod(1, tmp_path, FOLDER, maps=MAPS)
     files = sorted(p.relative_to(stage1_dir) for p in stage1_dir.rglob("*") if p.is_file())
     assert files == sorted(p.relative_to(again) for p in again.rglob("*") if p.is_file())
     assert all((stage1_dir / f).read_bytes() == (again / f).read_bytes() for f in files)
@@ -442,11 +448,12 @@ def test_build_main_builds_the_slot_only_folder_by_default(tmp_path, capsys):
 
 
 @needs_data
-def test_default_name_is_molynx_and_default_maps_are_the_test_maps(tmp_path):
+def test_default_name_is_molynx_and_default_maps_are_siege_and_the_flat_maps(tmp_path):
     out = build_mod(1, tmp_path)
     assert out == tmp_path / "Molynx"
     names = {p.name[:-len("Globals.kld")] for p in maps_dir(out).glob("*Globals.kld")}
-    assert names == set(MAPS)
+    assert names == set(SHIPPED_MAPS)
+    assert builder.FLAT_MAPS == {stem: in_pool for stem, (in_pool, _shown) in FLAT.items()}
 
 
 # ---- audit: a good stage-1 folder ---------------------------------------------------------------
@@ -914,7 +921,8 @@ def test_stage2_folder_holds_exactly_the_files_the_record_names(stage2_full):
     assert stage2_full.name == "Molynx"
     found = sorted(p.relative_to(stage2_full).as_posix() for p in stage2_full.rglob("*") if p.is_file())
     expected = sorted(["resource.toml",
-                       *(f"Data/editor/maps/{name}{suffix}" for name in MAPS for suffix in MAP_SUFFIXES),
+                       *(f"Data/editor/maps/{name}{suffix}" for name in SHIPPED_MAPS
+                         for suffix in MAP_SUFFIXES),
                        *(f"Data/Meshes/{f}" for f in STAGE2_MESHES),
                        *(f"Data/EngineTextures/{f}" for f in STAGE2_TEXTURES)])
     assert found == expected
@@ -1108,8 +1116,8 @@ def test_build_main_help_names_the_stages_and_the_assets_option(capsys):
 def test_stage2_audit_of_the_handed_over_folder_passes_every_rule(stage2_full):
     report = audit(stage2_full)
     assert report.ok, "\n".join(report.lines)
-    for name in MAPS:
-        for rule in "abcdef":
+    for name in SHIPPED_MAPS:
+        for rule in ("abcdef" if name == "Siege" else "abcf"):
             assert len(pass_lines(report, rule, name)) == 1, (rule, name)
         (line,) = pass_lines(report, "b", name)
         assert "stage 2" in line and "24 rewritten" in line
@@ -1612,3 +1620,368 @@ def test_bundle_refuses_a_missing_folder(tmp_path):
     with pytest.raises(ValueError, match="Molynx_slot_only"):
         make_bundle(mods, guide, tmp_path / "a.zip")
     assert not (tmp_path / "a.zip").exists()
+
+
+# ---- Test B: the flat test map in the folders (builder) -----------------------------------------
+# Offsets used below (written out here, from the Task 1 reconnaissance): Map.kld header 36 bytes,
+# then 69 x 69 tiles of 4 bytes (terrain, player, flag, unknown); Things.kld header 56 bytes (count
+# u32 at 20, file size at 8, content size at 52), records u32 type, u32 size, data (a creature: x, y
+# i32 at +0, creatureId at +26, owner at +27); Variables entries of 16 bytes after a 56-byte header;
+# the level file's name wchar[64] at 56, description wchar[1024] at 184, path records (72 bytes:
+# u32 type, u32 0, char[64]) from byte 56 + 25683 + 8.
+
+MAP_HEADER, MAP_W = 36, 69
+PATHS_AT = 56 + 25683 + 8
+DESCRIPTION = "Flat test map: Keeper 2 is sealed in, no enemies, no script."
+
+
+@pytest.fixture(scope="module")
+def shipped1(tmp_path_factory):
+    """The stage-1 folder as it is handed over: Siege (Test A) and the three flat maps."""
+    return build_mod(1, tmp_path_factory.mktemp("shipped1"), FOLDER)
+
+
+@pytest.fixture
+def flat_mod(shipped1, tmp_path):
+    target = tmp_path / FOLDER
+    shutil.copytree(shipped1, target)
+    return target
+
+
+def map_file(mod: Path, stem: str, suffix: str) -> bytes:
+    return (maps_dir(mod) / f"{stem}{suffix}").read_bytes()
+
+
+def set_tile(mod: Path, stem: str, x: int, y: int, tile: bytes) -> None:
+    path = maps_dir(mod) / f"{stem}Map.kld"
+    data = bytearray(path.read_bytes())
+    at = MAP_HEADER + 4 * (y * MAP_W + x)
+    data[at:at + 4] = tile
+    path.write_bytes(bytes(data))
+
+
+def level_strings(kwd: bytes) -> tuple[str, str, list[str]]:
+    name = kwd[56:56 + 128].decode("utf-16-le").split("\0")[0]
+    desc = kwd[184:184 + 2048].decode("utf-16-le").split("\0")[0]
+    count = struct.unpack_from("<H", kwd, 20)[0]
+    paths = [kwd[PATHS_AT + 72 * i + 8:PATHS_AT + 72 * i + 72].split(b"\0")[0].decode("latin-1")
+             for i in range(count)]
+    return name, desc, paths
+
+
+def variable_entries(data: bytes) -> list[bytes]:
+    return [data[i:i + 16] for i in range(56, len(data), 16)]
+
+
+def creature_records(things: bytes) -> list[bytes]:
+    pos, out = HEADER_SIZE, []
+    while pos < len(things):
+        kind, size = struct.unpack_from("<II", things, pos)
+        if kind == 200:
+            out.append(things[pos:pos + 8 + size])
+        pos += 8 + size
+    return out
+
+
+def add_thing_record(things: bytes, record: bytes) -> bytes:
+    out = bytearray(things + record)
+    struct.pack_into("<I", out, 8, len(out))
+    struct.pack_into("<I", out, 20, struct.unpack_from("<I", out, 20)[0] + 1)
+    struct.pack_into("<I", out, 52, len(out) - HEADER_SIZE)
+    return bytes(out)
+
+
+@needs_data
+def test_shipped_folder_lists_exactly_the_expected_files(shipped1):
+    found = sorted(p.relative_to(shipped1).as_posix() for p in shipped1.rglob("*") if p.is_file())
+    assert found == sorted(["resource.toml", *(f"Data/editor/maps/{name}{suffix}"
+                                               for name in SHIPPED_MAPS for suffix in MAP_SUFFIXES)])
+    assert len(found) == 1 + 4 * 7
+
+
+@needs_data
+def test_flat_maps_are_the_generators_files(shipped1):
+    from scripts.dk2_testmap import testmap_files
+    for stem, (in_pool, shown) in FLAT.items():
+        files = testmap_files(stem, molynx_in_pool=in_pool, display_name=shown)
+        assert sorted(files) == sorted(stem + s for s in MAP_SUFFIXES if s != "Globals.kld")
+        for name, data in files.items():
+            assert (maps_dir(shipped1) / name).read_bytes() == data, name
+
+
+@needs_data
+def test_flat_maps_globals_are_dead_walkings_with_record_47(shipped1, stage1_dir):
+    """The base map's Globals spliced with the folder's record 47: the bytes of Test A's Dead Walking."""
+    test_a = map_file(stage1_dir, SECOND, "Globals.kld")
+    for stem in FLAT:
+        data = map_file(shipped1, stem, "Globals.kld")
+        assert data == test_a, stem
+        (block,) = [b for b in read_blocks(data) if b.signature == CREATURES]
+        assert block.item_count == 47
+        assert read_creatures(block)[-1].get("creatureId") == 47
+
+
+@needs_data
+@needs_assets
+def test_stage2_flat_maps_carry_the_stage2_record_and_need_no_other_files(stage2_full):
+    first = map_file(stage2_full, "Molynx Test", "Globals.kld")
+    for stem in FLAT:
+        assert map_file(stage2_full, stem, "Globals.kld") == first, stem
+        assert {n + ".kmf" for n in renamed_slots_from(stage2_full, stem, SECOND)} \
+            == set(STAGE2_MESHES) - {"Molynx-staggering.kmf"}
+    assert files_under(meshes(stage2_full)) == STAGE2_MESHES
+    assert files_under(textures(stage2_full)) == STAGE2_TEXTURES
+
+
+def renamed_slots_from(mod: Path, stem: str, base: str) -> set[str]:
+    molynx, bile = record_47(mod, stem), source_bile(base)
+    return {molynx.resource_name(s) for s in ANIM_SLOTS
+            if s != "unk_1" and molynx.resource_name(s) != bile.resource_name(s)}
+
+
+@needs_data
+def test_the_portal_variant_differs_only_in_the_variables_and_the_level_file(shipped1):
+    plain, portal = "Molynx Test", "Molynx Test Portal"
+    for suffix in ("Map.kld", "Things.kld", "Players.kld", "Triggers.kld", "Globals.kld"):
+        assert map_file(shipped1, plain, suffix) == map_file(shipped1, portal, suffix), suffix
+    a, b = (variable_entries(map_file(shipped1, s, "Variables.kld")) for s in (plain, portal))
+    added = [e for e in b if e not in a]
+    assert [struct.unpack("<iiii", e) for e in added] == [(1, 47, 50, 3), (2, 2 | 3 << 16, 47, 3)]
+    assert [e for e in b if e not in added] == a
+
+
+@needs_data
+def test_dead_walking_is_the_flat_map_under_the_shipped_name(shipped1):
+    for suffix in MAP_SUFFIXES:
+        if suffix != ".kwd":
+            assert map_file(shipped1, SECOND, suffix) == map_file(shipped1, "Molynx Test", suffix), suffix
+    name, desc, paths = level_strings(map_file(shipped1, SECOND, ".kwd"))
+    assert (name, desc) == ("Molynx Test", DESCRIPTION)
+    source = (map_source_dir(SECOND) / f"{SECOND}.kwd").read_bytes()
+    assert paths == level_strings(source)[2]
+    assert level_strings(map_file(shipped1, "Molynx Test Portal", ".kwd"))[0] == "Molynx Test Portal"
+
+
+@needs_data
+def test_every_level_file_path_names_a_file_of_the_folder(shipped1):
+    present = {p.name for p in maps_dir(shipped1).iterdir()}
+    for stem in FLAT:
+        _name, _desc, paths = level_strings(map_file(shipped1, stem, ".kwd"))
+        named = [p.rsplit("\\", 1)[1] for p in paths if p.startswith("Data\\Editor\\Maps\\")]
+        assert sorted(named) == sorted(stem + s for s in MAP_SUFFIXES if s != ".kwd"), stem
+        assert set(named) <= present
+
+
+@needs_data
+def test_shipped_building_twice_gives_identical_bytes(shipped1, tmp_path):
+    again = build_mod(1, tmp_path, FOLDER)
+    files = sorted(p.relative_to(shipped1) for p in shipped1.rglob("*") if p.is_file())
+    assert files == sorted(p.relative_to(again) for p in again.rglob("*") if p.is_file())
+    assert all((shipped1 / f).read_bytes() == (again / f).read_bytes() for f in files)
+
+
+@needs_data
+def test_a_map_both_copied_and_flat_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="Dead Walking"):
+        build_mod(1, tmp_path, maps=["Siege", SECOND], flat_maps={SECOND: False})
+    with pytest.raises(ValueError, match="maps"):
+        build_mod(1, tmp_path, maps=[], flat_maps={})
+    assert list(tmp_path.iterdir()) == []
+
+
+@needs_data
+def test_flat_maps_alone_can_be_built_and_pass_the_audit(tmp_path):
+    out = build_mod(1, tmp_path, maps=[], flat_maps={"Molynx Test": False, "Molynx Test Portal": True,
+                                                     SECOND: False})
+    report = audit(out)
+    assert report.ok, "\n".join(report.lines)
+
+
+@needs_data
+def test_shipped_resource_toml_names_the_flat_maps(shipped1):
+    one = tomllib.loads((shipped1 / "resource.toml").read_text())["resource"]
+    assert one["name"] == FOLDER
+    assert "Molynx Test" in one["description"] and "Molynx Test Portal" in one["description"]
+    assert "Enable only one Molynx folder at a time." in one["description"]
+
+
+# ---- Test B: the audit of the flat maps ---------------------------------------------------------
+
+FLAT_RULES = [f"m{i}" for i in range(1, 13)]
+
+
+@needs_data
+def test_shipped_audit_is_ok_with_every_flat_map_rule(shipped1):
+    report = audit(shipped1)
+    assert report.ok, "\n".join(report.lines)
+    for stem in FLAT:
+        for rule in ["a", "b", "c", "f", *FLAT_RULES]:
+            assert len(pass_lines(report, rule, stem)) == 1, (rule, stem, report.lines)
+        (na,) = [line for line in report.lines if line.startswith(f"N/A (d, e) {stem}:")]
+        assert "flat test map" in na
+    (dw,) = [line for line in report.lines if line.startswith(f"N/A (d, e) {SECOND}:")]
+    assert "no longer the shipped map" in dw
+    for rule in "abcdef":
+        assert len(pass_lines(report, rule, "Siege")) == 1
+    assert [line for line in report.lines if line.startswith("PASS (m13) folder:")]
+    (m5,) = pass_lines(report, "m5", "Molynx Test")
+    assert "6 tiles thick" in m5
+
+
+@needs_data
+@needs_assets
+def test_stage2_shipped_audit_passes_the_flat_map_rules(stage2_full):
+    report = audit(stage2_full)
+    assert report.ok
+    for stem in FLAT:
+        for rule in FLAT_RULES:
+            assert len(pass_lines(report, rule, stem)) == 1, (rule, stem)
+
+
+@needs_data
+def test_the_audit_does_not_use_the_map_generator():
+    source = Path(audit_module.__file__).read_text()
+    for forbidden in ("dk2_testmap", "testmap_files", "validate_testmap", "preview_png"):
+        assert forbidden not in source, forbidden
+
+
+@needs_data
+def test_a_hole_in_keeper_2s_wall_fails(flat_mod):
+    set_tile(flat_mod, "Molynx Test", 54, 58, bytes.fromhex("03020100"))  # Dirt beside the chamber
+    report = audit(flat_mod)
+    assert not report.ok
+    assert fail_lines(report, "m5", "Molynx Test")
+    assert fail_lines(report, "m13")  # Dead Walking is no longer the same map
+
+
+@needs_data
+def test_a_corridor_that_thins_keeper_2s_wall_to_nothing_fails(flat_mod):
+    for x in range(36, 55):
+        set_tile(flat_mod, "Molynx Test Portal", x, 55, bytes.fromhex("03020100"))
+    (line,) = fail_lines(audit(flat_mod), "m5", "Molynx Test Portal")
+    assert "Impenetrable" in line
+
+
+@needs_data
+def test_a_breach_into_keeper_1s_area_fails(flat_mod):
+    for x in range(34, 55):
+        set_tile(flat_mod, SECOND, x, 52, bytes.fromhex("03020100"))
+    for y in range(52, 56):  # down to (54, 55), beside the chamber's corner (55, 55)
+        set_tile(flat_mod, SECOND, 54, y, bytes.fromhex("03020100"))
+    (line,) = fail_lines(audit(flat_mod), "m5", SECOND)
+    assert "reaches" in line
+
+
+@needs_data
+def test_a_second_molynx_thing_fails(flat_mod):
+    path = maps_dir(flat_mod) / "Molynx TestThings.kld"
+    things = path.read_bytes()
+    (molynx,) = [r for r in creature_records(things) if r[8 + 26] == 47]
+    extra = bytearray(molynx)
+    struct.pack_into("<i", extra, 8, 9)  # x 9, on the claimed floor
+    path.write_bytes(add_thing_record(things, bytes(extra)))
+    report = audit(flat_mod)
+    assert fail_lines(report, "m12", "Molynx Test")
+    assert fail_lines(report, "m6", "Molynx Test")
+
+
+@needs_data
+def test_a_changed_border_byte_fails(flat_mod):
+    path = maps_dir(flat_mod) / "Molynx TestMap.kld"
+    flip_byte(path, MAP_HEADER + 4 * 5 + 1)  # the player byte of tile (5, 0)
+    assert fail_lines(audit(flat_mod), "m1", "Molynx Test")
+
+
+@needs_data
+def test_portal_variables_equal_to_the_plain_ones_fail(flat_mod):
+    shutil.copyfile(maps_dir(flat_mod) / "Molynx TestVariables.kld",
+                    maps_dir(flat_mod) / "Molynx Test PortalVariables.kld")
+    report = audit(flat_mod)
+    assert fail_lines(report, "m8", "Molynx Test Portal")
+    (line,) = fail_lines(report, "m13")
+    assert "Molynx Test Portal" in line
+
+
+@needs_data
+def test_a_missing_flat_map_file_fails(flat_mod):
+    (maps_dir(flat_mod) / "Molynx Test PortalTriggers.kld").unlink()
+    report = audit(flat_mod)
+    assert any("Molynx Test PortalTriggers.kld" in line for line in fail_lines(report, "g"))
+    assert fail_lines(report, "m9", "Molynx Test Portal")
+
+
+@needs_data
+def test_a_missing_flat_map_fails(flat_mod):
+    for suffix in MAP_SUFFIXES:
+        (maps_dir(flat_mod) / f"Molynx Test Portal{suffix}").unlink()
+    (line,) = fail_lines(audit(flat_mod), "g")
+    assert "Molynx Test Portal" in line
+
+
+@needs_data
+def test_an_unexpected_extra_file_fails(flat_mod):
+    (maps_dir(flat_mod) / "Molynx Test 2.kwd").write_bytes(map_file(flat_mod, "Molynx Test", ".kwd"))
+    assert fail_lines(audit(flat_mod), "g")
+
+
+@needs_data
+def test_a_changed_globals_record_of_a_flat_map_fails(flat_mod):
+    def change(creatures):
+        creatures[10].set("hp", creatures[10].get("hp") + 1)
+        return creatures
+
+    edit_creatures(flat_mod, "Molynx Test", change)
+    (line,) = fail_lines(audit(flat_mod), "b", "Molynx Test")
+    assert "record 11" in line
+
+
+@needs_data
+def test_a_moved_heart_thing_fails(flat_mod):
+    path = maps_dir(flat_mod) / "Molynx Test PortalThings.kld"
+    data = bytearray(path.read_bytes())
+    pos = HEADER_SIZE
+    while pos < len(data):
+        kind, size = struct.unpack_from("<II", data, pos)
+        if kind == 204 and data[pos + 8 + 19] == 4:
+            struct.pack_into("<i", data, pos + 8, 57)
+        pos += 8 + size
+    path.write_bytes(bytes(data))
+    assert fail_lines(audit(flat_mod), "m2", "Molynx Test Portal")
+
+
+@needs_data
+def test_a_disabled_room_fails(flat_mod):
+    path = maps_dir(flat_mod) / "Molynx TestVariables.kld"
+    data = bytearray(path.read_bytes())
+    for at in range(56, len(data), 16):
+        if struct.unpack_from("<iHHii", data, at)[:4] == (2, 1, 3, 14):
+            struct.pack_into("<i", data, at + 12, 1)
+    path.write_bytes(bytes(data))
+    (line,) = fail_lines(audit(flat_mod), "m8", "Molynx Test")
+    assert "room 14" in line
+
+
+@needs_data
+def test_a_changed_description_fails(flat_mod):
+    path = maps_dir(flat_mod) / f"{SECOND}.kwd"
+    data = bytearray(path.read_bytes())
+    data[184:186] = "X".encode("utf-16-le")
+    path.write_bytes(bytes(data))
+    (line,) = fail_lines(audit(flat_mod), "m10", SECOND)
+    assert "description" in line
+
+
+@needs_data
+def test_a_triggers_file_with_a_script_fails(flat_mod):
+    shutil.copyfile(map_source_dir(SECOND) / f"{SECOND}Triggers.kld",
+                    maps_dir(flat_mod) / "Molynx TestTriggers.kld")
+    assert fail_lines(audit(flat_mod), "m9", "Molynx Test")
+
+
+@needs_data
+def test_a_richer_keeper_2_fails(flat_mod):
+    path = maps_dir(flat_mod) / "Molynx Test PortalPlayers.kld"
+    data = bytearray(path.read_bytes())
+    data[56 + 3 * 205] ^= 0x01  # Keeper 2's starting gold
+    path.write_bytes(bytes(data))
+    assert fail_lines(audit(flat_mod), "m7", "Molynx Test Portal")
