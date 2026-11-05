@@ -23,6 +23,8 @@ TEXT_FIELDS = {
 }
 
 STAGE1_FIELDS = {"name", "creatureId", "orderInEditor"}
+# Stage 2 also gives him the Horned Reaper's size (the editor's "Horny" record).
+SIZE = {"scale": 5734, "height": 4096, "eyeHeight": 2744}
 STAT_FIELDS = {"hp", "meleeDamage", "fear", "threat", "mass", "pay"}
 PORTRAIT_FIELDS = {"icon1Resource", "portraitResource"}
 
@@ -300,9 +302,10 @@ def test_stage2_differs_only_in_slot_names_and_the_tails_of_animation_slots(bile
     expected = expected_slot_names(bile)
     assert len(expected) == 29  # 48 slots - unk_1 - the 18 the Bile Demon leaves empty
     assert set(TAILS) == set(expected)
-    assert changed_fields(stage1, stage2) == set(expected)
-    assert changed_fields(bile, stage2) == STAGE1_FIELDS | set(expected)
-    changed = _changed_tail_fields(stage1, stage2)
+    assert changed_fields(stage1, stage2) == set(expected) | set(SIZE)
+    assert changed_fields(bile, stage2) == STAGE1_FIELDS | set(expected) | set(SIZE)
+    assert {k: stage2.get(k) for k in SIZE} == SIZE
+    changed = {(f, part) for f, part in _changed_tail_fields(stage1, stage2) if f not in SIZE}
     assert {field for field, part in changed if part == "name"} == set(expected)
     tails = {(field, part) for field, part in changed if part != "name"}
     poses = {"animPoseFrameResource", "animDiePoseResource", "animDraggedPoseResource",
@@ -604,7 +607,7 @@ def test_stage3_adds_only_stats_portrait_resources_and_text_ids(bile):
     assert changed == STAT_FIELDS | PORTRAIT_FIELDS | set(TEXT_FIELDS.values())
     # The change from the Bile Demon is stage 1 + the slot names and tails + that.
     assert changed_fields(bile, stage3) == (
-        STAGE1_FIELDS | set(expected_slot_names(bile)) | STAT_FIELDS | PORTRAIT_FIELDS
+        STAGE1_FIELDS | set(expected_slot_names(bile)) | set(SIZE) | STAT_FIELDS | PORTRAIT_FIELDS
         | set(TEXT_FIELDS.values()))
     assert bytes(stage3.raw[RECORD_SIZE:]) == bytes(bile.raw[RECORD_SIZE:])
     for offset in changed_offsets(stage2, stage3):
@@ -699,3 +702,13 @@ def test_clone_creature_id_follows_the_non_unique_pattern(creatures):
 def test_molynx_is_never_a_clone_even_of_a_unique_creature(bile):
     bile.set("cloneCreatureId", 3)
     assert build_molynx(bile, 1, ORDER).get("cloneCreatureId") == 0
+
+
+@pytest.mark.skipif(not have(EDITOR_DIR), reason="editor data not present")
+def test_size_fields_are_the_horned_reapers():
+    from scripts.dk2kwd_blocks import read_blocks
+    from scripts.dk2kwd_creatures import read_creatures
+    from scripts.molynx_record import SIZE_FIELDS
+    (block,) = [b for b in read_blocks((EDITOR_DIR / "Creatures.kwd").read_bytes()) if b.signature == 0xAA]
+    (horny,) = [c for c in read_creatures(block) if c.get("name") == "Horny"]
+    assert SIZE_FIELDS == SIZE == {k: horny.get(k) for k in SIZE}

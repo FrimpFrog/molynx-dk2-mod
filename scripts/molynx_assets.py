@@ -112,8 +112,9 @@ idle1 and PoseFrame entries name the same positions this way. Ids 1000..1014 (10
 spread over the body, 2000 / 2001 at the front of the head, 3000 low at the back, 5000 = 1000 on top
 of the head). Each is moved to Molynx by one rule: the Bile Demon's point in idle1 frame 0 and
 Molynx's `stand` frame 0 are both normalised to their own bounding box (each axis to 0..1), and the
-nearest Molynx body vertex (body sprites only: every Bile Demon point is on its body) takes it, the
-first on a tie. The same vertex is used in every file.
+nearest Molynx vertex of his body, head or neck (every sprite but the mace: every Bile Demon point
+is on its body; since the redesign his face is the Golem head's own sprites, so the points at the
+front of the head land on it) takes it, the first on a tie. The same vertex is used in every file.
 
 Materials and textures. Game materials are named <part><texture> with one texture each
 (FrontBDemonFrnt / BDemonFrnt, SpikesBDEMONback / BDEMONback); Molynx's are BodyMolynx_Body and
@@ -408,7 +409,7 @@ def _remap_controls(plan: MolynxPlan, bile_idle: Kmf, rest: list) -> list:
     starts = np.cumsum([0] + [len(p) for p in theirs])
     ours = _bbox_unit(np.concatenate(rest))
     our_starts = np.cumsum([0] + [len(p) for p in rest])
-    body = [s for s, lay in enumerate(plan.sprites) if lay.texture == BODY_TEXTURE]
+    body = [s for s, lay in enumerate(plan.sprites) if lay.texture != MACE_TEXTURE]
     cand = np.concatenate([np.arange(our_starts[s], our_starts[s + 1]) for s in body])
     out = []
     for ref, ident in pairs:

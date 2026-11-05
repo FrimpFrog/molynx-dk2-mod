@@ -20,7 +20,8 @@ molynx_assets.export_molynx_assets; the builder never runs that export itself):
                                          maps 18 clips, the variant walk_once and the 5
                                          static poses; the clips no slot uses stay out)
   <name>/Data/EngineTextures/<t>.png     the textures those files' materials name (Molynx_Body,
-                                         Molynx_Mace), where the user's Flame texture mods put theirs
+                                         Molynx_Head, Molynx_Mace, Molynx_Neck), where the user's
+                                         Flame texture mods put theirs
 
 What the record says about each file (frame count, loop flag) is not taken from a separate list: it
 is read from the exported files themselves, and the build stops (ValueError, nothing written) when a

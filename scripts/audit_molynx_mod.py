@@ -139,6 +139,9 @@ SOURCE_RECORDS = 46
 NAME_FIELD_SIZE = 32
 ICON, PORTRAIT = r"gui\creatures\evil\molynx", r"gui\creatures\evil\molynx-bg"
 STATS = ("hp", "meleeDamage", "fear", "threat", "mass", "pay")
+# Stage 2 also gives him the Horned Reaper's size (editor Creatures.kwd, "Horny": scale 5734 = 1.4,
+# height 4096 = 1.0, eyeHeight 2744 = 0.67), his model files being as tall as Horny's.
+SIZE = {"scale": 5734, "height": 4096, "eyeHeight": 2744}
 TEXT_ID_FIELDS = ("nameStringId", "tooltipStringId", "generalDescriptionStringId",
                   "strengthStringId", "weaknessStringId")
 MAPS_PATH = Path("Data") / "editor" / "maps"
@@ -370,7 +373,7 @@ def _anim_slots() -> list[str]:
 def _stage_field_sets(bile: Creature) -> dict[int, frozenset[str]]:
     """The set of record fields in which record 47 must differ from the Bile Demon, per stage."""
     renamed = frozenset(slot for slot in _anim_slots() if bile.resource_name(slot))
-    stage2 = _STAGE1_FIELDS | renamed
+    stage2 = _STAGE1_FIELDS | renamed | set(SIZE)
     stage3 = stage2 | set(STATS) | {"icon1Resource", "portraitResource"} | set(TEXT_ID_FIELDS)
     return {1: _STAGE1_FIELDS, 2: stage2, 3: stage3}
 
@@ -468,6 +471,10 @@ def _value_problems(molynx: Creature, bile: Creature, stage: int, order: int,
                 counts["unchecked"] += 1
             else:
                 counts["rewritten" if what.endswith("rewritten") else "kept"] += 1
+    if stage >= 2:
+        for field, want in SIZE.items():
+            if molynx.get(field) != want:
+                problems.append(f"{field} is {molynx.get(field)}, expected {want} (the Horned Reaper's)")
     if stage >= 3:
         for stat in STATS:
             if not molynx.get(stat) > bile.get(stat):

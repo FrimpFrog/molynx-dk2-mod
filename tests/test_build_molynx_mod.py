@@ -2039,3 +2039,17 @@ def test_a_richer_keeper_2_fails(flat_mod):
     data[56 + 3 * 205] ^= 0x01  # Keeper 2's starting gold
     path.write_bytes(bytes(data))
     assert fail_lines(audit(flat_mod), "m7", "Molynx Test Portal")
+
+
+@needs_data
+@needs_assets
+@pytest.mark.parametrize("field,value", [("scale", 4096), ("scale", 5735), ("height", 2662),
+                                         ("eyeHeight", 1515)])
+def test_stage2_record_must_have_the_horned_reapers_size(mod2, field, value):
+    def wrong(creatures):
+        creatures[-1].set(field, value)
+        return creatures
+
+    edit_creatures(mod2, "Siege", wrong)
+    lines = fail_lines(audit(mod2), "b")
+    assert lines and all("Siege" in line for line in lines) and any(field in line for line in lines)

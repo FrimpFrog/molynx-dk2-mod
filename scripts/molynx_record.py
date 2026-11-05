@@ -7,7 +7,8 @@ test bundle build all three):
   1  name "Molynx", creatureId 47, orderInEditor (the caller's; max of the map's + 1).
   2  + the animation slots: each assigned slot's name (`Molynx-<file stem>`, see SLOT_CLIPS,
      RULING F and the file plan below) and, for a slot that plays an animation, the 20 bytes after
-     the name that describe the file (frames, fps, flags, type; see "Slot tails").
+     the name that describe the file (frames, fps, flags, type; see "Slot tails"); and his size,
+     SIZE_FIELDS (the redesign, 2026-11-06).
   3  + the six stats of MULTIPLIERS, the icon1 / portrait resource names, and the five text IDs.
 
 Everything else (sound category, lair, spells, attractions, jobs, anger values, flags, the
@@ -98,6 +99,13 @@ PORTRAIT_RESOURCE = r"gui\creatures\evil\molynx-bg"
 PREFIX = "Molynx-"
 DEFAULT_STEM = "stand"
 
+# His size (stage 2): the Horned Reaper's. The game draws a creature's model at its record's
+# `scale` (fixed point, 4096 = 1): 8 creatures use it (Horny 5734 = 1.4, King 1.25, Prince and Lord
+# 1.2), and a record's `height` follows file height x scale (Horny 0.739 x 1.4 = 1.035, height
+# 1.000). Molynx's model files are as tall as Horny's (0.740 vs 0.739), so with Horny's scale,
+# height and eyeHeight he stands exactly as tall as the Horned Reaper in the game. `width` stays the
+# Bile Demon's (0.425; Horny 0.348): Molynx is as bulky as the Bile Demon.
+SIZE_FIELDS = {"scale": 5734, "height": 4096, "eyeHeight": 2744}
 MULTIPLIERS = {"hp": 1.6, "meleeDamage": 1.4, "fear": 1.2, "threat": 1.4, "mass": 1.2, "pay": 1.3}
 
 # text_ids key -> creature field
@@ -359,6 +367,8 @@ def build_molynx(bile: Creature, stage: int, order_in_editor: int,
     molynx.set("cloneCreatureId", CLONE_CREATURE_ID)
     if plan is not None:
         _write_slots(molynx, bile, plan, anim_info)
+        for name, value in SIZE_FIELDS.items():
+            molynx.set(name, value)
     if stage >= 3:
         for name, multiplier in MULTIPLIERS.items():
             molynx.set(name, min(_field_max(name), round(bile.get(name) * multiplier)))

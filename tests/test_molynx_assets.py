@@ -449,11 +449,15 @@ def test_control_points_name_the_same_spot_in_every_file(export):
 
 
 @needs_data
-def test_control_points_land_on_the_body(export):
+def test_control_points_land_on_the_body_or_head_never_the_mace(export):
     model = export["models"]["stand"]
-    for ref, _ in _controls(model):
+    where = {}
+    for ref, ident in _controls(model):
         sprite = model.anim.sprites[ref & 0xFFFF]
-        assert model.materials[sprite.material].textures == [assets.BODY_TEXTURE]
+        (texture,) = model.materials[sprite.material].textures
+        assert texture != assets.MACE_TEXTURE
+        where[ident] = texture
+    assert where[1000] == where[5000] == assets.HEAD_TEXTURE  # the top of his head is the Golem's
 
 
 # ---------------------------------------------------------------- materials and textures
