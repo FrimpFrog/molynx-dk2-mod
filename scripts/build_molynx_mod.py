@@ -74,6 +74,7 @@ from scripts.dk2kld_splice import (BILE_DEMON_ID, BILE_DEMON_NAME, MAP_SUFFIXES,
                                    map_source_dir, molynx_for_map, pick_skirmish_test_map,
                                    pick_test_map, retarget_creature_thing, splice_creatures)
 from scripts.dk2kmf import parse_kmf
+from scripts.dk2paths import EDITOR_DIR
 from scripts.dk2kwd_blocks import read_blocks
 from scripts.dk2kwd_creatures import Creature, read_creatures
 from scripts.molynx_assets import MAX_TEXTURE, bile_file_wraps
@@ -85,6 +86,7 @@ _FOLDER_NAME = re.compile(r"[A-Za-z0-9_-]+")
 MAPS_PATH = "Data/editor/maps"
 MESHES_PATH = "Data/Meshes"
 TEXTURES_PATH = "Data/EngineTextures"
+EDITOR_CREATURES_PATH = "Data/editor/Creatures.kwd"  # the base creature table with record 47
 STAGE1_FOLDER = "Molynx_slot_only"
 # The flat maps of the handed-over folders: stem -> Molynx also in the portal pool.
 FLAT_MAPS = {"Molynx Test": False, "Molynx Test Portal": True, FLAT_BASE: False}
@@ -285,6 +287,30 @@ def _flat_map_files(stem: str, in_pool: bool, stage: int, text_ids: dict[str, in
     return out, stems
 
 
+def _editor_creatures_file(stage: int, text_ids: dict[str, int] | None, assets: _Assets | None,
+                           anim_info: dict | None, file_wraps: dict | None,
+                           editor_dir: Path | None = None) -> tuple[bytes, set[str]]:
+    """`Data/editor/Creatures.kwd`: the editor's own file with record 47 spliced in (its Bile Demon,
+    in its 5449-byte record size), and the Molynx file stems that record names (stage >= 2).
+
+    Why. The game loads the editor's Creatures.kwd as its base creature table (46 records) and then
+    applies a map's Globals.kld as an update: with the update flag set (CWorld field 0xA3C7, the
+    global 0x6FCDCF, set by CFrontEndComponent::loadLevel_data 0x541AA0 when a map is picked in the
+    Skirmish lobby), CWorld_loadCreature (0x51F240) looks each record up by creatureId
+    (CWorld::fun_50D390) and updates it in place (MyCreatureDataObj::loadCreatureType 0x492320). A
+    creatureId missing from the base table gives a NULL object: the Test B crash (2026-11-07, Flame
+    crash report: eip 0x492380, `mov [ebx+0x770], al` with ebx = 0, creatureId eax = 0x2F). Flame's
+    alt-resources serve Data/editor files from the mod folder, so this copy is the one loaded."""
+    source = ((editor_dir or EDITOR_DIR) / "Creatures.kwd").read_bytes()
+    stems: set[str] = set()
+    info = wraps = None
+    if stage >= 2:
+        info, wraps, stems = _files_for(_map_bile(source), assets, anim_info, file_wraps)
+    data = splice_creatures(source, [molynx_for_map(source, stage, text_ids, anim_info=info,
+                                                    file_wraps=wraps)])
+    return data, stems
+
+
 def _asset_files(assets: _Assets, stems: set[str]) -> dict[str, bytes]:
     """Data/Meshes/<file> for every stem and Data/EngineTextures/<t>.png for every texture they name."""
     files, textures = {}, set()
@@ -300,7 +326,7 @@ def _asset_files(assets: _Assets, stems: set[str]) -> dict[str, bytes]:
 def build_mod(stage: int, out_dir: Path, name: str = "Molynx", maps: list[str] | None = None,
               text_ids: dict[str, int] | None = None, *, anim_info: dict | None = None,
               file_wraps: dict | None = None, assets_dir: Path | None = None,
-              flat_maps: Mapping[str, bool] | None = None) -> Path:
+              flat_maps: Mapping[str, bool] | None = None, editor_creatures: bool = True) -> Path:
     """Create `out_dir/<name>/` (see the module docstring) and return its path.
 
     `stage` is 1, 2 or 3 (molynx_record); stage 3 needs `text_ids`; stages 2 and 3 need
@@ -312,7 +338,8 @@ def build_mod(stage: int, out_dir: Path, name: str = "Molynx", maps: list[str] |
     `FLAT_MAPS`, when one is given the other defaults to none. ValueError for a bad stage, folder
     name, map list (a name in both, or no map at all), record or asset; FileExistsError when `out_dir/<name>` already exists (nothing is
     deleted or overwritten); FileNotFoundError for a map that has no complete set of seven files.
-    Nothing is created unless the whole build succeeded.
+    Nothing is created unless the whole build succeeded. `editor_creatures` (default True) also
+    writes `Data/editor/Creatures.kwd` with record 47 (see `_editor_creatures_file`).
     """
     _check_stage(stage)
     _check_name(name)
@@ -346,6 +373,10 @@ def build_mod(stage: int, out_dir: Path, name: str = "Molynx", maps: list[str] |
         map_files, used = _flat_map_files(stem, bool(in_pool), stage, text_ids, assets, anim_info,
                                           file_wraps)
         files.update(map_files)
+        stems |= used
+    if editor_creatures:
+        data, used = _editor_creatures_file(stage, text_ids, assets, anim_info, file_wraps)
+        files[EDITOR_CREATURES_PATH] = data
         stems |= used
     if assets is not None:
         files.update(_asset_files(assets, stems))

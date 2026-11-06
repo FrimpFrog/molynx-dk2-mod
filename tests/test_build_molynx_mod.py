@@ -93,10 +93,17 @@ def maps_dir(mod: Path) -> Path:
     return mod / "Data" / "editor" / "maps"
 
 
+EDITOR_LABEL = "editor Creatures.kwd"
+
+
 def fail_lines(report, rule: str | None = None, map_name: str | None = None) -> list[str]:
+    """FAIL lines (of `rule`, of `map_name`). Without `map_name` the editor Creatures.kwd's lines
+    are left out: its record 47 names the same Molynx files as the maps' records, so a damaged
+    asset fails rule (f) there too (test_a_damaged_mesh_fails_the_editor_table_too checks that)."""
     prefix = "FAIL" + (f" ({rule})" if rule else "")
     return [line for line in report.lines
-            if line.startswith(prefix) and (map_name is None or f" {map_name}:" in line)]
+            if line.startswith(prefix) and (f" {map_name}:" in line if map_name is not None
+                                            else f" {EDITOR_LABEL}:" not in line)]
 
 
 def pass_lines(report, rule: str, map_name: str) -> list[str]:
@@ -378,10 +385,10 @@ def test_build_refuses_an_empty_or_repeated_map_list(tmp_path, maps):
 def test_stage1_folder_lists_exactly_the_expected_files(stage1_dir):
     assert stage1_dir.name == FOLDER
     found = sorted(p.relative_to(stage1_dir).as_posix() for p in stage1_dir.rglob("*") if p.is_file())
-    expected = sorted(["resource.toml", *(f"Data/editor/maps/{name}{suffix}"
-                                          for name in MAPS for suffix in MAP_SUFFIXES)])
+    expected = sorted(["resource.toml", "Data/editor/Creatures.kwd",
+                       *(f"Data/editor/maps/{name}{suffix}" for name in MAPS for suffix in MAP_SUFFIXES)])
     assert found == expected
-    assert len(found) == 1 + 2 * 7
+    assert len(found) == 2 + 2 * 7
     assert sorted(p.relative_to(stage1_dir).as_posix() for p in stage1_dir.rglob("*") if p.is_dir()) \
         == ["Data", "Data/editor", "Data/editor/maps"]
 
@@ -920,7 +927,7 @@ def textures(mod: Path) -> Path:
 def test_stage2_folder_holds_exactly_the_files_the_record_names(stage2_full):
     assert stage2_full.name == "Molynx"
     found = sorted(p.relative_to(stage2_full).as_posix() for p in stage2_full.rglob("*") if p.is_file())
-    expected = sorted(["resource.toml",
+    expected = sorted(["resource.toml", "Data/editor/Creatures.kwd",
                        *(f"Data/editor/maps/{name}{suffix}" for name in SHIPPED_MAPS
                          for suffix in MAP_SUFFIXES),
                        *(f"Data/Meshes/{f}" for f in STAGE2_MESHES),
@@ -1695,9 +1702,10 @@ def add_thing_record(things: bytes, record: bytes) -> bytes:
 @needs_data
 def test_shipped_folder_lists_exactly_the_expected_files(shipped1):
     found = sorted(p.relative_to(shipped1).as_posix() for p in shipped1.rglob("*") if p.is_file())
-    assert found == sorted(["resource.toml", *(f"Data/editor/maps/{name}{suffix}"
-                                               for name in SHIPPED_MAPS for suffix in MAP_SUFFIXES)])
-    assert len(found) == 1 + 4 * 7
+    assert found == sorted(["resource.toml", "Data/editor/Creatures.kwd",
+                            *(f"Data/editor/maps/{name}{suffix}"
+                              for name in SHIPPED_MAPS for suffix in MAP_SUFFIXES)])
+    assert len(found) == 2 + 4 * 7
 
 
 @needs_data
@@ -2053,3 +2061,60 @@ def test_stage2_record_must_have_the_horned_reapers_size(mod2, field, value):
     edit_creatures(mod2, "Siege", wrong)
     lines = fail_lines(audit(mod2), "b")
     assert lines and all("Siege" in line for line in lines) and any(field in line for line in lines)
+
+
+# ---- the base creature table (Data/editor/Creatures.kwd, rule i) --------------------------------
+
+@needs_data
+def test_editor_creatures_is_the_editors_file_with_molynx_as_record_47(stage1_dir):
+    """The game loads the editor's Creatures.kwd as its base creature table and applies a map's
+    Globals as an update by creatureId (the Test B crash: no creature 47 to update)."""
+    source = (EDITOR_DIR / "Creatures.kwd").read_bytes()
+    (src_block,) = read_blocks(source)
+    (block,) = read_blocks((stage1_dir / "Data" / "editor" / "Creatures.kwd").read_bytes())
+    old, new = read_creatures(src_block), read_creatures(block)
+    assert len(old) == 46 and len(new) == 47
+    assert [c.raw for c in new[:46]] == [c.raw for c in old]
+    molynx, bile = new[46], next(c for c in old if c.get("creatureId") == 3)
+    assert (molynx.get("creatureId"), molynx.get("name")) == (47, "Molynx")
+    assert len(molynx.raw) == len(bile.raw) == 5449
+    assert molynx.get("orderInEditor") == max(c.get("orderInEditor") for c in old) + 1
+
+
+@needs_data
+def test_build_can_leave_the_editor_creatures_out(tmp_path):
+    out = build_mod(1, tmp_path, FOLDER, maps=["Siege"], editor_creatures=False)
+    assert not (out / "Data" / "editor" / "Creatures.kwd").exists()
+
+
+@needs_data
+def test_audit_fails_rule_i_without_the_editor_creatures(mod):
+    (mod / "Data" / "editor" / "Creatures.kwd").unlink()
+    report = audit(mod)
+    assert not report.ok
+    assert any(line.startswith("FAIL (i)") and "Creatures.kwd is missing" in line for line in report.lines)
+
+
+@needs_data
+def test_audit_fails_when_the_editor_creatures_lacks_record_47(mod):
+    (mod / "Data" / "editor" / "Creatures.kwd").write_bytes((EDITOR_DIR / "Creatures.kwd").read_bytes())
+    report = audit(mod)
+    assert not report.ok
+    assert any(line.startswith("FAIL (b) editor Creatures.kwd") for line in report.lines)
+
+
+@needs_data
+def test_stage2_editor_creatures_names_the_same_molynx_files(stage2_full):
+    report = audit(stage2_full)
+    assert report.ok, "\n".join(l for l in report.lines if l.startswith("FAIL"))
+    assert any(line.startswith("PASS (f) editor Creatures.kwd") and "Molynx meshes" in line
+               for line in report.lines)
+
+
+@needs_data
+@needs_assets
+def test_a_damaged_mesh_fails_the_editor_table_too(mod2):
+    (meshes(mod2) / "Molynx-walk.kmf").write_bytes(b"")
+    report = audit(mod2)
+    assert fail_lines(report, "f", EDITOR_LABEL)
+    assert fail_lines(report, "f", "Siege")

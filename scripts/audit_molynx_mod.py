@@ -43,6 +43,10 @@ Rules, each one PASS or FAIL line per map (per folder for g and h):
       all three flat maps, below) and, from stage 2,
       exactly the `Data/Meshes/<name>.kmf` files record 47 names and the `Data/EngineTextures/<t>.png`
       files those meshes name (no unreferenced mesh or texture).
+  (i) `Data/editor/Creatures.kwd` is there: the editor's Creatures.kwd with record 47 added, checked
+      with rules (a), (b), (c) and (f) like a Globals file (rule g allows it). The game loads it as
+      its base creature table and applies a map's Globals as an update by creatureId; without
+      record 47 in it, picking a Molynx map crashes (Test B, 2026-11-07).
   (h) `resource.toml` is valid TOML with a [resource] table of name, version, authors, description,
       and its name is the name of the folder.
 
@@ -145,6 +149,7 @@ SIZE = {"scale": 5734, "height": 4096, "eyeHeight": 2744}
 TEXT_ID_FIELDS = ("nameStringId", "tooltipStringId", "generalDescriptionStringId",
                   "strengthStringId", "weaknessStringId")
 MAPS_PATH = Path("Data") / "editor" / "maps"
+EDITOR_CREATURES = "Data/editor/Creatures.kwd"  # rule (i): the base creature table with record 47
 
 BLOCK_NAMES = {0x6E: "Terrain", 0x78: "Rooms", 0x82: "Traps", 0x8C: "Doors", 0x96: "KeeperSpells",
                0xA0: "CreatureSpells", 0xAA: "Creatures", 0xF0: "Objects", 0xFA: "EffectElements",
@@ -926,6 +931,54 @@ def _audit_globals(mod_dir: Path, name: str, source: Path, lines: _Lines, files:
     return None, set(), set()
 
 
+def _audit_editor_creatures(mod_dir: Path, lines: _Lines, files: _Files) -> tuple:
+    """Rule (i): `Data/editor/Creatures.kwd` must be there, and it is checked like a map's Globals
+    file against the editor's own Creatures.kwd: rules (a), (b), (c) and (f) on its one Creatures
+    block (46 records unchanged, record 47 Molynx in the editor's 5449-byte record size). The game
+    loads this file as its base creature table and applies a map's Globals as an update by
+    creatureId, so without record 47 here picking a Molynx map crashes (the Test B crash)."""
+    label = "editor Creatures.kwd"
+    path = mod_dir / EDITOR_CREATURES
+    if not path.is_file():
+        lines.add(False, "i", label, f"{EDITOR_CREATURES} is missing: the game's base creature table "
+                                     "would have no creature 47, and a map that updates creature 47 crashes")
+        return None, set(), set()
+    lines.add(True, "i", label, f"{EDITOR_CREATURES} is there (the base creature table)")
+    return _audit_globals_file(path, EDITOR_DIR / "Creatures.kwd", label, lines, files)
+
+
+def _audit_globals_file(mod_path: Path, source: Path, label: str, lines: _Lines, files: _Files) -> tuple:
+    """Rules (a), (b), (c) and (f) of one creature-table file `mod_path` against `source`."""
+    info = None
+    mod_data, src_data = _read(mod_path), _read(source)
+    if mod_data is None or src_data is None:
+        for rule in "abc":
+            lines.add(False, rule, label, "the file or its source is missing")
+    else:
+        try:
+            src_blocks, mod_blocks = read_blocks(src_data), read_blocks(mod_data)
+            record_size = len(_creatures_block(src_blocks, "the source").content) // SOURCE_RECORDS
+        except ValueError as err:
+            for rule in "abc":
+                lines.add(False, rule, label, f"the file does not parse: {err}")
+        else:
+            ok, message = _safe(_check_blocks, src_blocks, mod_blocks)
+            lines.add(ok, "a", label, message)
+            ok, message, *rest = _safe(_check_creatures, src_blocks, mod_blocks, files)
+            info = rest[0] if rest else None
+            lines.add(ok, "b", label, message)
+            ok, message = _safe(_check_headers, src_blocks, mod_blocks, record_size)
+            lines.add(ok, "c", label, message)
+    if info:
+        stage, molynx, bile, _size = info
+        ok, message, *rest = _safe(_check_assets, stage, molynx, bile, files)
+        lines.add(ok, "f", label, message)
+        meshes, textures = rest if rest else (set(), set())
+        return stage, meshes, textures
+    lines.add(False, "f", label, "not checked because record 47 could not be read")
+    return None, set(), set()
+
+
 # ---- the flat test map -------------------------------------------------------------------------
 # Written from the test-map design and the layout rules, independently of the map generator: the
 # audit parses every file itself and takes its expectations from the shipped files (Dead Walking in
@@ -1616,7 +1669,7 @@ def _check_layout(mod_dir: Path, names: list[str], stage: int | None, meshes: se
         for f in sorted(names_here):
             rel = f if here == "." else f"{here}/{f}"
             files.append(rel)
-            if rel == "resource.toml" or (here == maps_rel and f in expected_maps):
+            if rel in ("resource.toml", EDITOR_CREATURES) or (here == maps_rel and f in expected_maps):
                 continue
             if here == "Data/Meshes" and f in expected_meshes:
                 mesh_count += 1
@@ -1687,6 +1740,7 @@ def audit(mod_dir: Path) -> AuditReport:
     flat = any(name in (FLAT_PLAIN, FLAT_PORTAL) for name in names)
     results = {name: (_audit_flat if flat and name in FLAT_VARIANTS else _audit_map)(mod_dir, name, maps, files)
                for name in names}
+    results[EDITOR_CREATURES] = _audit_editor_creatures(mod_dir, maps, files)
     stages = {name: result[0] for name, result in results.items()}
     meshes = set().union(*(result[1] for result in results.values()))
     textures = set().union(*(result[2] for result in results.values()))

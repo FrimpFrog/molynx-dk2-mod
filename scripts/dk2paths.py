@@ -9,9 +9,13 @@ location is missing.
 
 LICENCE: GPL-3.0.
 """
+import os
 from pathlib import Path
 
-_SCRATCH = Path("/tmp/claude-0/-home-claude/76eb4112-412f-58e4-a30a-b275f992be89/scratchpad")
+# MOLYNX_DK2_DATA names the folder that holds the layout below (up/Data1/editor, dk2game/Ai,
+# extracted/Meshes, up/flame/flame/resources/Quuz_LevelFixes); the default is the first session's.
+_SCRATCH = Path(os.environ.get(
+    "MOLYNX_DK2_DATA", "/tmp/claude-0/-home-claude/76eb4112-412f-58e4-a30a-b275f992be89/scratchpad"))
 
 EDITOR_DIR = _SCRATCH / "up" / "Data1" / "editor"
 MAPS_DIR = EDITOR_DIR / "maps"
