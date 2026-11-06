@@ -434,7 +434,7 @@ def test_rule10_level_file(files, files_pool):
             assert f"Data\\Editor\\Maps\\{stem}{s}" in paths
         changed = {i for i in range(len(k)) if k[i] != base[i]}
         allowed = set(range(56, 56 + 128)) | set(range(56 + 128, 56 + 128 + 2048)) | \
-            set(range(paths_at, paths_at + 7 * 72))
+            set(range(paths_at, paths_at + 7 * 72)) | set(range(56 + 4480, 56 + 4482))  # script root
         assert changed <= allowed
 
 
@@ -445,7 +445,8 @@ def test_rule10_base_stem_keeps_base_paths(tm):
     assert k[56 + 25683:] == base[56 + 25683:]
     # only the name (wchar[64] at 56) and the description (wchar[1024] at 184) differ from the base
     changed = {i for i in range(len(k)) if k[i] != base[i]}
-    assert changed and changed <= set(range(56, 56 + 128)) | set(range(184, 184 + 2048))
+    root = set(range(56 + 4480, 56 + 4482))  # the script root, 1 -> 0 (Test B)
+    assert changed and changed <= set(range(56, 56 + 128)) | set(range(184, 184 + 2048)) | root
     assert k[56:56 + 128].decode("utf-16-le").split("\0")[0] == "Molynx Test"
     assert k[184:184 + 2048].decode("utf-16-le").split("\0")[0] == tm.DESCRIPTION
 
@@ -537,3 +538,26 @@ def test_preview_png(tm, files, tmp_path):
     tm.preview_png(files, STEM, out)
     with Image.open(out) as img:
         assert img.size[0] >= 69 and img.size[0] == img.size[1]
+
+
+# ---- the level's script root (Test B) -----------------------------------------------------------
+
+@needs_maps
+def test_level_script_root_is_zero_like_the_maps_with_an_empty_triggers_file(files):
+    """Dead Walking's root trigger 1 with the empty Triggers file hung the game (Test B)."""
+    kwd = _f(files, STEM, ".kwd")
+    assert struct.unpack_from("<H", kwd, tm_module().LEVEL_TRIGGER_ROOT_AT)[0] == 0
+    assert struct.unpack_from("<H", _base()[".kwd"], tm_module().LEVEL_TRIGGER_ROOT_AT)[0] == 1
+
+
+@needs_maps
+def test_rule10_validator_fails_on_the_bases_script_root(tm, files):
+    bad = bytearray(_f(files, STEM, ".kwd"))
+    struct.pack_into("<H", bad, tm.LEVEL_TRIGGER_ROOT_AT, 1)
+    errors = tm.validate_testmap(_with(files, STEM, ".kwd", bytes(bad)), STEM, molynx_in_pool=False)
+    assert any("trigger root" in e for e in errors)
+
+
+def tm_module():
+    import scripts.dk2_testmap as module
+    return module

@@ -49,7 +49,14 @@ Level file (.kwd, 0xDC). The base file with the name (wchar[64] at byte 56) and 
 (wchar[1024] at byte 184) replaced and its path list (after the content: u32 222, u32 size, then
 72-byte records of u32 type, u32 0, char path[64]) pointing at `<stem>` files: the game opens the
 files these paths name (CWorld_loadLevel_unk2 at 0x51EA40), so a new stem must name its own files.
-Flags, the creature id list and every other byte stay; the level file stores no width or height.
+Flags, the creature id list and every other byte stay, except the trigger root (u16 at byte
+LEVEL_TRIGGER_ROOT_AT = 56 + 4480), which is 0: no script. The base names its script's root (Dead
+Walking: trigger 1, the only "when" no other trigger references); with the empty Triggers file that
+id does not exist and the game's trigger walker (sub_518150, from the world tick) loops forever
+(Test B, 2026-11-07: black screen as the map started; two dumps of the hung game). With the base's
+own Triggers file instead the script runs and crashes spawning a hero party the flat map does not
+have (Flame finalizeSpawnParty). The 14 shipped maps with an empty Triggers file (Small, Warrens,
+...) have 0 there. The level file stores no width or height.
 
 LICENCE: GPL-3.0.
 """
@@ -102,6 +109,7 @@ VARIABLE_SIZE = 16
 LEVEL_NAME_AT, LEVEL_NAME_CHARS = 56, 64
 LEVEL_DESC_AT, LEVEL_DESC_CHARS = 56 + 128, 1024
 LEVEL_FLAGS_AT = 56 + 25484
+LEVEL_TRIGGER_ROOT_AT = 56 + 4480  # u16: the level script's root trigger, 0 = no script
 PATH_RECORD, PATH_CHARS = 72, 64
 MAPS_PREFIX = "Data\\Editor\\Maps\\"
 
@@ -457,6 +465,7 @@ def _level(base_kwd: bytes, stem: str, display_name: str) -> bytes:
     buf = bytearray(base_kwd)
     _put_wstr(buf, LEVEL_NAME_AT, LEVEL_NAME_CHARS, display_name)
     _put_wstr(buf, LEVEL_DESC_AT, LEVEL_DESC_CHARS, DESCRIPTION)
+    struct.pack_into("<H", buf, LEVEL_TRIGGER_ROOT_AT, 0)  # no script (see the module docstring)
     hsz = len(lv.header)
     lv = LevelFile(lv.header, bytes(buf[hsz:hsz + len(lv.content)]), lv.paths_header,
                    tuple(_repath(p, BASE, stem) for p in lv.paths), lv.rest)
@@ -802,7 +811,11 @@ def _level_errors(new: bytes, base: bytes, stem: str) -> list[str]:
     want_paths = [_repath(p, BASE, stem) for p in blv.paths]
     if list(lv.paths) != want_paths:
         errors.append("rule 10: the path list does not name the stem's files")
-    keep = [(0, LEVEL_NAME_AT), (LEVEL_DESC_AT + 2 * LEVEL_DESC_CHARS, 56 + len(blv.content))]
+    if struct.unpack_from("<H", new, LEVEL_TRIGGER_ROOT_AT)[0] != 0:
+        errors.append("rule 10: the level's trigger root is not 0 (the Triggers file is empty)")
+    root = (LEVEL_TRIGGER_ROOT_AT, LEVEL_TRIGGER_ROOT_AT + 2)
+    keep = [(0, LEVEL_NAME_AT), (LEVEL_DESC_AT + 2 * LEVEL_DESC_CHARS, root[0]),
+            (root[1], 56 + len(blv.content))]
     if any(new[a:b] != base[a:b] for a, b in keep) or lv.rest != blv.rest or lv.paths_header != blv.paths_header:
         errors.append("rule 10: level bytes other than name, description and paths changed")
     return errors

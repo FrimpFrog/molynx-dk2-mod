@@ -2118,3 +2118,13 @@ def test_a_damaged_mesh_fails_the_editor_table_too(mod2):
     report = audit(mod2)
     assert fail_lines(report, "f", EDITOR_LABEL)
     assert fail_lines(report, "f", "Siege")
+
+
+@needs_data
+def test_a_level_file_with_the_bases_script_root_fails_m10(flat_mod):
+    """Root trigger 1 with the empty Triggers file hung the game as the map started (Test B)."""
+    path = maps_dir(flat_mod) / "Molynx Test.kwd"
+    data = bytearray(path.read_bytes())
+    struct.pack_into("<H", data, audit_module.LEVEL_SCRIPT_ROOT, 1)
+    path.write_bytes(bytes(data))
+    assert any("root trigger" in line for line in fail_lines(audit(flat_mod), "m10", "Molynx Test"))

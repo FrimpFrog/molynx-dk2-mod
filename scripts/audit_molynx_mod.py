@@ -89,7 +89,9 @@ the user's Quuz copy of Siege for the portal, and the editor's AutoSaveTriggers.
         Portal" for the variant), the description (FLAT_DESCRIPTION) and the path texts, which
         name the stem's own files (Dead Walking: the shipped paths), all present in the folder; the
         path record heads (u32 type, u32 0) are Dead Walking's, and every text field (name,
-        description, each path) holds only zero bytes after its NUL.
+        description, each path) holds only zero bytes after its NUL; and the script's root trigger
+        (u16 at byte 4536) is 0, as in the shipped maps with an empty Triggers file (Small,
+        Warrens): Dead Walking's root 1 with no such trigger hangs the game (Test B).
   (m11) containers: each file one block that read_blocks accepts, Dead Walking's signature, header
         size, check words and timestamps, consistent file size, content size and item count.
   (m12) exactly one creature thing has id 47, and it is owned by player 3.
@@ -993,6 +995,7 @@ FLAT_VARIANTS = {"Molynx Test": (False, "Molynx Test"),
 FLAT_PLAIN, FLAT_PORTAL = "Molynx Test", "Molynx Test Portal"
 FLAT_WITH = ("Siege",)  # the copied map a flat-test-map folder also holds (the shipped-map round's)
 FLAT_SIX = (".kwd", "Map.kld", "Things.kld", "Players.kld", "Triggers.kld", "Variables.kld")
+LEVEL_SCRIPT_ROOT = 4536  # u16 at 56 + 4480 of a level file: its script's root trigger (0: none)
 FLAT_DESCRIPTION = "Flat test map: Keeper 2 is sealed in, no enemies, no script."
 FLAT_RULES = tuple(f"m{i}" for i in range(1, 13))
 # Terrain ids of Map.kld (1-based in Terrain.kwd).
@@ -1483,7 +1486,12 @@ class _Flat:
         _bfirst, bpaths = _level_paths(base)
         regions = [(LEVEL_NAME_AT, LEVEL_NAME_AT + LEVEL_NAME_BYTES),
                    (LEVEL_DESC_AT, LEVEL_DESC_AT + LEVEL_DESC_BYTES),
-                   (first, first + PATH_RECORD * len(bpaths))]
+                   (first, first + PATH_RECORD * len(bpaths)),
+                   (LEVEL_SCRIPT_ROOT, LEVEL_SCRIPT_ROOT + 2)]
+        if struct.unpack_from("<H", data, LEVEL_SCRIPT_ROOT)[0] != 0:
+            problems.append(f"the script's root trigger (u16 at byte {LEVEL_SCRIPT_ROOT}) is "
+                            f"{struct.unpack_from('<H', data, LEVEL_SCRIPT_ROOT)[0]}, not 0: the Triggers "
+                            "file is empty, and a root with no trigger hangs the game")
         stray = [i for i in range(len(data)) if data[i] != base[i]
                  and not any(a <= i < b for a, b in regions)]
         if stray:
