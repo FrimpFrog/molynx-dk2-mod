@@ -1,0 +1,87 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#000;overflow:hidden}</style></head>
+<body><canvas id="c"></canvas>
+<script type="module">
+import * as THREE from './three.module.js';
+import { loadGLB } from './glbload.js';
+const Q = new URLSearchParams(location.search);
+const W = +(Q.get('w') || 1280), H = +(Q.get('h') || 720);
+const az = +(Q.get('az') || 20) * Math.PI / 180, el = +(Q.get('el') || 8) * Math.PI / 180;
+const fov = +(Q.get('fov') || 30), dist = +(Q.get('dist') || 0);
+const tgt = (Q.get('t') || '0,2.0,0').split(',').map(Number);
+const bg = Q.get('bg') || 'dk2';
+const model = Q.get('m') || 'molynx_idle.glb';
+const canvas = document.getElementById('c');
+const r = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true, alpha: bg === 'none' });
+r.setSize(W, H); r.setPixelRatio(+(Q.get('pr') || 1));
+r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = +(Q.get('exp') || 1.0);
+r.outputColorSpace = THREE.SRGBColorSpace;
+r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+
+// --- environment for reflections: a dark room with a warm torch panel and a cool window panel
+const envScene = new THREE.Scene();
+envScene.add(new THREE.Mesh(new THREE.BoxGeometry(30, 30, 30), new THREE.MeshBasicMaterial({ color: 0x0a0d14, side: THREE.BackSide })));
+const panel = (c, i, x, y, z, s) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(s, s), new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(i), side: THREE.DoubleSide })); m.position.set(x, y, z); m.lookAt(0, 0, 0); envScene.add(m); };
+panel(0xffb070, 6, -8, 6, 9, 6); panel(0x6f8cff, 1.2, 9, 4, -8, 7); panel(0xffffff, 1.2, 0, 14, 0, 10); panel(0xff7040, 1.5, 0, -10, 6, 8);
+const pm = new THREE.PMREMGenerator(r); scene.environment = pm.fromScene(envScene, 0.04).texture;
+
+// --- background: DK2 intro-panel blue, or a dungeon-dark vignette
+if (bg === 'dk2' || bg === 'dungeon') {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 512; const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(256, 210, 20, 256, 256, 380);
+  if (bg === 'dk2') { gr.addColorStop(0, '#1d3a6e'); gr.addColorStop(0.55, '#0c1d40'); gr.addColorStop(1, '#03070f'); }
+  else { gr.addColorStop(0, '#3a2a1c'); gr.addColorStop(0.5, '#160f0b'); gr.addColorStop(1, '#030202'); }
+  g.fillStyle = gr; g.fillRect(0, 0, 512, 512);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; scene.background = t;
+} else if (bg !== 'none') scene.background = new THREE.Color(bg);
+
+// --- lights: warm key, cool rim, soft fill, low bounce
+const key = new THREE.DirectionalLight(0xffcf98, +(Q.get('key') || 3.6)); key.position.set(-4, 7, 6);
+key.castShadow = true; key.shadow.mapSize.set(4096, 4096); key.shadow.bias = -0.0004; key.shadow.normalBias = 0.02;
+Object.assign(key.shadow.camera, { left: -3, right: 3, top: 5, bottom: -1, near: 1, far: 25 });
+scene.add(key);
+const rim = new THREE.DirectionalLight(0xa9bcff, +(Q.get('rim') || 1.6)); rim.position.set(5, 5, -6); scene.add(rim);
+const rim2 = new THREE.DirectionalLight(0xff8a50, 2.2); rim2.position.set(-6, 4, -4); scene.add(rim2);
+const front = new THREE.DirectionalLight(0xff7a40, 0.8); front.position.set(1, 1.5, 6); scene.add(front);
+const fill = new THREE.HemisphereLight(0x8090b0, 0x301810, +(Q.get('fill') || 0.6)); scene.add(fill);
+if (Q.get('torch')) { const [tx, ty, tz] = Q.get('torch').split(',').map(Number); const tl = new THREE.PointLight(0xff8a30, +(Q.get('torchi') || 30), 12, 1.6); tl.position.set(tx, ty, tz); scene.add(tl); }
+if (Q.get('eyeglow') && Q.get('eyeglow') !== '0') { const eg = new THREE.PointLight(0xffa040, +(Q.get('eyeglow') || 0.5), 0.6, 2); eg.position.set(0.02, 3.62, 0.85); scene.add(eg); }
+scene.environmentIntensity = +(Q.get('env') || 0.3);
+if (Q.get('mood') === 'evil') {           // dramatic: hard light from above and the side, little front fill
+  key.position.set(-6, 7, 0.8); key.intensity = 4.6; front.intensity = 0.15; fill.intensity = 0.25;
+  rim.intensity = 2.4; rim2.intensity = 3.0; scene.environmentIntensity = 0.18;
+}
+
+// --- floor (catches the shadow), fading into the background
+if (Q.get('floor') !== '0') {
+  const fc = document.createElement('canvas'); fc.width = fc.height = 256; const g = fc.getContext('2d');
+  const gr = g.createRadialGradient(128, 128, 10, 128, 128, 128); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 256, 256);
+  const ft = new THREE.CanvasTexture(fc);
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(+(Q.get('floorr') || 4), 96), new THREE.MeshStandardMaterial({ color: Q.get('floorc') || '#2a2622', roughness: 0.85, alphaMap: ft, transparent: true }));
+  floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+}
+
+const g = await loadGLB(model);
+const expr = Q.get('expr') || 'grin';
+if (Q.get('only')) g.traverse(o => { if (o.isMesh && !o.name.startsWith(Q.get('only'))) o.visible = false; });
+g.traverse(o => { if (o.isMesh && o.name.startsWith('head_')) o.visible = o.name.startsWith('head_' + expr + '_'); });
+scene.add(g);
+// eye glow: soft additive halos just in front of the eyes
+if (g.userData.eyeGlow && Q.get('halo') !== '0') {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+  const gr = x.createRadialGradient(64, 64, 0, 64, 64, 64); gr.addColorStop(0, 'rgba(255,230,140,1)'); gr.addColorStop(0.25, 'rgba(255,170,40,0.55)'); gr.addColorStop(1, 'rgba(255,90,0,0)');
+  x.fillStyle = gr; x.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(c);
+  for (const p of g.userData.eyeGlow) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: +(Q.get('halo') || 0.85) })); s.position.set(...p); s.scale.setScalar(0.13); s.renderOrder = 10; scene.add(s); }
+}
+const box = new THREE.Box3().setFromObject(g);
+const target = new THREE.Vector3(...tgt);
+const cam = new THREE.PerspectiveCamera(fov, W / H, 0.05, 100);
+const d = dist || (box.getSize(new THREE.Vector3()).y * 0.62) / Math.tan(fov * Math.PI / 360);
+cam.position.set(target.x + d * Math.sin(az) * Math.cos(el), target.y + d * Math.sin(el), target.z + d * Math.cos(az) * Math.cos(el));
+cam.lookAt(target);
+const t0 = performance.now();
+r.render(scene, cam); r.getContext().finish();
+document.title = 'ok ' + (performance.now() - t0).toFixed(0) + 'ms bbox ' + box.min.toArray().map(v => v.toFixed(2)) + ' / ' + box.max.toArray().map(v => v.toFixed(2));
+</script></body></html>

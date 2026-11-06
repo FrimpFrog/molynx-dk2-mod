@@ -1,0 +1,9 @@
+/*
+!/scripts/
+!/tests/
+!/docs/
+!/data/
+!/cinematic/
+!/.gitignore
+__pycache__/
+*.pyc
