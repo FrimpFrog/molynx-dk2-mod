@@ -12,6 +12,9 @@ carry it. The changes, in the order they are applied:
    set (the dropped stretched triangles are measured on the original library, as approved).
 2. Free-hand claw. The claw (vertices 244, 571-574, labelled torso/leg by the rig) moves rigidly
    with the 12 hand vertices it sits on, in every frame (it floated by the hip in the DK2 clips).
+   The MegaGlest model itself leaves it 0.16 off his hand (a floating nail even in his own idle),
+   so it is first moved onto the hand: the centre of its base (244, 571, 574) to the nearest point
+   of his body's surface, CLAW_SINK further in (2026-11-06, the user's review of the game files).
 3. Mace arm. In the retargeted clips the mace arm (vertices 382-429 and 654-693) follows the club it
    holds, blending back to the retargeted arm near the shoulder; in the clips made with the club
    arm locked (LOCKED) the arm, the club and the mace keep their stand frame 0 place on his upper
@@ -81,6 +84,8 @@ def design_clips(meshes_dir, cache, unit_dir) -> dict:
 
 # ---------------------------------------------------------------- 2-3. claw and mace arm
 CLAW = np.array([244, 574, 573, 572, 571])
+CLAW_BASE = np.array([244, 571, 574])
+CLAW_SINK = 0.02
 HAND = np.array([231, 560, 226, 566, 238, 240, 236, 559, 564, 558, 556, 237])
 CLUB = np.arange(142)                      # behemoth_rig.CLUB_VERTICES
 ARM_N = np.r_[382:430, 654:694]
@@ -97,14 +102,53 @@ def kabsch(a, b):
     return R, cb - R @ ca
 
 
+def _closest_on_triangle(p, a, b, c):
+    """The point of triangle abc nearest p (Ericson, Real-Time Collision Detection, 5.1.5)."""
+    ab, ac, ap = b - a, c - a, p - a
+    d1, d2 = ab @ ap, ac @ ap
+    if d1 <= 0 and d2 <= 0:
+        return a
+    bp = p - b
+    d3, d4 = ab @ bp, ac @ bp
+    if d3 >= 0 and d4 <= d3:
+        return b
+    vc = d1 * d4 - d3 * d2
+    if vc <= 0 and d1 >= 0 and d3 <= 0:
+        return a + d1 / (d1 - d3) * ab
+    cp = p - c
+    d5, d6 = ab @ cp, ac @ cp
+    if d6 >= 0 and d5 <= d6:
+        return c
+    vb = d5 * d2 - d1 * d6
+    if vb <= 0 and d2 >= 0 and d6 <= 0:
+        return a + d2 / (d2 - d6) * ac
+    va = d3 * d6 - d5 * d4
+    if va <= 0 and d4 - d3 >= 0 and d5 - d6 >= 0:
+        return b + (d4 - d3) / ((d4 - d3) + (d5 - d6)) * (c - b)
+    den = 1 / (va + vb + vc)
+    return a + ab * vb * den + ac * vc * den
+
+
+def claw_offset(rest, triangles):
+    """The move that puts the claw on his hand (rest pose): its base centre to the nearest point of
+    the body's surface (triangles without the claw), CLAW_SINK past it."""
+    tri = np.asarray(triangles, int).reshape(-1, 3)
+    tri = tri[~np.any(np.isin(tri, CLAW), axis=1)]
+    p = rest[CLAW_BASE].mean(0)
+    q = min((_closest_on_triangle(p, *rest[t]) for t in tri), key=lambda x: np.linalg.norm(x - p))
+    d = q - p
+    return d * (1 + CLAW_SINK / np.linalg.norm(d))
+
+
 def fix_claw(data, rest):
+    rest_claw = rest[CLAW] + claw_offset(rest, data["stand"]["parts"][0]["indices"])
     out = {}
     for name, clip in data.items():
         frames = []
         for fr in clip["frames"]:
             body = np.array(fr[0], float, copy=True)
             R, t = kabsch(rest[HAND], body[HAND])
-            body[CLAW] = rest[CLAW] @ R.T + t
+            body[CLAW] = rest_claw @ R.T + t
             frames.append([body] + list(fr[1:]))
         out[name] = {**clip, "frames": frames}
     return out

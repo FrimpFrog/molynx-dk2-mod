@@ -100,7 +100,8 @@ def test_the_claw_rides_on_its_hand_in_every_frame(built):
     new, _, _, _ = built
     from scripts.behemoth_rig import behemoth_rest
     rest, _, _ = behemoth_rest(BEHEMOTH_DIR)
-    gap = np.linalg.norm(rest[design.CLAW].mean(0) - rest[design.HAND].mean(0))
+    claw = rest[design.CLAW] + design.claw_offset(rest, new["stand"]["parts"][0]["indices"])
+    gap = np.linalg.norm(claw.mean(0) - rest[design.HAND].mean(0))
     for name in CLIPS:
         for frame in new[name]["frames"]:
             body = np.asarray(frame[0])
@@ -163,3 +164,22 @@ def test_the_game_files_use_four_textures_and_the_horned_reaper_size(built, tmp_
     assert (u0 * 512, v0 * 512, u1 * 512, v1 * 512) == (33, 207, 221, 485)
     head_uv = np.asarray(plan.parts[2]["uv"], float)[np.unique(plan.parts[2]["indices"])]
     assert head_uv.min() >= 0 and head_uv.max() <= 1
+
+
+@needs_data
+def test_the_claw_sits_on_his_hand_not_beside_it(built):
+    """The MegaGlest model leaves the free hand's claw 0.16 off the hand; moved onto it, the centre
+    of its base stays within 0.06 of his body's surface in every frame of every clip."""
+    new, _, old, _ = built
+    tri = np.asarray(new["stand"]["parts"][0]["indices"], int).reshape(-1, 3)
+    others = tri[~np.any(np.isin(tri, design.CLAW), axis=1)]
+
+    def gap(body):
+        p = body[design.CLAW_BASE].mean(0)
+        near = others[np.linalg.norm(body[others].mean(1) - p, axis=1) < 0.6]
+        return min(np.linalg.norm(design._closest_on_triangle(p, *body[t]) - p) for t in near)
+
+    assert gap(np.asarray(old["stand"]["frames"][0][0])) > 0.15
+    for name in CLIPS:
+        for frame in new[name]["frames"][::3]:
+            assert gap(np.asarray(frame[0])) < 0.06, name

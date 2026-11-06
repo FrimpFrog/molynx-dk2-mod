@@ -422,7 +422,7 @@ def test_one_way_clips_are_the_measured_ones():
     # asset tests measure them on the source): sleeping lies down, waking_up gets up.
     assert MAX_CLOSE_GAP == 10
     assert set(ONE_WAY_GAPS) == {"sleeping", "waking_up"}
-    assert ONE_WAY_GAPS["sleeping"] == pytest.approx(37.04, abs=0.01)
+    assert ONE_WAY_GAPS["sleeping"] == pytest.approx(37.09, abs=0.01)
     assert ONE_WAY_GAPS["waking_up"] == pytest.approx(25.25, abs=0.01)
     assert all(not SOURCE_WRAP[clip] for clip in ONE_WAY_GAPS)
 

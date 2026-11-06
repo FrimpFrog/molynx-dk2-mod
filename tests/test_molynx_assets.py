@@ -152,17 +152,17 @@ def test_clips_are_animations_that_pass_the_format_invariants(export):
 # The largest GEOM (keyframe positions) of every animation file, reduced (reduce=True). The game's
 # largest animation has 34,816 (Mis-Idle1); 65,535 is the largest a u16 index could reach.
 # The redesign (2026-11-06): files that would pass the game's largest are reduced with a wider
-# tolerance (molynx_assets.KEY_TOLERANCES): celebrating 46,079 -> 34,419 (2.5 steps), staggering
-# 40,448 -> 33,988 (1.5), training 35,676 -> 31,920 (1.5), fighting_another_creature 43,518 ->
-# 34,053 (2); victory_celebration (shipped by no slot) stays at one step.
+# tolerance (molynx_assets.KEY_TOLERANCES): celebrating 46,079 -> 34,442 (2.5 steps), staggering
+# 40,448 -> 33,973 (1.5), training 35,676 -> 31,942 (1.5), fighting_another_creature 43,518 ->
+# 34,076 (2); victory_celebration (shipped by no slot) stays at one step.
 GEOM = {
-    "stand": 1834, "walk": 8068, "walk_once": 8068, "attack": 11420, "die": 5553,
-    "fidgeting": 18932, "running": 14925, "eating": 19637, "praying": 16565, "happy": 21905,
-    "angry": 9870, "celebrating": 34419, "victory_celebration": 73948, "getting_hit": 6220,
-    "being_slapped": 10073, "staggering": 33988, "waking_up": 15987, "knockback": 25813,
-    "sleeping": 21411, "training": 31920, "fighting_another_creature": 34053, "patrolling": 16911,
-    "guarding": 1693, "manufacturing": 13467, "interacting_with_objects": 5971,
-    "being_picked_up": 6492,
+    "stand": 1833, "walk": 8044, "walk_once": 8044, "attack": 11407, "die": 5547,
+    "fidgeting": 18949, "running": 14901, "eating": 19675, "praying": 16564, "happy": 21917,
+    "angry": 9844, "celebrating": 34442, "victory_celebration": 74003, "getting_hit": 6219,
+    "being_slapped": 10092, "staggering": 33973, "waking_up": 16024, "knockback": 25785,
+    "sleeping": 21379, "training": 31942, "fighting_another_creature": 34076, "patrolling": 16934,
+    "guarding": 1700, "manufacturing": 13444, "interacting_with_objects": 5977,
+    "being_picked_up": 6464,
 }
 GAME_MAX_GEOM = 34_816
 # The reduction tolerance (quantisation steps) of the files reduced wider than one step.
@@ -183,7 +183,7 @@ def test_keyframes_are_reduced_like_661_game_files(export):
 def test_shipped_animations_stay_within_the_index_range(export, bile):
     """Every animation the record names (and staggering, shipped for a type NONE slot of some
     maps' Bile Demons) stays within the game's own largest animation (34,816 keyframes); only the
-    unshipped victory_celebration (73,948) is above it, and above 65,535."""
+    unshipped victory_celebration (74,003) is above it, and above 65,535."""
     shipped = {s for s in stems_used(bile, assets.molynx_files(bile)) if s not in POSE_STEMS}
     shipped.add("staggering")  # Siege's Bile Demon names it in dejectedPose (type NONE)
     for stem in shipped:
