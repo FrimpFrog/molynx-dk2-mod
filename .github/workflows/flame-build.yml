@@ -6,7 +6,7 @@ name: flame-build
 on:
   workflow_dispatch:
   push:
-    branches: [flame-ci]
+    branches: [main, flame-ci]
     paths: ['flame_patch/**', '.github/workflows/flame-build.yml']
 
 permissions:
