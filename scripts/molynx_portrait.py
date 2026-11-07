@@ -31,7 +31,7 @@ EMBLEM_WHITE = (228, 230, 214)
 # The picture: a frame of one of his clips, turned a little to one side, the camera a little below
 # his chin.
 PORTRAIT_CLIP, PORTRAIT_FRAME = "training", 30     # the mace raised in his fist, glaring ahead
-PORTRAIT_AZIMUTH, PORTRAIT_ELEVATION = 200.0, 8.0
+PORTRAIT_AZIMUTH, PORTRAIT_ELEVATION = 215.0, 8.0
 KEY_LIGHT = np.array([-0.55, 0.55, -0.65])    # x right, y up, z away from the camera
 RIM_LIGHT = np.array([0.7, 0.35, 0.6])        # from behind
 AMBIENT, KEY, RIM = 0.30, 0.95, 0.85
@@ -122,11 +122,11 @@ def _radial(size: tuple[int, int], centre, edge, focus=(0.5, 0.4)) -> Image.Imag
     return Image.fromarray(img.astype(np.uint8), "RGB")
 
 
-HEAD_WEIGHT = 0.7    # across, the picture centres on his head, drawn a little toward the mace
+HEAD_WEIGHT = 0.85    # across, the picture centres on his head, drawn a little toward the mace
 
 
 def portrait_box(model: Kmf, frame: int, inner: tuple[int, int], *, azimuth=PORTRAIT_AZIMUTH,
-                 elevation=PORTRAIT_ELEVATION, headroom: float = 0.04, depth: float = 0.42,
+                 elevation=PORTRAIT_ELEVATION, headroom: float = 0.04, depth: float = 0.36,
                  mace_cut: float = 0.25) -> tuple:
     """The camera window of the panel portrait, tight on him like the game's portraits: his head
     (horns included) with a little room above, down to `depth` of his height; the mace's spiked
