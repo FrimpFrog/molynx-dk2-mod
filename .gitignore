@@ -7,3 +7,5 @@
 !/.gitignore
 __pycache__/
 *.pyc
+!/.github/
+!/flame_patch/

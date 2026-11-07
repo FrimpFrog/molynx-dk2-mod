@@ -1,0 +1,63 @@
+# Builds Flame (https://github.com/DiaLight/Flame, GPL-3.0) at the commit the game runs
+# (build 260228, f6e2a3d) with the Molynx patches of flame_patch/ laid over it, and pushes the
+# installed files (PATCH.dll and flame/) to the branch flame-build-out.
+name: flame-build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [flame-ci]
+    paths: ['flame_patch/**', '.github/workflows/flame-build.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: mod
+      - uses: actions/checkout@v4
+        with:
+          repository: DiaLight/Flame
+          ref: f6e2a3d385bf2e6e95dc70cab88aa387bb7659d9
+          path: flame
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: python deps
+        run: python -m pip install -r flame/requirements.txt
+      - name: lay the Molynx patches over Flame
+        shell: bash
+        run: |
+          if [ -f mod/flame_patch/apply.py ]; then python mod/flame_patch/apply.py flame; fi
+          cd flame && git status --short && git diff --stat
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: win32
+      - name: build
+        shell: cmd
+        run: |
+          cd flame && mkdir build && cd build
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DNO_VCRUNTIME=ON -DUSE_CONFIGURE_DATE=ON -DCMAKE_INSTALL_PREFIX=../install .. || exit /b 1
+          cmake --build . || exit /b 1
+          cmake --install . || exit /b 1
+      - name: push the build to flame-build-out
+        shell: bash
+        run: |
+          cd mod
+          git config user.name "flame-build"
+          git config user.email "flame-build@users.noreply.github.com"
+          src_sha=$(git rev-parse HEAD)
+          git fetch origin flame-build-out || true
+          git checkout --orphan out
+          git rm -rq --cached . || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -r ../flame/install/. .
+          echo "built from ${src_sha} on Flame f6e2a3d" > BUILT_FROM.txt
+          git add -A
+          git commit -qm "Flame build for ${src_sha}"
+          git push -f origin out:flame-build-out
