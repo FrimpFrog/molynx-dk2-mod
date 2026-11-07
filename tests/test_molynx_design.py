@@ -9,6 +9,8 @@ import hashlib
 
 import numpy as np
 import pytest
+
+REVIEW = {"falling", "torture", "drinking", "eating", "sleeping", "manufacturing"}
 from PIL import Image
 
 import scripts.molynx_assets as assets
@@ -79,8 +81,8 @@ def test_fidgeting_and_celebrating_are_the_troll_clips(built):
     assert (len(new["fidgeting"]["frames"]), new["fidgeting"]["fps"], new["fidgeting"]["wrap"]) == (113, 35.684, True)
     assert (len(new["celebrating"]["frames"]), new["celebrating"]["fps"], new["celebrating"]["wrap"]) == (97, 30.0, True)
     assert design.NEW_CLIP_SOURCES == {"fidgeting": "Troll idle2", "celebrating": "Troll dance"}
-    for name in CLIPS:  # every other clip keeps its timing
-        if name not in design.NEW_CLIPS:
+    for name in CLIPS:  # every other clip keeps its timing (the review round's clips are tested below)
+        if name not in design.NEW_CLIPS and name not in REVIEW and name in old:
             assert (len(new[name]["frames"]), new[name]["fps"], new[name]["wrap"]) == (
                 len(old[name]["frames"]), old[name]["fps"], old[name]["wrap"]), name
 
@@ -183,3 +185,39 @@ def test_the_claw_sits_on_his_hand_not_beside_it(built):
     for name in CLIPS:
         for frame in new[name]["frames"][::3]:
             assert gap(np.asarray(frame[0])) < 0.06, name
+
+
+# ---- the in-game review round (2026-11-07) -------------------------------------------------------
+
+@needs_data
+def test_review_round_clips(built):
+    new, _, _old, _ = built
+    assert set(design.REVIEW_SOURCES) == REVIEW
+    assert design.REVIEW_CLIPS["falling"][:2] == ("giant", "fallback")
+    assert design.REVIEW_CLIPS["eating"][:2] == ("knight", "eat")
+    assert design.REVIEW_CLIPS["torture"][:2] == ("giant", "torture")
+    for name in REVIEW:
+        assert name in new, name
+    assert not new["falling"]["wrap"] and not new["torture"]["wrap"]
+    assert new["sleeping"]["wrap"] and new["manufacturing"]["wrap"] and new["eating"]["wrap"]
+    # drinking is the eating motion (no chicken: the chicken is added to the eat file only)
+    assert all(np.array_equal(a[0], b[0]) for a, b in zip(new["drinking"]["frames"], new["eating"]["frames"]))
+    # sleeping is a closed breathing loop
+    first, last = new["sleeping"]["frames"][0][0], new["sleeping"]["frames"][-1][0]
+    assert np.allclose(first, last)
+
+
+@needs_data
+def test_hammer_strikes_at_bench_height():
+    from scripts.behemoth_rig import CLUB_VERTICES, behemoth_rest
+    from scripts.dk2paths import BEHEMOTH_DIR
+    frames, seconds = design.hammer_frames(BEHEMOTH_DIR)
+    rest, _, _ = behemoth_rest(BEHEMOTH_DIR)
+    height = rest[:, 1].max() - rest[:, 1].min()
+    low = frames[:, :CLUB_VERTICES, 1].min(axis=1) - rest[:, 1].min()
+    target = design.BENCH_HEIGHT * height
+    # the strike stops at the bench (the interpolated strike frame lies a little above the target)
+    assert target <= low.min() <= target + 0.06 * height
+    assert np.allclose(frames[0], frames[-1])                                   # loops
+    strikes = np.sum((low[1:-1] <= low[:-2]) & (low[1:-1] < low[2:] + 1e-9) & (low[1:-1] < low.max() * 0.6))
+    assert strikes >= 2 and 1.5 < seconds < 4

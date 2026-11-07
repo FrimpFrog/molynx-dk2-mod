@@ -82,6 +82,107 @@ def design_clips(meshes_dir, cache, unit_dir) -> dict:
     return out
 
 
+# ---------------------------------------------------------------- 1b. the in-game review round (2026-11-07)
+# The user's first in-game test of the redesign: the stun cycle stood up, sat in a standing pose and
+# fell again; sleeping had no bed and lay on the floor; eating had no chicken and the free arm swung
+# back over his head; torture was a flinch under the wheel; manufacturing held the mace still. The
+# clips below replace or add those (donors from any DK2 creature, as the user allowed):
+#   falling       Giant fallback alone (the fallback slot; it ends lying, where StunnedPose and the
+#                 getup slot's waking_up begin)
+#   eating        Knight eat (one hand eats, the other keeps its weapon), mace on his shoulder
+#   drinking      the same motion without the chicken (the drink slot)
+#   torture       Giant torture (spread on the wheel), lifted off the ground; molynx_assets anchors
+#                 it on the wheel where the Bile Demon's torture file puts the Bile Demon
+#   sleeping      the breathing loop at the end of his old sleeping clip (lying down); molynx_assets
+#                 lays him on the Bile Demon's bed (his lair) and adds the bed to the file, as every
+#                 bed file does
+#   manufacturing his own mace smash (MegaGlest attack) cut where the mace head reaches bench height,
+#                 struck twice per loop
+REVIEW_CLIPS = {  # clip -> (donor creature, donor animation, options)
+    "falling": ("giant", "fallback", {"loop": False}),
+    "eating": ("knight", "eat", {"mirror": True, "locked": True, "loop": True}),
+    "torture": ("giant", "torture", {"ground": False, "loop": False}),
+}
+SLEEP_BREATH = 48        # frames of the breathing loop that ends behemoth_anims' sleeping clip
+REVIEW_SOURCES = {"falling": "Giant fallback", "eating": "Knight eat", "drinking": "Knight eat (no chicken)",
+                  "torture": "Giant torture", "sleeping": "Lying breathing (end of Giant die), on the Bile Demon's bed",
+                  "manufacturing": "His own mace smash, cut at bench height, twice"}
+BENCH_HEIGHT = 0.40      # the mace head's lowest point at the strike, as a fraction of his rest height
+
+
+def _review_retarget(rig, tracks, creature, anim, opt):
+    import warnings
+    from scripts.behemoth_anims import CLUB_ARM, CLUB_LOCKED, FLIP, MIRROR
+    from scripts.humanoid_retarget import retarget
+    T = tracks[creature]
+    rest = "idle1" if "idle1" in T else "walk"
+    flip = MIRROR if opt.get("mirror") else FLIP
+    amp = {**CLUB_ARM, **(CLUB_LOCKED if opt.get("locked") else {})}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        return np.asarray(retarget(rig, T[anim][0] * flip, T[rest][0][0] * flip, amp=amp,
+                                   ground=opt.get("ground", True)))
+
+
+
+def hammer_frames(unit_dir) -> tuple[np.ndarray, float]:
+    """(frames, seconds) of the manufacturing loop: his MegaGlest mace smash from its first frame
+    (mace raised) to the frame where the mace head's lowest point reaches BENCH_HEIGHT, a short
+    rest on the bench, the lift back, twice."""
+    from pathlib import Path as _P
+    from scripts.behemoth_anims import DK2_FPS
+    from scripts.behemoth_rig import CLUB_VERTICES, behemoth_rest
+    from scripts.g3d import parse_g3d
+    from scripts.golem_anims import _resample
+    rest, _, off = behemoth_rest(unit_dir)
+    height = float(rest[:, 1].max() - rest[:, 1].min())
+    model = parse_g3d((_P(unit_dir) / "models/behemoth_attacking.g3d").read_bytes())
+    swing = np.concatenate([m.vertices.astype(float) for m in model.meshes], axis=1) - off
+    swing = _resample(swing, int(round(len(swing) / 0.75 / 18 * 30)))  # its real speed, at 30 fps
+    low = swing[:, :CLUB_VERTICES, 1].min(axis=1) - rest[:, 1].min()
+    target = BENCH_HEIGHT * height
+    k = next(i for i in range(1, len(swing)) if low[i] <= target and low[i - 1] > target)
+    t = (low[k - 1] - target) / (low[k - 1] - low[k])
+    strike = swing[k - 1] + t * (swing[k] - swing[k - 1])
+    down = list(swing[:k]) + [strike]
+    hold = [strike] * 3
+    ease = (1 - np.cos(np.linspace(0, np.pi, 14))) / 2           # lift back to the raised mace
+    up = [strike + e * (swing[0] - strike) for e in ease[1:]]
+    one = down + hold + up
+    frames = np.asarray(one[:-1] + one[:-1] + [swing[0]])
+    return frames, (len(frames) - 1) / DK2_FPS
+
+
+def review_clips(meshes_dir, cache, unit_dir, lib: dict) -> dict:
+    """{clip: library entry} of the review round (see REVIEW_CLIPS), made like build_all's clips."""
+    from scripts.behemoth_anims import DK2_FPS
+    from scripts.behemoth_rig import behemoth_rig
+    from scripts.donor_tracks import donor_tracks
+    from scripts.golem_anims import _loop_close, _resample
+    rig = behemoth_rig(unit_dir)
+    tracks, out = {}, {}
+    for name, (creature, anim, opt) in REVIEW_CLIPS.items():
+        if creature not in tracks:
+            tracks[creature] = donor_tracks(meshes_dir, cache, creature)
+        frames = _review_retarget(rig, tracks, creature, anim, opt)
+        seconds = len(tracks[creature][anim][0]) / DK2_FPS
+        if len(frames) / seconds < 24 or len(frames) / seconds > 36:
+            frames = _resample(frames, int(seconds * 30))
+        if opt["loop"]:
+            frames = _loop_close(frames)
+        out[name] = {"frames": [np.asarray(f) for f in frames], "wrap": bool(opt["loop"]),
+                     "fps": round(len(frames) / seconds, 3), "kind": "dk2", "source": REVIEW_SOURCES[name]}
+    out["drinking"] = {**out["eating"], "source": REVIEW_SOURCES["drinking"]}
+    old = lib["sleeping"]
+    breath = [np.asarray(f) for f in old["frames"][-SLEEP_BREATH:]]
+    out["sleeping"] = {**old, "frames": breath + [breath[0]], "wrap": True, "source": REVIEW_SOURCES["sleeping"]}
+    ham, secs = hammer_frames(unit_dir)
+    out["manufacturing"] = {"frames": [np.asarray(f) for f in ham], "wrap": True,
+                            "fps": round((len(ham) - 1) / secs, 3), "kind": "native",
+                            "source": REVIEW_SOURCES["manufacturing"]}
+    return out
+
+
 # ---------------------------------------------------------------- 2-3. claw and mace arm
 CLAW = np.array([244, 574, 573, 572, 571])
 CLAW_BASE = np.array([244, 571, 574])
@@ -89,8 +190,9 @@ CLAW_SINK = 0.02
 HAND = np.array([231, 560, 226, 566, 238, 240, 236, 559, 564, 558, 556, 237])
 CLUB = np.arange(142)                      # behemoth_rig.CLUB_VERTICES
 ARM_N = np.r_[382:430, 654:694]
-NATIVE = {"stand", "walk", "attack", "die", "tpose"}
-LOCKED = {"eating", "praying", "happy", "celebrating", "victory_celebration", "manufacturing"}
+NATIVE = {"stand", "walk", "attack", "die", "tpose", "manufacturing"}   # manufacturing: his own smash
+MACELESS = {"torture"}   # strapped to the wheel: no mace (molynx_assets.MIRRORED_ARM spreads both arms alike)
+LOCKED = {"eating", "drinking", "praying", "happy", "celebrating", "victory_celebration"}
 
 
 def kabsch(a, b):
@@ -358,4 +460,30 @@ def apply_design(data: dict, textures: dict, unit_dir) -> tuple[dict, dict]:
     shoulder = np.asarray(rig.joints["armN"], float)
     data = fix_club_arm(fix_claw(data, rest), rest, shoulder)
     data = lock_club_arm(data, np.asarray(rig.weights), list(rig.bones), shoulder)
+    data = hide_mace(data, rest)
     return add_head(data, unit_dir), design_textures(textures)
+
+
+MACE_PART = 1    # the character's parts: 0 body (its first CLUB vertices are the mace's shaft), 1 mace
+
+
+def hide_mace(data, rest, clips=MACELESS):
+    """The mace taken out of `clips`: its vertices (the shaft in the body part, the whole mace part)
+    folded onto one point inside his chest, so every triangle of it has no area and is not drawn
+    (every file keeps the same sprites and triangles, as the game needs)."""
+    from scripts.behemoth_rig import behemoth_labels
+    chest = np.nonzero(behemoth_labels(rest) == 0)[0]
+    chest = chest[chest >= len(CLUB)]
+    out = dict(data)
+    for name in clips:
+        if name not in data:
+            continue
+        frames = []
+        for fr in data[name]["frames"]:
+            body = np.array(fr[0], float, copy=True)
+            centre = body[chest].mean(0)
+            body[CLUB] = centre
+            mace = np.broadcast_to(centre, np.shape(fr[MACE_PART])).copy()
+            frames.append([body, mace] + list(fr[2:]))
+        out[name] = {**data[name], "frames": frames}
+    return out

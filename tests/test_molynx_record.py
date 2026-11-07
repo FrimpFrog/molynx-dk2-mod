@@ -33,9 +33,10 @@ CLIP_LIBRARY = {
     "celebrating", "victory_celebration", "getting_hit", "being_slapped", "staggering", "waking_up",
     "knockback", "sleeping", "training", "fighting_another_creature", "patrolling", "guarding",
     "manufacturing", "interacting_with_objects", "being_picked_up",
+    "falling", "torture", "drinking",   # the in-game review round (2026-11-07)
 }
 NEAREST_ONLY = [
-    "magic", "torture", "elec", "electrocute", "research", "loot", "special", "entrance", "walkback",
+    "magic", "elec", "electrocute", "research", "loot", "special", "entrance", "walkback",
     "melee2", "drink", "eatCorpse", "stunnedPose", "dejectedPose", "drunkIdle",
 ]
 # The Bile Demon record (editor and every map) leaves exactly these animation slots empty.
@@ -73,23 +74,23 @@ TAILS = {
     "animSwingResource": ("being_picked_up", "000000003c0000001e0000000000000006000000",
                           "000000003c0000001e0000000000000006000000"),
     "animSleepResource": ("sleeping", "00000000780000000f0000000000000006000000",
-                          "00000000880000001e0000000000000006000000"),  # 136, not looping
+                          "00000000360000001e0000000000000006000000"),  # 55, looping (review round)
     "animEatResource": ("eating", "01000000500000001e0000000000000006000000",
                         "01000000530000001e0000000000000006000000"),
-    "animTortureResource": ("getting_hit", "01000000640000001e0000000000000006000000",
-                            "01000000110000001e0000000000000006000000"),
-    "animDrinkResource": ("eating", "00000000960000001e0000000000000006000000",
+    "animTortureResource": ("torture", "01000000640000001e0000000000000006000000",
+                            "01000000640000001e0000000000000006000000"),  # 100 (Giant torture)
+    "animDrinkResource": ("drinking", "00000000960000001e0000000000000006000000",
                           "00000000530000001e0000000000000006000000"),
     "animIdle1Resource": ("stand", "00000000be0000001e0000000000000006000000",
                           "000000003d0000001e0000000000000006000000"),
     "animRecoilHfbResource": ("being_slapped", "000000002e0000001e0000000000000006000000",
                               "00000000230000001e0000000000000006000000"),
     "animBuildingResource": ("manufacturing", "18000000210000001e00000000000000062d2000",
-                             "00000000210000001e0000000000000006000000"),
+                             "00000000440000001e0000000000000006000000"),  # 69, looping (the mace)
     "animPrayResource": ("praying", "180000003c0000001e0000000000000006383700",
                          "00000000780000001e0000000000000006000000"),
-    "animFallbackResource": ("knockback", "01000000210000001e0000000000000006000000",
-                             "010000003d0000001e0000000000000006000000"),
+    "animFallbackResource": ("falling", "01000000210000001e0000000000000006000000",
+                             "010000000f0000001e0000000000000006000000"),  # 15 (Giant fallback)
     "animElecResource": ("ElecPose", "0000000000100000010000006804c80005000000",
                          "0000000000100000010000006804c80005000000"),
     "animElectrocuteResource": ("getting_hit", "010000000a0000001e0000000000000006000000",
@@ -192,8 +193,8 @@ def test_multipliers_are_the_specified_ones():
     assert MULTIPLIERS == {"hp": 1.6, "meleeDamage": 1.4, "fear": 1.2, "threat": 1.4, "mass": 1.2, "pay": 1.3}
 
 
-def test_clip_library_is_the_25_clips():
-    assert len(CLIPS) == 25 and set(CLIPS) == CLIP_LIBRARY
+def test_clip_library_is_the_28_clips():
+    assert len(CLIPS) == 28 and set(CLIPS) == CLIP_LIBRARY
     assert set(POSE_STEMS) == {"PoseFrame", "DiePose", "DraggedPose", "StunnedPose", "ElecPose"}
     assert STATIC_POSES == {"staggering": "StunnedPose"}
 
@@ -220,13 +221,13 @@ def test_table_entries_from_the_brief():
         "recoilHfb": "being_slapped", "melee1": "attack", "melee2": "attack", "special": "attack",
         "die": "die", "diePose": "DiePose", "happy": "happy", "angry": "angry",
         "swing": "being_picked_up", "sleep": "sleeping", "eat": "eating", "eatCorpse": "eating",
-        "drink": "eating", "building": "manufacturing", "pray": "praying", "fallback": "knockback",
+        "drink": "drinking", "building": "manufacturing", "pray": "praying", "fallback": "falling",
         "getUp": "waking_up", "dance": "celebrating", "drunk": "staggering", "drunk2": "staggering",
         "stunnedPose": "StunnedPose", "dejectedPose": "staggering", "idle1": "stand",
         "idle2": "fidgeting", "drunkIdle": "fidgeting", "poseFrame": "PoseFrame",
         "walk2": "patrolling", "entrance": "walk", "walkback": "walk",
         "research": "interacting_with_objects", "loot": "interacting_with_objects",
-        "magic": "getting_hit", "torture": "getting_hit", "elec": "ElecPose",
+        "magic": "getting_hit", "torture": "torture", "elec": "ElecPose",
         "electrocute": "getting_hit",
     }
     assert SLOT_CLIPS == expected
@@ -367,7 +368,7 @@ def test_stage2_slot_names_for_the_real_bile_demon(bile):
 
 SOURCE_WRAPS = {  # the clip library's own flags (test_molynx_assets checks them on the source)
     "die": False, "victory_celebration": False, "getting_hit": False, "being_slapped": False,
-    "waking_up": False, "knockback": False, "sleeping": False,
+    "waking_up": False, "knockback": False, "falling": False, "torture": False,
 }
 
 
@@ -385,8 +386,8 @@ def test_file_plan_for_the_real_bile_demon(bile):
         "walk": True, "walk_once": False, "getting_hit": False,
         "stand": False, "fidgeting": False, "eating": False, "happy": False, "attack": False,
         "angry": False, "celebrating": False, "die": False, "being_slapped": False,
-        "knockback": False, "waking_up": False, "sleeping": False, "being_picked_up": True,
-        "manufacturing": True, "praying": True,
+        "falling": False, "waking_up": False, "sleeping": True, "being_picked_up": True,
+        "manufacturing": True, "praying": True, "torture": False, "drinking": False,
     }
     assert "staggering" not in stems_used(bile, plan)  # the editor's Bile Demon has no staggering slot
     assert stems_used(bile, plan) == set(plan.slots.values()) == set(plan.wraps) | set(POSE_STEMS)
@@ -421,8 +422,7 @@ def test_one_way_clips_are_the_measured_ones():
     # last-to-first gap in median frame steps of the source clips that do not loop (pinned; the
     # asset tests measure them on the source): sleeping lies down, waking_up gets up.
     assert MAX_CLOSE_GAP == 10
-    assert set(ONE_WAY_GAPS) == {"sleeping", "waking_up"}
-    assert ONE_WAY_GAPS["sleeping"] == pytest.approx(37.09, abs=0.01)
+    assert set(ONE_WAY_GAPS) == {"waking_up"}   # sleeping loops since the review round
     assert ONE_WAY_GAPS["waking_up"] == pytest.approx(25.25, abs=0.01)
     assert all(not SOURCE_WRAP[clip] for clip in ONE_WAY_GAPS)
 
@@ -430,12 +430,16 @@ def test_one_way_clips_are_the_measured_ones():
 @needs_data
 def test_a_one_way_clip_is_not_looped_even_where_the_bile_demons_file_loops(bile):
     plan = file_plan(bile, FILE_WRAPS)
+    # since the review round sleeping is a breathing loop, like the Bile Demon's bed file: no exception
     assert FILE_WRAPS["biledemon-bed(sleeping)"] is True
-    assert plan.wraps["sleeping"] is False and plan.slots["animSleepResource"] == "sleeping"
-    assert plan.wrap_exceptions == (
-        WrapException("sleeping", ("animSleepResource",), True, ONE_WAY_GAPS["sleeping"]),)
-    # the tail of a non-looping file: frames = file frames (136), fps 30
-    assert build(bile, 2).art_tail("animSleepResource").frames == 136
+    assert plan.wraps["sleeping"] is True and plan.slots["animSleepResource"] == "sleeping"
+    assert plan.wrap_exceptions == ()
+    # the tail of a looping file: frames = file frames - 1 (55 - 1), fps 30
+    assert build(bile, 2).art_tail("animSleepResource").frames == 54
+    # a one-way clip still refuses a loop: waking_up in a slot whose Bile file loops
+    looped = file_plan(bile, {**FILE_WRAPS, "bile_demon-getup": True})
+    assert looped.wraps["waking_up"] is False
+    assert [e.stem for e in looped.wrap_exceptions] == ["waking_up"]
 
 
 @needs_data
@@ -591,12 +595,13 @@ def test_slot_assignment_and_stems_used(bile):
     # (staggering only where a map's Bile Demon names dejectedPose in a type NONE slot, e.g. Siege).
     assert stems_used(bile) == {
         "walk", "DraggedPose", "getting_hit", "being_slapped", "attack", "die", "DiePose", "happy",
-        "angry", "being_picked_up", "sleeping", "eating", "manufacturing", "praying", "knockback",
+        "angry", "being_picked_up", "sleeping", "eating", "manufacturing", "praying", "falling",
+        "torture", "drinking",
         "waking_up", "celebrating", "StunnedPose", "ElecPose", "stand", "fidgeting", "PoseFrame",
     }
     assert set(CLIPS) - stems_used(bile) == {
         "running", "victory_celebration", "training", "fighting_another_creature", "patrolling",
-        "guarding", "interacting_with_objects", "staggering",
+        "guarding", "interacting_with_objects", "staggering", "knockback",
     }
 
 

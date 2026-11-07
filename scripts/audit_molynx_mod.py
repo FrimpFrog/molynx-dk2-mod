@@ -176,7 +176,9 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # Which Molynx file each animation slot names (stage 2), written out here from the design's slot
 # table (slot-table.md, plan Task 8) and the rulings on loop variants: entrance needs a walk that
 # ends (walk_once); the static mesh slots stunnedPose and elec take static poses (StunnedPose, a
-# middle frame of staggering; ElecPose, the peak of getting_hit), like the game's creatures. A slot
+# middle frame of staggering until the review round, now the last frame of falling; ElecPose, the
+# peak of getting_hit), like the game's creatures. Review round (2026-11-07): fallback falling
+# (it ends lying), torture its own clip, drink its own (eating without the chicken). A slot
 # not listed takes "stand"; a slot empty in the Bile Demon stays empty; a static mesh slot (type 5)
 # whose entry is staggering (dejectedPose in some maps) takes StunnedPose (MESH_SLOT_FILES).
 SLOT_FILES = {
@@ -186,9 +188,9 @@ SLOT_FILES = {
     "animMelee2Resource": "attack", "animSpecialResource": "attack", "animDieResource": "die",
     "animDiePoseResource": "DiePose", "animHappyResource": "happy", "animAngryResource": "angry",
     "animSwingResource": "being_picked_up", "animSleepResource": "sleeping",
-    "animEatResource": "eating", "animEatCorpseResource": "eating", "animDrinkResource": "eating",
+    "animEatResource": "eating", "animEatCorpseResource": "eating", "animDrinkResource": "drinking",
     "animBuildingResource": "manufacturing", "animPrayResource": "praying",
-    "animFallbackResource": "knockback", "animGetUpResource": "waking_up",
+    "animFallbackResource": "falling", "animGetUpResource": "waking_up",
     "animDanceResource": "celebrating", "animDrunkResource": "staggering",
     "animDrunk2Resource": "staggering", "animStunnedPoseResource": "StunnedPose",
     "animDejectedPoseResource": "staggering", "animIdle1Resource": "stand",
@@ -196,15 +198,14 @@ SLOT_FILES = {
     "animPoseFrameResource": "PoseFrame", "animWalk2Resource": "patrolling",
     "animEntranceResource": "walk_once", "animWalkbackResource": "walk",
     "animResearchResource": "interacting_with_objects", "animLootResource": "interacting_with_objects",
-    "animMagicResource": "getting_hit", "animTortureResource": "getting_hit",
+    "animMagicResource": "getting_hit", "animTortureResource": "torture",
     "animElecResource": "ElecPose", "animElectrocuteResource": "getting_hit",
 }
 MESH_SLOT_FILES = {"staggering": "StunnedPose"}
 DEFAULT_FILE = "stand"
-WRAP_EXCEPTIONS = {
-    "animSleepResource": ("Molynx-sleeping", "a one-way clip (he lies down and stays down), so it "
-                          "plays once and is not looped"),
-}
+# slot -> (file, why it may not loop although the Bile Demon's file does). Empty since the review
+# round of 2026-11-07: sleeping is a closed breathing loop in the bed, like BileDemon-bed(sleeping).
+WRAP_EXCEPTIONS: dict[str, tuple[str, str]] = {}
 
 
 @dataclass(frozen=True)
@@ -749,9 +750,20 @@ def _model_problems(name: str, model, files: "_Files") -> tuple[list[str], set[s
     return problems, textures
 
 
+@functools.lru_cache(maxsize=1)
+def _game_texture_names() -> frozenset[str]:
+    """Lower-case names of the textures in the game's own EngineTextures cache (no MMn suffix):
+    a prop the file carries (the chicken of an eat file, a bed) uses these, as the game's files do."""
+    from scripts.dk2texture import TextureCache
+    cache = TextureCache(GAME_DIR / "EngineTextures.dir", GAME_DIR / "EngineTextures.dat")
+    return frozenset(n[:-3].lower() for n in cache.names if n[-3:-1].upper() == "MM")
+
+
 def _texture_problems(texture: str, files: "_Files") -> list[str]:
     file_name = texture + ".png"
     shown = f"Data/EngineTextures/{file_name}"
+    if file_name not in files.texture_names and texture.lower() in _game_texture_names():
+        return []           # a game texture (a prop's): the game's own cache has it
     if file_name not in files.texture_names:
         folded = {n.lower(): n for n in files.texture_names}
         if file_name.lower() in folded:
@@ -1025,6 +1037,7 @@ ENABLE = 3
 KEEPER_1_ITEMS = {AV_ROOM: frozenset({1, 2, 3, 4, *range(6, 18)}), AV_DOOR: frozenset(range(1, 7)),
                   AV_TRAP: frozenset({*range(1, 12), 16}), AV_SPELL: frozenset({*range(1, 12), 13})}
 # Siege's creature pool for player 3 (creature id -> pool value), copied into the flat map.
+IMP = 1   # creature id of the Imp
 SIEGE_POOL = {7: 50, 5: 50, 12: 10, 10: 50, 6: 50, 4: 50, 24: 50, 3: 50, 22: 50, 23: 20, 45: 20}
 MOLYNX_POOL = 50
 LEVEL_NAME_AT, LEVEL_NAME_BYTES = 56, 128
@@ -1454,8 +1467,9 @@ class _Flat:
             problems.append(f"player 3's creature pool is {dict(sorted(got_pool.items()))}, expected "
                             f"{dict(sorted(want_pool.items()))}")
         got_av = {k[2] for k in k1 if k[0] == AV_CREATURE}
-        if got_av != set(want_pool):
-            problems.append(f"player 3's creature availability is {sorted(got_av)}, expected {sorted(want_pool)}")
+        want_av = set(want_pool) | {IMP}   # the Imp is available, not in the pool (review round)
+        if got_av != want_av:
+            problems.append(f"player 3's creature availability is {sorted(got_av)}, expected {sorted(want_av)}")
         if problems:
             return False, "; ".join(problems)
         molynx = " and Molynx (47, pool 50)" if self.in_pool else ", not Molynx"

@@ -191,7 +191,7 @@ UV_MARGIN = 0.02
 # stand frame 0 height (the top of the mace, the same as before the redesign).
 DESIGN_HEIGHT_RATIO = 1.38
 POSE_SOURCES = {"PoseFrame": ("stand", 0), "DiePose": ("die", -1), "DraggedPose": ("being_picked_up", 0),
-                "StunnedPose": ("staggering", 48), "ElecPose": ("getting_hit", 5)}  # see the docstring
+                "StunnedPose": ("falling", -1), "ElecPose": ("getting_hit", 5)}  # see the docstring
 FRAME = 7                       # the game portraits' frame, pixels on every side
 # The redesign's portrait pictures: renders of the design (stand frame 0, turned 15 degrees, on the
 # blue of the user's picture, 10/23/89), made by data/molynx_design/painting_tools/portrait_render.py.
@@ -278,8 +278,9 @@ def build_source(unit_dir: Path = BEHEMOTH_DIR, meshes_dir: Path = MESHES_DIR, c
         lib = build_all(Path(meshes_dir), cache, Path(unit_dir))
     drop = stretched_triangles(Path(unit_dir), lib)
     if design:
-        from scripts.molynx_design import design_clips
+        from scripts.molynx_design import design_clips, review_clips
         lib = {**lib, **design_clips(Path(meshes_dir), cache, Path(unit_dir))}
+        lib = {**lib, **review_clips(Path(meshes_dir), cache, Path(unit_dir), lib)}
     data, textures, _ = build_character(Path(unit_dir), clips=("stand", "walk", "attack", "die"),
                                         extra=lib, drop=drop)
     if design:
@@ -320,6 +321,7 @@ class MolynxPlan:
     materials: list = field(default_factory=list)
     mm_factors: list = field(default_factory=list)
     crops: dict = field(default_factory=dict)      # game texture -> (u0, v0, u1, v1) of its image used
+    props: dict = field(default_factory=dict)      # clip -> Prop (game objects the file carries)
 
     def to_kmf(self, parts) -> list:
         """Character Y-up points (one array per part) -> placed KMF points."""
@@ -449,6 +451,225 @@ def _mm_factor(points: np.ndarray, uv: np.ndarray, tris) -> float:
     return float(np.float32(MM_PER_RATIO * tex / model))
 
 
+# ---------------------------------------------------------------- props and anchors (review round, 2026-11-07)
+# Some game animation files carry an object with the creature: every eat file the chicken it eats
+# (Bile_Demon-Eat: materials chickenchicken, Feet+Beakchicken), every bed(sleeping) file the
+# creature's bed (the game hides the lair while the creature sleeps: Molynx's sleep file had no bed,
+# so his bed vanished). Torture and bed files also place the creature where the room's object is
+# (the wheel, the bed). PROPS: clip -> (donor file, texture names of the donor sprites to carry,
+# how the prop moves): "hand" follows his free hand (molynx_design.HAND) the way it follows the
+# donor's hand; "fixed" keeps the donor's own positions. ANCHORS: clip -> (donor file, how he is
+# placed): "centre" puts his torso's centre on the donor creature's; "bed" centres his whole body
+# over the bed sprite and lays his lowest point on the bed's top, BED_SINK of the bed's height in.
+PROPS = {"eating": ("Knight-Eat", ("chicken",), "hand"),
+         "sleeping": ("BileDemon-bed(sleeping)", ("Creature Bed_Bile Demon1",), "fixed")}
+ANCHORS = {"torture": ("Bil-Torture", "centre"), "sleeping": ("BileDemon-bed(sleeping)", "bed")}
+BED_SINK = 0.85          # his lowest point, as a fraction of the way from the bed's top to the floor: the Bile Demon sits in its bed with its bottom at the floor (z -0.03 of -0.24)
+HAND_GRAB_DISTANCE = 0.06   # the donor's chicken counts as held once this close to the donor's hand
+# MIRRORED_ARM: clips where both his arms are spread the same way (strapped to the torture wheel).
+# His two arms are not built alike (the mace arm is bent up to hold the mace), so the mace arm is
+# folded away (its vertices onto the middle of the ring where it meets his shoulder) and the file
+# carries a mirror copy of his free arm instead: extra Molynx_Body sprites, mirrored across his
+# middle in his torso's own frame each frame. ARM_WEIGHT: a vertex is the arm's when its arm and
+# forearm skin weights add up to more than this.
+MIRRORED_ARM = {"torture"}
+ARM_WEIGHT = 0.5
+FOLD_INWARD = 0.6
+
+
+@dataclass
+class Prop:
+    materials: list          # donor Materials, or texture names of his own materials
+    sprites: list            # donor Sprites (uv, normals, triangles)
+    frames: list             # frames[f][k] = (n, 3) KMF positions of prop sprite k
+
+
+def _donor_anim(name: str, meshes_dir: Path = MESHES_DIR):
+    model = parse_kmf(game_mesh_path(name, meshes_dir).read_bytes())
+    frames = [evaluate_anim_frame(model.anim, f) for f in range(model.anim.frame_count)]
+    return model, frames
+
+
+def _carried(model, names) -> list[int]:
+    want = {n.lower() for n in names}
+    return [i for i, s in enumerate(model.anim.sprites)
+            if any(t.lower() in want for t in model.materials[s.material].textures)]
+
+
+def _part_vertices(plan: "MolynxPlan", part: int, ids) -> list[tuple[int, int]]:
+    """(sprite, index) in plan.sprites of each vertex `ids` of part `part`."""
+    where = {}
+    for s, lay in enumerate(plan.sprites):
+        if lay.part == part:
+            for i, v in enumerate(lay.vertices):
+                where.setdefault(int(v), (s, i))
+    return [where[int(v)] for v in ids if int(v) in where]
+
+
+def _gather(frame: list, at: list) -> np.ndarray:
+    return np.array([frame[s][i] for s, i in at], float)
+
+
+def _kabsch(a, b):
+    ca, cb = a.mean(0), b.mean(0)
+    U, _S, Vt = np.linalg.svd((a - ca).T @ (b - cb))
+    d = np.sign(np.linalg.det(Vt.T @ U.T))
+    return Vt.T @ np.diag([1, 1, d]) @ U.T, ca, cb
+
+
+def _torso_ids(rest: np.ndarray, unit_dir: Path = BEHEMOTH_DIR) -> np.ndarray:
+    """His torso's vertices: labelled torso, not the mace and not skinned mostly to an arm (the
+    shoulder edges move with the arms; the mace arm is folded away on the torture wheel)."""
+    from scripts.behemoth_rig import CLUB_VERTICES, behemoth_labels
+    lab = behemoth_labels(rest)
+    ids = np.nonzero(lab == 0)[0]
+    arms = np.r_[_arm_ids(unit_dir, "N"), _arm_ids(unit_dir, "P")]
+    return np.setdiff1d(ids[ids >= CLUB_VERTICES], arms)
+
+
+def _donor_index(i: int, n: int, nd: int) -> int:
+    return int(round(i * (nd - 1) / max(n - 1, 1)))
+
+
+def _anchor(plan: "MolynxPlan", clip: "Clip", donor: str, how: str, meshes_dir: Path) -> "Clip":
+    model, dframes = _donor_anim(donor, meshes_dir)
+    bed = set(_carried(model, ("Creature Bed_Bile Demon1",)))
+    rest = np.asarray(plan.source[0]["stand"]["frames"][0][0], float)
+    at = _part_vertices(plan, 0, _torso_ids(rest))
+    out = []
+    for i, frame in enumerate(clip.frames):
+        dfr = dframes[_donor_index(i, len(clip.frames), len(dframes))]
+        if how == "centre":
+            d = np.concatenate([p for k, p in enumerate(dfr) if k not in bed])
+            shift = d.mean(0) - _gather(frame, at).mean(0)
+        else:   # bed: z is down in KMF space (the lowest point has the largest z)
+            b = np.concatenate([dfr[k] for k in bed])
+            mine = np.concatenate(frame)
+            top, floor = b[:, 2].min(), b[:, 2].max()
+            centre = (b[:, :2].min(0) + b[:, :2].max(0)) / 2
+            lay = top + BED_SINK * (floor - top)
+            shift = np.array([centre[0] - (mine[:, 0].min() + mine[:, 0].max()) / 2,
+                              centre[1] - (mine[:, 1].min() + mine[:, 1].max()) / 2,
+                              lay - mine[:, 2].max()])
+        out.append([p + shift for p in frame])
+    if clip.wrap:   # a loop still ends on a copy of its first frame
+        out[-1] = [p.copy() for p in out[0]]
+    return Clip(out, clip.wrap)
+
+
+def _prop(plan: "MolynxPlan", clip: "Clip", donor: str, names, how: str, meshes_dir: Path) -> Prop:
+    from scripts.molynx_design import HAND
+    model, dframes = _donor_anim(donor, meshes_dir)
+    keep = _carried(model, names)
+    if not keep:
+        raise ValueError(f"{donor} has no sprite with textures {names}")
+    n, nd = len(clip.frames), len(dframes)
+    props = [[dframes[_donor_index(i, n, nd)][k] for k in keep] for i in range(n)]
+    if how == "hand":
+        body = [k for k in range(len(model.anim.sprites)) if k not in keep]
+        cen = [np.concatenate(p).mean(0) for p in props]
+        # the donor's holding hand: its body vertices nearest the chicken where the chicken is highest
+        top = int(np.argmin([c[2] for c in cen]))
+        dtop = dframes[_donor_index(top, n, nd)]
+        allb = np.concatenate([dtop[k] for k in body])
+        which = np.argsort(np.linalg.norm(allb - cen[top], axis=1))[:10]
+        starts = np.cumsum([0] + [len(dtop[k]) for k in body])
+        dat = [(body[int(np.searchsorted(starts, w, side="right") - 1)],
+                int(w - starts[int(np.searchsorted(starts, w, side="right") - 1)])) for w in which]
+        mat = _part_vertices(plan, 0, HAND)
+        held = [np.linalg.norm(cen[i] - _gather(dframes[_donor_index(i, n, nd)], dat).mean(0)) < HAND_GRAB_DISTANCE
+                for i in range(n)]
+        grab = held.index(True) if True in held else n
+        ref_d = _gather(dframes[_donor_index(grab if grab < n else top, n, nd)], dat)
+        ref_m = _gather(clip.frames[grab if grab < n else top], mat)
+        out = []
+        for i in range(n):
+            dh = _gather(dframes[_donor_index(i, n, nd)], dat)
+            mh = _gather(clip.frames[i], mat)
+            if i >= grab:
+                Rd, cd, _ = _kabsch(ref_d, dh)
+                Rm, cm, _ = _kabsch(ref_m, mh)
+                # the prop in the donor hand's frame, carried by his hand
+                out.append([(p - dh.mean(0)) @ Rd @ Rm.T + mh.mean(0) for p in props[i]])
+            else:   # on the floor: moved under the place where his hand will take it
+                shift = ref_m.mean(0) - ref_d.mean(0)
+                shift[2] = 0.0
+                out.append([p + shift for p in props[i]])
+        props = out
+    return Prop([model.materials[model.anim.sprites[k].material] for k in keep],
+                [model.anim.sprites[k] for k in keep], props)
+
+
+def _arm_ids(unit_dir: Path, side: str) -> np.ndarray:
+    """The vertices of one arm (N the mace arm, P the free arm): skinned mostly to it."""
+    from scripts.behemoth_rig import CLUB_VERTICES, behemoth_rig
+    rig = behemoth_rig(Path(unit_dir))
+    w = np.asarray(rig.weights)
+    b = list(rig.bones)
+    ids = np.nonzero(w[:, b.index("arm" + side)] + w[:, b.index("fore" + side)] > ARM_WEIGHT)[0]
+    return ids[ids >= CLUB_VERTICES]
+
+
+def _mirror_arm(plan: "MolynxPlan", clip: "Clip", unit_dir: Path) -> tuple["Clip", Prop]:
+    """(the clip with his mace arm folded away, the mirror copy of his free arm), see MIRRORED_ARM."""
+    rest_c = np.asarray(plan.source[0]["stand"]["frames"][0][0], float)
+    torso = _part_vertices(plan, 0, _torso_ids(rest_c))
+    tris = np.asarray(plan.parts[0]["indices"], int).reshape(-1, 3)
+    free, mace = set(_arm_ids(unit_dir, "P").tolist()), set(_arm_ids(unit_dir, "N").tolist())
+    arm_tris = [t for t in tris if all(int(v) in free for v in t)]
+    used = sorted({int(v) for t in arm_tris for v in t})
+    layouts = _split(0, [(a, c, b) for a, b, c in arm_tris], BODY_TEXTURE)   # a mirror turns the winding
+    def ring(arm):   # the arm's vertices on its edge with his shoulder
+        return sorted({int(v) for t in tris if any(int(v) in arm for v in t)
+                       and not all(int(v) in arm for v in t) for v in t if int(v) in arm})
+    fold = _part_vertices(plan, 0, sorted(mace))
+    at_ring, at_used = _part_vertices(plan, 0, ring(mace)), _part_vertices(plan, 0, used)
+    if len(at_used) != len(used):
+        raise ValueError("a vertex of his free arm's triangles is in no sprite")
+    rest_k = plan.poses["PoseFrame"]
+    rest_t = _gather(rest_k, torso)
+    frames, props = [], []
+    for frame in clip.frames:
+        R, ca, cb = _kabsch(rest_t, _gather(frame, torso))     # rest -> this frame
+        # the mirror is upright (z is down in KMF space): through his torso's centre, across the
+        # way his torso faces, so the copy is level with the free arm as seen from the front
+        normal = R @ np.array([1.0, 0.0, 0.0])
+        normal[2] = 0.0
+        normal /= np.linalg.norm(normal)
+        arm = _gather(frame, at_used)
+        mirrored = dict(zip(used, arm - 2 * np.outer((arm - cb) @ normal, normal)))
+        props.append([np.array([mirrored[int(v)] for v in lay.vertices]) for lay in layouts])
+        # folded inside his shoulder, part of the way from the edge's middle to his torso's centre,
+        # so the triangles that join the edge to it stay inside him
+        centre = _gather(frame, at_ring).mean(0)
+        centre = centre + FOLD_INWARD * (_gather(frame, torso).mean(0) - centre)
+        out = [p.copy() for p in frame]
+        for s_, i in fold:
+            out[s_][i] = centre
+        frames.append(out)
+    uv = np.asarray(plan.parts[0]["uv"], float)
+    acc = {}
+    for lay, p in zip(layouts, props[0]):
+        t = np.asarray(lay.triangles)
+        face = -np.cross(p[t[:, 1]] - p[t[:, 0]], p[t[:, 2]] - p[t[:, 0]])
+        for k in range(3):
+            for row, v in zip(t[:, k], face):
+                key = int(lay.vertices[row])
+                acc[key] = acc.get(key, 0) + v
+    sprites = []
+    for lay in layouts:
+        q = np.clip(np.rint(uv[lay.vertices] * 32768), 0, 65535).astype(int)
+        verts = []
+        for i, v in enumerate(lay.vertices):
+            n = np.asarray(acc.get(int(v), np.zeros(3)), float)
+            n = n / np.linalg.norm(n) if np.linalg.norm(n) > 1e-12 else np.array([0.0, 0.0, -1.0])
+            verts.append(Vertex((int(q[i, 0]), int(q[i, 1])), tuple(float(np.float32(c)) for c in n)))
+        mm = _mm_factor(_gather(rest_k, _part_vertices(plan, 0, lay.vertices)), uv[lay.vertices],
+                        np.asarray(lay.triangles))
+        sprites.append(Sprite(0, [list(lay.triangles) for _ in range(LODS)], verts, mm))
+    return Clip(frames, clip.wrap), Prop([BODY_TEXTURE] * len(sprites), sprites, props)
+
+
 def plan_molynx(height_ratio: float = DESIGN_HEIGHT_RATIO, source=None, *, unit_dir: Path = BEHEMOTH_DIR,
                 meshes_dir: Path = MESHES_DIR, editor_dir: Path = EDITOR_DIR,
                 game_dir: Path = GAME_DIR) -> MolynxPlan:
@@ -487,8 +708,14 @@ def plan_molynx(height_ratio: float = DESIGN_HEIGHT_RATIO, source=None, *, unit_
         frames = _resample(clip["frames"], clip["fps"], clip["wrap"])
         plan.clips[name] = Clip([plan.to_sprites(plan.to_kmf(f)) for f in frames], clip["wrap"])
         plan.info[name] = {"frames": len(frames), "fps": GAME_FPS, "wrap": clip["wrap"]}
+    for name, (donor, how) in ANCHORS.items():
+        plan.clips[name] = _anchor(plan, plan.clips[name], donor, how, Path(meshes_dir))
+    for name, (donor, names, how) in PROPS.items():
+        plan.props[name] = _prop(plan, plan.clips[name], donor, names, how, Path(meshes_dir))
     for stem, (name, index) in POSE_SOURCES.items():
         plan.poses[stem] = plan.to_sprites(plan.to_kmf(data[name]["frames"][index]))
+    for name in MIRRORED_ARM:
+        plan.clips[name], plan.props[name] = _mirror_arm(plan, plan.clips[name], Path(unit_dir))
 
     rest = plan.poses["PoseFrame"]
     plan.controls = _remap_controls(plan, idle, rest)
@@ -603,8 +830,30 @@ def _file_wraps(plan: MolynxPlan, wraps: dict) -> dict:
 def clip_kmf(plan: MolynxPlan, stem: str, reduce: bool = True, wrap: bool | None = None) -> Kmf:
     """The animation file `stem` (a clip, or a variant with `wrap`); `wrap` None = the clip's own."""
     clip = plan.clips[stem] if wrap is None else file_clip(plan, stem, wrap)
+    base, _forced = clip_of(stem)
+    prop = plan.props.get(base)
+    materials = list(plan.materials)
+    if prop is not None:
+        if len(prop.frames) != len(clip.frames):
+            raise ValueError(f"{stem}: its prop has {len(prop.frames)} frames, the clip {len(clip.frames)}")
+        pframes = list(prop.frames)
+        if clip.wrap:   # a loop ends on a copy of its first frame, the prop's too
+            pframes[-1] = [p.copy() for p in pframes[0]]
+        clip = Clip([list(f) + list(p) for f, p in zip(clip.frames, pframes)], clip.wrap)
     rows = _rows(clip.frames)
-    sprites = _sprites(plan, clip.frames[0], rows, mesh=False)
+    sprites = _sprites(plan, clip.frames[0][:len(plan.sprites)], rows, mesh=False)
+    if prop is not None:
+        start = sum(len(p) for p in clip.frames[0][:len(plan.sprites)])
+        for k, sp in enumerate(prop.sprites):
+            verts = [Vertex(v.uv, v.normal, itab_index=int(rows[start + i])) for i, v in enumerate(sp.vertices)]
+            mat = prop.materials[k]
+            if isinstance(mat, str):     # one of his own textures: his own material
+                index = next(i for i, m in enumerate(plan.materials) if m.textures[0] == mat)
+            else:
+                index = len(materials)
+                materials.append(mat)
+            sprites.append(Sprite(index, [list(t) for t in sp.triangles], verts, sp.mm_factor))
+            start += len(sp.vertices)
     controls = b"".join(np.array([(v << 16) | s, ident], "<u4").tobytes()
                         for s, v, ident in plan.controls)
     anim = None
@@ -616,7 +865,7 @@ def clip_kmf(plan: MolynxPlan, stem: str, reduce: bool = True, wrap: bool | None
     else:
         if reduce:
             anim = encode_anim(PREFIX + stem, sprites, clip.frames, clip.wrap, controls, reduce=True)
-    return Kmf(VERSION, "anim", list(plan.materials), anim=anim)
+    return Kmf(VERSION, "anim", materials, anim=anim)
 
 
 def pose_kmf(plan: MolynxPlan, stem: str) -> Kmf:

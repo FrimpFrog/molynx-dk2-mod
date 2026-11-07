@@ -121,17 +121,18 @@ CLIPS = (
     "victory_celebration", "getting_hit", "being_slapped", "staggering", "waking_up", "knockback",
     "sleeping", "training", "fighting_another_creature", "patrolling", "guarding", "manufacturing",
     "interacting_with_objects", "being_picked_up",
+    "falling", "torture", "drinking",   # the in-game review round (molynx_design.REVIEW_CLIPS)
 )
 POSE_STEMS = ("PoseFrame", "DiePose", "DraggedPose", "StunnedPose", "ElecPose")
 STATIC_POSES = {"staggering": "StunnedPose"}  # a type-5 slot assigned this clip takes this pose
 # Whether each clip loops in the clip library itself (molynx_assets checks it against the source).
 SOURCE_WRAP: dict[str, bool] = {clip: clip not in (
     "die", "victory_celebration", "getting_hit", "being_slapped", "waking_up", "knockback",
-    "sleeping") for clip in CLIPS}
+    "falling", "torture") for clip in CLIPS}
 # Non-looping source clips that end far from where they began (last-to-first gap, in median frame
 # steps, as molynx_assets.loop_gap measures it): never closed into a loop (see "File plan").
 MAX_CLOSE_GAP = 10
-ONE_WAY_GAPS: dict[str, float] = {"sleeping": 37.089, "waking_up": 25.251}
+ONE_WAY_GAPS: dict[str, float] = {"waking_up": 25.251}
 ONCE_SUFFIX, LOOP_SUFFIX = "_once", "_loop"   # variant files: the clip opened / closed
 GAME_FPS = 30
 
@@ -141,8 +142,8 @@ SLOT_CLIPS: dict[str, str] = {
     "melee1": "attack", "melee2": "attack", "special": "attack",
     "die": "die", "diePose": "DiePose", "happy": "happy", "angry": "angry",
     "swing": "being_picked_up", "sleep": "sleeping",
-    "eat": "eating", "eatCorpse": "eating", "drink": "eating",
-    "building": "manufacturing", "pray": "praying", "fallback": "knockback",
+    "eat": "eating", "eatCorpse": "eating", "drink": "drinking",
+    "building": "manufacturing", "pray": "praying", "fallback": "falling",
     "getUp": "waking_up", "dance": "celebrating",
     "drunk": "staggering", "drunk2": "staggering", "stunnedPose": "StunnedPose",
     "dejectedPose": "staggering",
@@ -150,14 +151,13 @@ SLOT_CLIPS: dict[str, str] = {
     "poseFrame": "PoseFrame", "walk2": "patrolling",
     "entrance": "walk", "walkback": "walk",
     "research": "interacting_with_objects", "loot": "interacting_with_objects",
-    "magic": "getting_hit", "torture": "getting_hit", "elec": "ElecPose",
+    "magic": "getting_hit", "torture": "torture", "elec": "ElecPose",
     "electrocute": "getting_hit",
 }
 
 # Slots that use a clip only as the nearest available, with why (for the in-game review).
 _NEAREST_ONLY = {
     "magic": "No spell-casting clip in the library; a hit reaction is the nearest.",
-    "torture": "No torture clip in the library; flinching (getting_hit) is the nearest.",
     "elec": ("No electrocution pose in the library; the peak frame of flinching (getting_hit) is "
              "the nearest."),
     "electrocute": "No electrocution clip in the library; flinching (getting_hit) is the nearest.",
@@ -167,9 +167,9 @@ _NEAREST_ONLY = {
     "entrance": "No entrance clip in the library; the walk is the nearest.",
     "walkback": "No walking-backwards clip in the library; the forward walk is reused.",
     "melee2": "No second melee clip in the library; the ordinary attack is reused.",
-    "drink": "No drinking clip in the library; eating is the nearest.",
+    "drink": "Drinking is the eating motion without the chicken.",
     "eatCorpse": "No corpse-eating clip in the library; ordinary eating is reused.",
-    "stunnedPose": "No stunned pose in the library; a middle frame of staggering is the nearest.",
+    "stunnedPose": "Lying where falling ends (and waking_up begins).",
     "dejectedPose": "No dejected pose in the library; staggering is the nearest.",
     "drunkIdle": "No drunken idle in the library; fidgeting is the nearest.",
 }

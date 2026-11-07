@@ -24,8 +24,9 @@ ANIM_INFO = {stem: {"frames": frames, "fps": 30, "wrap": wrap} for stem, frames,
     ("praying", 121, True), ("happy", 59, False), ("angry", 23, False), ("celebrating", 97, False),
     ("victory_celebration", 246, False), ("getting_hit", 17, False),
     ("being_slapped", 35, False), ("staggering", 96, True),
-    ("waking_up", 46, False), ("knockback", 61, False), ("sleeping", 136, False),
+    ("waking_up", 46, False), ("knockback", 61, False), ("sleeping", 55, True),
     ("training", 121, True), ("fighting_another_creature", 133, True), ("patrolling", 42, True),
-    ("guarding", 24, True), ("manufacturing", 34, True), ("interacting_with_objects", 18, True),
+    ("guarding", 24, True), ("manufacturing", 69, True), ("interacting_with_objects", 18, True),
     ("being_picked_up", 61, True),
+    ("falling", 15, False), ("torture", 100, False), ("drinking", 83, False),   # review round
 ]}

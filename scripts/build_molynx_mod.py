@@ -318,9 +318,18 @@ def _asset_files(assets: _Assets, stems: set[str]) -> dict[str, bytes]:
         data, model = assets.model(stem)
         files[f"{MESHES_PATH}/{PREFIX}{stem}.kmf"] = data
         textures |= {t for material in model.materials for t in material.textures}
+    game = _game_textures()
     for texture in sorted(textures):
+        if texture.lower() in game:     # a prop's own game texture (the chicken, the bed): the game has it
+            continue
         files[f"{TEXTURES_PATH}/{texture}.png"] = assets.texture(texture)
     return files
+
+
+def _game_textures() -> set[str]:
+    """Lower-case names of the game's own textures (EngineTextures cache, without the MMn suffix)."""
+    from scripts.molynx_assets import texture_cache
+    return {n[:-3].lower() for n in texture_cache().names if n[-3:-1].upper() == "MM"}
 
 
 def build_mod(stage: int, out_dir: Path, name: str = "Molynx", maps: list[str] | None = None,

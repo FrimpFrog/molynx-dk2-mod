@@ -50,13 +50,13 @@ FLAT = {"Molynx Test": (False, "Molynx Test"), "Molynx Test Portal": (True, "Mol
 SHIPPED_MAPS = sorted(["Siege", *FLAT])
 TEXT_IDS = {"name": 3001, "tooltip": 3002, "general": 3003, "strength": 3004, "weakness": 3005}
 # The files a stage-2 folder delivers (literal; the record's file plan for the test maps' Bile Demons):
-# 18 clips (staggering only for Siege's type NONE dejectedPose slot), the variant walk_once, the 5
+# 20 clips (staggering only for Siege's type NONE dejectedPose slot), the variant walk_once, the 5
 # poses (stunnedPose and elec take static poses), and the 4 textures.
 STAGE2_MESHES = sorted(f"Molynx-{stem}.kmf" for stem in (
     "walk", "walk_once", "DraggedPose", "getting_hit", "StunnedPose", "ElecPose", "attack", "die",
     "DiePose", "happy", "angry", "staggering", "being_picked_up", "sleeping", "eating", "stand",
-    "being_slapped", "manufacturing", "praying", "knockback", "waking_up", "celebrating",
-    "fidgeting", "PoseFrame"))
+    "being_slapped", "manufacturing", "praying", "falling", "waking_up", "celebrating",
+    "fidgeting", "PoseFrame", "torture", "drinking"))
 STAGE2_TEXTURES = ["Molynx_Body.png", "Molynx_Head.png", "Molynx_Mace.png", "Molynx_Neck.png"]
 UNUSED_CLIPS = ["running", "victory_celebration", "training", "fighting_another_creature",
                 "patrolling", "guarding", "interacting_with_objects"]
@@ -68,11 +68,11 @@ TAIL_AT = {"flags": (0, 4), "frames": (4, 4), "fps": (8, 4), "startDist": (12, 2
 # poses StunnedPose and ElecPose); other slots: stand.
 SLOT_TABLE = """walk->walk, run->running, draggedPose->DraggedPose, recoilHff->getting_hit,
 recoilHfb->being_slapped, melee1/melee2/special->attack, die->die, diePose->DiePose, happy->happy,
-angry->angry, swing->being_picked_up, sleep->sleeping, eat/eatCorpse/drink->eating,
-building->manufacturing, pray->praying, fallback->knockback, getUp->waking_up, dance->celebrating,
+angry->angry, swing->being_picked_up, sleep->sleeping, eat/eatCorpse->eating, drink->drinking,
+building->manufacturing, pray->praying, fallback->falling, getUp->waking_up, dance->celebrating,
 drunk/drunk2/stunnedPose/dejectedPose->staggering, idle1->stand, idle2/drunkIdle->fidgeting,
 poseFrame->PoseFrame, walk2->patrolling, entrance/walkback->walk,
-research/loot->interacting_with_objects, magic/torture/elec/electrocute->getting_hit"""
+research/loot->interacting_with_objects, magic/elec/electrocute->getting_hit, torture->torture"""
 VARIANTS = {"entrance": "walk_once", "stunnedPose": "StunnedPose", "elec": "ElecPose"}
 
 
@@ -933,7 +933,7 @@ def test_stage2_folder_holds_exactly_the_files_the_record_names(stage2_full):
                        *(f"Data/Meshes/{f}" for f in STAGE2_MESHES),
                        *(f"Data/EngineTextures/{f}" for f in STAGE2_TEXTURES)])
     assert found == expected
-    assert len(STAGE2_MESHES) == 24
+    assert len(STAGE2_MESHES) == 26
     for clip in UNUSED_CLIPS:
         assert not (meshes(stage2_full) / f"Molynx-{clip}.kmf").exists(), clip
 
@@ -968,11 +968,11 @@ def test_stage2_files_are_byte_copies_of_the_export(stage2_full, assets_dir):
 @needs_data
 @needs_assets
 def test_stage2_record_frames_come_from_the_files(stage2_dir):
-    """A few literal values: walk loops (47 frames -> 46), sleeping does not (136); stunnedPose and
+    """A few literal values: walk loops (47 frames -> 46), so does sleeping (55 -> 54); stunnedPose and
     elec name static poses and keep the Bile Demon's mesh tails (type 5, scale 4096)."""
     molynx = record_47(stage2_dir, "Siege")
     assert get_tail(molynx, "animWalkResource", "frames") == 46
-    assert get_tail(molynx, "animSleepResource", "frames") == 136
+    assert get_tail(molynx, "animSleepResource", "frames") == 54
     assert get_tail(molynx, "animSleepResource", "fps") == 30
     bile = source_bile("Siege")
     for slot in ("animElecResource", "animStunnedPoseResource"):
@@ -1129,14 +1129,14 @@ def test_stage2_audit_of_the_handed_over_folder_passes_every_rule(stage2_full):
         (line,) = pass_lines(report, "b", name)
         assert "stage 2" in line and "24 rewritten" in line
     (g,) = [line for line in report.lines if line.startswith("PASS (g) folder:")]
-    assert "24 meshes" in g and "4 textures" in g
+    assert "26 meshes" in g and "4 textures" in g
 
 
 @needs_data
 @needs_assets
 def test_stage2_audit_passes_with_every_renamed_animation_present(mod2):
     names = renamed_slots(mod2, "Siege")
-    assert "Molynx-walk" in names and len(names) == 24
+    assert "Molynx-walk" in names and len(names) == 26
     report = audit(mod2)
     assert report.ok, "\n".join(report.lines)
     assert any("stage 2" in line for line in report.lines if line.startswith("PASS (b)"))
@@ -1147,12 +1147,11 @@ def test_stage2_audit_passes_with_every_renamed_animation_present(mod2):
 
 @needs_data
 @needs_assets
-def test_stage2_audit_lists_the_sleeping_wrap_exception_by_name(mod2):
+def test_stage2_audit_lists_no_wrap_exception(mod2):
+    """Since the review round sleeping loops like the Bile Demon's bed file: no slot is excepted."""
     (line,) = pass_lines(audit(mod2), "f", "Siege")
-    assert "1 recorded exception(s)" in line
-    assert "animSleepResource Molynx-sleeping does not loop" in line
-    assert "BileDemon-bed(sleeping)" in line
-    assert set(audit_module.WRAP_EXCEPTIONS) == {"animSleepResource"}
+    assert "exception" not in line
+    assert audit_module.WRAP_EXCEPTIONS == {}
 
 
 @needs_data
@@ -1403,15 +1402,14 @@ def test_stage2_a_flipped_loop_flag_fails_rule_f_and_the_frame_count(mod2):
 
 @needs_data
 @needs_assets
-def test_stage2_a_looped_sleeping_file_is_no_exception_but_breaks_its_frame_count(mod2):
-    """The exception covers only a non-looping sleeping file; looped, it matches the Bile Demon's
-    flag (no exception listed) and the record's 136 is then one too many (rule b)."""
-    rewrite_kmf(meshes(mod2) / "Molynx-sleeping.kmf", lambda m: setattr(m.anim, "wrap", True))
+def test_stage2_an_unlooped_sleeping_file_fails_its_loop_flag(mod2):
+    """No exception covers sleeping any more: a sleeping file that does not loop fails rule (f),
+    since the Bile Demon's bed(sleeping) file loops."""
+    rewrite_kmf(meshes(mod2) / "Molynx-sleeping.kmf", lambda m: setattr(m.anim, "wrap", False))
     report = audit(mod2)
-    (b,) = fail_lines(report)
-    assert b.startswith("FAIL (b) Siege:") and "animSleepResource frames" in b and "expected 135" in b
-    (f,) = pass_lines(report, "f", "Siege")
-    assert "exception" not in f
+    f = [line for line in fail_lines(report) if line.startswith("FAIL (f) Siege:")]
+    assert len(f) == 1
+    assert "animSleepResource: Molynx-sleeping does not loop, but the Bile Demon's" in f[0]
 
 
 @needs_data

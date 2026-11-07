@@ -37,8 +37,8 @@ REQUIRED = {
     "walk": True, "walk_once": False, "getting_hit": False,
     "stand": False, "fidgeting": False, "eating": False, "happy": False, "attack": False,
     "angry": False, "celebrating": False, "die": False, "being_slapped": False,
-    "knockback": False, "waking_up": False, "sleeping": False, "being_picked_up": True,
-    "manufacturing": True, "praying": True,
+    "falling": False, "waking_up": False, "sleeping": True, "being_picked_up": True,
+    "manufacturing": True, "praying": True, "drinking": False, "torture": False,
 }
 RATIO = 1.38  # the redesign: as tall as the Horned Reaper (was 1.15 x the Bile Demon)
 GAME_FPS = 30
@@ -157,12 +157,12 @@ def test_clips_are_animations_that_pass_the_format_invariants(export):
 # 34,076 (2); victory_celebration (shipped by no slot) stays at one step.
 GEOM = {
     "stand": 1833, "walk": 8044, "walk_once": 8044, "attack": 11407, "die": 5547,
-    "fidgeting": 18949, "running": 14901, "eating": 19675, "praying": 16564, "happy": 21917,
+    "fidgeting": 18949, "running": 14901, "eating": 21117, "praying": 16564, "happy": 21917,
     "angry": 9844, "celebrating": 34442, "victory_celebration": 74003, "getting_hit": 6219,
     "being_slapped": 10092, "staggering": 33973, "waking_up": 16024, "knockback": 25785,
-    "sleeping": 21379, "training": 31942, "fighting_another_creature": 34076, "patrolling": 16934,
-    "guarding": 1700, "manufacturing": 13444, "interacting_with_objects": 5977,
-    "being_picked_up": 6464,
+    "sleeping": 6400, "training": 31942, "fighting_another_creature": 34076, "patrolling": 16934,
+    "guarding": 1700, "manufacturing": 16395, "interacting_with_objects": 5977,
+    "being_picked_up": 6464, "falling": 7827, "torture": 24247, "drinking": 19947,
 }
 GAME_MAX_GEOM = 34_816
 # The reduction tolerance (quantisation steps) of the files reduced wider than one step.
@@ -241,8 +241,8 @@ def test_plan_frames_are_the_source_frames_scaled_mirrored_and_placed(export):
     data, _ = plan.source
     for stem in CLIPS:
         clip, src = plan.clips[stem], data[stem]
-        if src["fps"] != GAME_FPS:
-            continue  # resampled: checked by test_clips_are_resampled_to_the_game_rate
+        if src["fps"] != GAME_FPS or stem in assets.ANCHORS:
+            continue  # resampled / placed: checked by their own tests
         for f, frame in enumerate(src["frames"]):
             if src["wrap"] and f == len(src["frames"]) - 1 and assets.loop_closes(src["frames"]):
                 frame = src["frames"][0]  # a (nearly) closed loop's last frame becomes frame 0
@@ -252,7 +252,7 @@ def test_plan_frames_are_the_source_frames_scaled_mirrored_and_placed(export):
     stand, die, picked = data["stand"]["frames"], data["die"]["frames"], data["being_picked_up"]
     for stem, frame in (("PoseFrame", stand[0]), ("DiePose", die[-1]),
                         ("DraggedPose", picked["frames"][0]),
-                        ("StunnedPose", data["staggering"]["frames"][48]),
+                        ("StunnedPose", data["falling"]["frames"][-1]),
                         ("ElecPose", data["getting_hit"]["frames"][5])):
         for got, w in zip(plan.poses[stem], plan.to_sprites(plan.to_kmf(frame))):
             np.testing.assert_allclose(got, w, atol=1e-9)
@@ -396,19 +396,36 @@ def test_sprites_fit_the_byte_triangle_indices_and_carry_16_lods(export):
             assert len(sprite.vertices) <= 255, stem
             assert len(sprite.triangles[0]) <= 255, stem  # the game's largest sprite has 255
             assert len(sprite.triangles) == 16
-            assert all(lod == sprite.triangles[0] for lod in sprite.triangles), stem
+            if not _is_prop(model, sprite):  # a carried game object keeps its donor's own LODs
+                assert all(lod == sprite.triangles[0] for lod in sprite.triangles), stem
             assert max(max(t) for t in sprite.triangles[0]) < len(sprite.vertices)
             assert sprite.mm_factor > 0
 
 
+def _is_prop(model, sprite):
+    """A sprite of a carried game object (the chicken, the bed): its texture is the game's."""
+    return model.materials[sprite.material].textures[0] in PROP_TEXTURES
+
+
+PROP_TEXTURES = {"chicken", "Creature Bed_Bile Demon1"}
+PROP_FILES = {"eating": {"chicken"}, "sleeping": {"Creature Bed_Bile Demon1"},
+              "torture": {"Molynx_Body"}}   # torture: the mirror copy of his free arm
+
+
 @needs_data
 def test_every_file_has_the_same_sprites_and_controls(export):
+    """Every file starts with the same Molynx sprites; only the eat and bed files carry more (the
+    game's chicken and bed sprites, after his own), as the game's own eat and bed files do."""
     models = export["models"]
     ref = models["stand"]
+    mine = [(s.material, s.triangles[0], [v.uv for v in s.vertices]) for s in ref.anim.sprites]
     for stem, model in models.items():
-        assert [(s.material, s.triangles[0], [v.uv for v in s.vertices]) for s in _sprites(model)
-                ] == [(s.material, s.triangles[0], [v.uv for v in s.vertices])
-                      for s in ref.anim.sprites], stem
+        sprites = _sprites(model)
+        assert [(s.material, s.triangles[0], [v.uv for v in s.vertices])
+                for s in sprites[:len(mine)]] == mine, stem
+        extra = {model.materials[s.material].textures[0] for s in sprites[len(mine):]}
+        base = clip_of(stem)[0] if model.kind == "anim" else stem
+        assert extra == PROP_FILES.get(base, set()), stem
 
 
 # ---------------------------------------------------------------- control points
@@ -468,8 +485,10 @@ def test_materials_name_the_texture_files_and_copy_a_game_material(export, bile)
     stems = {p.stem for p in export["result"]["textures"].values()}
     for stem, model in export["models"].items():
         used = {model.materials[s.material].textures[0] for s in _sprites(model)}
-        assert used == stems, stem
+        assert used - PROP_TEXTURES == stems, stem
         for m in model.materials:
+            if m.textures[0] in PROP_TEXTURES:
+                continue  # the donor file's own material
             assert len(m.textures) == 1
             assert m.name == m.name.split(m.textures[0])[0] + m.textures[0]  # <part><texture>
             assert (m.flags, m.brightness, m.shininess, m.environment_map) == (
@@ -553,6 +572,29 @@ FLIPPED = ["stand", "fidgeting", "eating", "happy", "attack", "angry", "celebrat
            "walk_once"]
 
 
+def _placed(plan, stem, f, want):
+    """`want` moved as a whole onto the plan's frame `f` for a clip the plan places on a room
+    object (ANCHORS: each frame moves by one shift, checked by
+    test_anchored_clips_move_each_frame_as_a_whole)."""
+    clip = clip_of(stem)[0]
+    if clip not in assets.ANCHORS:
+        return want
+    have = plan.clips[clip].frames[f]
+    keep = [np.ones(len(w), bool) for w in want]
+    for s, i in _folded(plan, clip):
+        keep[s][i] = False
+    shift = (np.concatenate([h[k] for h, k in zip(have, keep)]).mean(0)
+             - np.concatenate([w[k] for w, k in zip(want, keep)]).mean(0))
+    return [np.where(k[:, None], w + shift, h) for w, h, k in zip(want, have, keep)]
+
+
+def _folded(plan, clip):
+    """(sprite, index) of the mace arm's vertices, folded away in the MIRRORED_ARM clips."""
+    if clip not in assets.MIRRORED_ARM:
+        return []
+    return assets._part_vertices(plan, 0, assets._arm_ids(BEHEMOTH_DIR, "N"))
+
+
 def _axes(p):
     """Character Y-up, right-handed -> KMF axes, written out on its own: mirror x (DK2 is
     left-handed), then (X, Y, Z) -> (X, Z, -Y) (KMF y forward, z down)."""
@@ -620,16 +662,19 @@ def test_resampled_clips_decode_to_a_plain_interpolation_of_the_source(export, b
         for f in check:
             want = kmf(_lerp_frame(frames, times[f], nxt))
             got = evaluate_anim_frame(anim, f)
+            want = _placed(export["plan"], stem, f, want)
             err = max(float(np.abs(g - w).max()) for g, w in zip(got, want))
             assert err <= bound, (stem, f, err, bound)
+        got0 = evaluate_anim_frame(anim, 0)
         first = max(float(np.abs(g - w).max())
-                    for g, w in zip(evaluate_anim_frame(anim, 0), kmf(frames[0])))
+                    for g, w in zip(got0, _placed(export["plan"], stem, 0, kmf(frames[0]))))
         assert first <= bound, stem
         if not anim.wrap:  # an opened loop still ends on its copy of frame 0 (times[-1] = 0)
             assert times[-1] == (0.0 if src["wrap"] else n - 1), stem
         if not wrap:
+            gotn = evaluate_anim_frame(anim, count - 1)
             last = max(float(np.abs(g - w).max())
-                       for g, w in zip(evaluate_anim_frame(anim, count - 1), kmf(frames[-1])))
+                       for g, w in zip(gotn, _placed(export["plan"], stem, count - 1, kmf(frames[-1]))))
             assert last <= bound, stem
 
 
@@ -707,7 +752,7 @@ def test_closed_loops_end_on_frame_0_with_one_more_frame(export):
 
 @needs_data
 @pytest.mark.parametrize("wraps", [{"walk_twice": True}, {"walk_once": True}, {"walk_loop": False},
-                                   {"PoseFrame": True}, {"walk": 1}, {"sleeping": True},
+                                   {"PoseFrame": True}, {"walk": 1}, {"waking_up": True},
                                    {"waking_up_loop": True}])
 def test_bad_wraps_are_refused_before_anything_is_written(export, tmp_path, wraps):
     with pytest.raises(ValueError):
@@ -746,7 +791,7 @@ def test_one_way_gaps_are_measured_on_the_source(export):
     data, _ = export["plan"].source
     gaps = {clip: _median_gap(data[clip]["frames"]) for clip in CLIPS if not data[clip]["wrap"]}
     far = {clip: gap for clip, gap in gaps.items() if gap > 10}
-    assert set(far) == set(ONE_WAY_GAPS) == {"sleeping", "waking_up"}
+    assert set(far) == set(ONE_WAY_GAPS) == {"waking_up"}
     for clip, gap in far.items():
         assert gap == pytest.approx(ONE_WAY_GAPS[clip], abs=0.01), clip
     assert gaps["getting_hit"] == pytest.approx(5.80, abs=0.01)  # could be closed (below 10)
@@ -763,15 +808,15 @@ def test_every_looping_file_closes_a_small_gap(export):
 
 
 @needs_data
-def test_sleeping_stays_one_way_and_is_reported(export, bile):
+def test_sleeping_is_a_closed_breathing_loop_in_the_bed(export, bile):
+    """Review round: sleeping is his lying breathing loop (no lying down: that is the bed's own
+    entry), closed like the Bile Demon's bed(sleeping) file, so no slot is held one-way."""
     model = export["models"]["sleeping"].anim
-    assert model.wrap is False
-    assert export["result"]["info"]["sleeping"] == {"frames": 136, "fps": 30, "wrap": False}
-    (exception,) = export["result"]["wrap_exceptions"]
-    assert exception == WrapException("sleeping", ("animSleepResource",), True,
-                                      ONE_WAY_GAPS["sleeping"])
-    assert assets.required_wraps(bile)["sleeping"] is False  # reported, not raised
-    assert assets.molynx_files(bile).wrap_exceptions == (exception,)
+    assert model.wrap is True
+    assert export["result"]["info"]["sleeping"] == {"frames": 55, "fps": 30, "wrap": True}
+    assert list(export["result"]["wrap_exceptions"]) == []
+    assert assets.required_wraps(bile)["sleeping"] is True
+    assert list(assets.molynx_files(bile).wrap_exceptions) == []
 
 
 # ---------------------------------------------------------------- static poses for mesh slots
@@ -782,10 +827,11 @@ def _mean_distance(frame, first):
 
 
 @needs_data
-def test_stunned_and_elec_poses_are_the_middle_of_staggering_and_the_peak_of_getting_hit(export):
+def test_stunned_pose_is_the_end_of_falling_and_elec_the_peak_of_getting_hit(export):
     data, _ = export["plan"].source
-    assert assets.POSE_SOURCES["StunnedPose"] == ("staggering", len(data["staggering"]["frames"]) // 2) \
-        == ("staggering", 48)
+    # review round: stunned holds the crouch the falling clip ends on (it then gets up), not a
+    # standing stagger (he stood up, waited, fell and got up again)
+    assert assets.POSE_SOURCES["StunnedPose"] == ("falling", -1)
     hit = data["getting_hit"]["frames"]
     peak = max(range(len(hit)), key=lambda f: _mean_distance(hit[f], hit[0]))
     assert assets.POSE_SOURCES["ElecPose"] == ("getting_hit", peak) == ("getting_hit", 5)
@@ -798,3 +844,106 @@ def test_every_pose_but_the_rest_pose_differs_from_the_stand_frame(export):
         points = mesh_points(export["models"][stem])
         moved = max(float(np.abs(a - b).max()) for a, b in zip(points, rest))
         assert moved > 0.02, stem  # 0.62 is his height
+
+
+# ---------------------------------------------------------------- room objects (review round)
+
+@needs_data
+def test_anchored_clips_move_each_frame_as_a_whole(export):
+    """Torture and sleeping are placed on the wheel and in the bed: every frame is the source
+    frame moved by one shift (no stretching), so the motion itself is the clip's."""
+    plan = export["plan"]
+    data, _ = plan.source
+    for clip in assets.ANCHORS:
+        src = data[clip]
+        frames = assets._resample(src["frames"], src["fps"], src["wrap"])
+        assert len(frames) == len(plan.clips[clip].frames), clip
+        folded = _folded(plan, clip)
+        for f in (0, len(frames) // 2, len(frames) - 1):
+            want = plan.to_sprites(plan.to_kmf(frames[f]))
+            keep = [np.ones(len(w), bool) for w in want]
+            for s, i in folded:
+                keep[s][i] = False
+            want = np.concatenate([w[k] for w, k in zip(want, keep)])
+            got = np.concatenate([g[k] for g, k in zip(plan.clips[clip].frames[f], keep)])
+            d = got - want
+            np.testing.assert_allclose(d, np.broadcast_to(d.mean(0), d.shape), atol=1e-9)
+
+
+@needs_data
+def test_torture_puts_his_torso_where_the_bile_demon_is_on_the_wheel(export):
+    model = parse_kmf(assets.game_mesh_path("Bil-Torture").read_bytes())
+    theirs = np.concatenate(evaluate_anim_frame(model.anim, 0))
+    plan = export["plan"]
+    rest = np.asarray(plan.source[0]["stand"]["frames"][0][0], float)
+    at = assets._part_vertices(plan, 0, assets._torso_ids(rest))
+    mine = assets._gather(plan.clips["torture"].frames[0], at).mean(0)
+    np.testing.assert_allclose(mine, theirs.mean(0), atol=1e-9)
+
+
+@needs_data
+def test_he_sleeps_in_the_bed(export):
+    """The bed file carries the Bile Demon's bed, and his body lies over it with his lowest point
+    BED_SINK of the way from the bed's top to the floor (z grows downwards)."""
+    anim = export["models"]["sleeping"].anim
+    n_mine = len(export["models"]["stand"].anim.sprites)
+    for f in (0, anim.frame_count // 2):
+        pts = evaluate_anim_frame(anim, f)
+        mine, bed = np.concatenate(pts[:n_mine]), np.concatenate(pts[n_mine:])
+        top, floor = bed[:, 2].min(), bed[:, 2].max()
+        bound = anim.scale / 511 * 4
+        assert mine[:, 2].max() == pytest.approx(top + assets.BED_SINK * (floor - top), abs=bound)
+        centre = (bed[:, :2].min(0) + bed[:, :2].max(0)) / 2
+        np.testing.assert_allclose((mine[:, :2].min(0) + mine[:, :2].max(0)) / 2, centre, atol=bound)
+
+
+@needs_data
+def test_the_chicken_is_in_his_free_hand_once_he_takes_it(export):
+    """The eat file carries the game's chicken; once taken it stays by his free hand (not the
+    mace hand), as the Knight's chicken stays by the Knight's."""
+    from scripts.molynx_design import HAND
+    plan = export["plan"]
+    prop = plan.props["eating"]
+    hand = assets._part_vertices(plan, 0, HAND)
+    gaps = [float(np.linalg.norm(np.concatenate(p).mean(0) - assets._gather(f, hand).mean(0)))
+            for f, p in zip(plan.clips["eating"].frames, prop.frames)]
+    grab = next(i for i, g in enumerate(gaps) if g < 0.06)
+    assert grab < len(gaps) // 2  # taken in the first half
+    assert max(gaps[grab:]) < 0.06  # then kept at his hand to the end (not left in the air)
+    assert min(gaps[:grab]) > 0.1   # before that it lies on the floor in front of him
+
+
+@needs_data
+def test_on_the_wheel_both_arms_are_spread_alike_and_the_mace_is_gone(export):
+    """Torture: the mace is folded onto one point (no triangle of it has any area), the mace arm
+    onto one point, and the file's extra sprites are his free arm reflected across an upright
+    plane: each vertex pair's middle lies on the plane and the pair's line is level and square to it."""
+    from scripts.behemoth_rig import CLUB_VERTICES
+    plan, data = export["plan"], export["plan"].source[0]
+    mace_part = [i for i, p in enumerate(data["stand"]["parts"]) if p["texture"].endswith("mace")]
+    assert mace_part == [1]
+    for frame in data["torture"]["frames"]:
+        for pts in (frame[0][:CLUB_VERTICES], frame[1]):
+            assert np.ptp(pts, axis=0).max() == 0
+    used = sorted({int(v) for t in np.asarray(plan.parts[0]["indices"]).reshape(-1, 3)
+                   if all(int(v) in set(assets._arm_ids(BEHEMOTH_DIR, "P").tolist()) for v in t)
+                   for v in t})
+    at = assets._part_vertices(plan, 0, used)
+    prop = plan.props["torture"]
+    for f in (0, len(prop.frames) // 2, len(prop.frames) - 1):
+        frame = plan.clips["torture"].frames[f]
+        folded = assets._gather(frame, _folded(plan, "torture"))
+        assert np.ptp(folded, axis=0).max() < 1e-12
+        free = dict(zip(used, assets._gather(frame, at)))
+        pairs = [(free[int(v)], p[i]) for lay, p in zip(assets._split(0, [(a, c, b) for a, b, c in
+                 np.asarray(plan.parts[0]["indices"]).reshape(-1, 3)
+                 if all(int(x) in free for x in (a, b, c))], assets.BODY_TEXTURE), prop.frames[f])
+                 for i, v in enumerate(lay.vertices)]
+        a, b = np.array([x for x, _ in pairs]), np.array([y for _, y in pairs])
+        d = b - a
+        normal = d[np.argmax(np.linalg.norm(d, axis=1))]
+        normal /= np.linalg.norm(normal)
+        assert abs(normal[2]) < 1e-9                      # upright plane (z is down)
+        np.testing.assert_allclose(np.cross(d, normal), 0, atol=1e-9)
+        offs = ((a + b) / 2) @ normal
+        assert np.ptp(offs) < 1e-9

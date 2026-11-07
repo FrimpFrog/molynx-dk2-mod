@@ -441,7 +441,10 @@ def _variables(base_vars: bytes, molynx_in_pool: bool) -> bytes:
             out.append(struct.pack("<iiii", *e))
     if molynx_in_pool and (MOLYNX_ID, KEEPER1) not in pool_have:
         out.append(struct.pack("<iiii", CREATURE_POOL, MOLYNX_ID, POOL_VALUE, KEEPER1))
-    creature_ids = [e[2] for e in av] + ([MOLYNX_ID] if molynx_in_pool else [])
+    # The Imp too (review round, 2026-11-07: on the flat map the user could slap his Imps but not
+    # pick them up; Siege's list, copied here, has no Imp, while Dead Walking has no creature
+    # availability entries at all). Not in the pool: Imps come from the heart, not the portal.
+    creature_ids = [IMP_ID] + [e[2] for e in av] + ([MOLYNX_ID] if molynx_in_pool else [])
     for type_id in creature_ids:
         key = (AV_CREATURE, KEEPER1, type_id)
         if key in have:
@@ -788,7 +791,7 @@ def _variable_errors(new: bytes, base: bytes, molynx_in_pool: bool) -> list[str]
     got_pool = {(e[1], e[2]) for e in ents if e[0] == CREATURE_POOL and e[3] == KEEPER1}
     if got_pool != want_pool:
         errors.append(f"rule 8: player 3 pool {sorted(got_pool)}, want {sorted(want_pool)}")
-    want_av = {e[2] for e in av} | ({MOLYNX_ID} if molynx_in_pool else set())
+    want_av = {IMP_ID} | {e[2] for e in av} | ({MOLYNX_ID} if molynx_in_pool else set())
     got_av = {i for (t, i) in k1 if t == AV_CREATURE}
     if got_av != want_av:
         errors.append(f"rule 8: player 3 creature availability {sorted(got_av)}, want {sorted(want_av)}")

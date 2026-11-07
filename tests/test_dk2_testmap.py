@@ -363,7 +363,8 @@ def test_rule8_variables(files, files_pool, pool):
     pool_ids = sorted(e[1] for e in ents if e[0] == 1 and e[3] == 3)
     creature_av = sorted(i for t, i in k1 if t == 2)
     want = sorted(SIEGE_POOL_IDS + ([47] if pool else []))
-    assert pool_ids == want and creature_av == want
+    # the Imp is available but not in the pool (review round: he could not pick up his Imps)
+    assert pool_ids == want and creature_av == sorted([1] + want)
     if pool:
         assert (1, 47, 50, 3) in ents
     pool_keys = [(e[1], e[3]) for e in ents if e[0] == 1]

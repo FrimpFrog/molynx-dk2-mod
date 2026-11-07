@@ -92,10 +92,13 @@ back when you take the folder out).
    - **Make him fight** - in the training room he swings his mace. There are no enemies on this
      map, so being hit, knocked back, getting up and dying are hard to see here; if you do see
      them anywhere, tell me how they looked.
-   - **Put him to sleep** - in a lair he lies down and stays lying (see the quirks below).
-   - **Eat** - in the hatchery he eats.
+   - **Put him to sleep** - in a lair he lies in his bed (the bed stays visible) and breathes.
+   - **Eat** - in the hatchery a chicken appears; he picks it up with his free hand (not the mace
+     hand) and eats it.
    - **Pray** - in a temple he prays.
-   - **Work** - in a workshop he works.
+   - **Work** - in a workshop he smashes his mace down on the bench, twice per cycle.
+   - **Torture** - on the torture wheel both arms are spread the same way and his mace is gone.
+   - **Stun** - stunned, he falls to a crouch and stays down until he gets up.
    - **Moods** - when he is happy or angry he shows it.
    - **Dance** - if he dances, it is his own dance (a stompy Troll-style dance, mace on his shoulder).
    - **His creature panel opens** - click his picture or open his panel; the game does not crash.
@@ -153,12 +156,10 @@ window:
 
 Some of his actions borrow the nearest animation he has. These are expected in this test:
 
-- **Sleeping** plays once: he lies down and stays lying until he wakes up. If he keeps standing up
-  and lying down again, or freezes standing, tell me.
-- **Dazed or stunned**, he holds one still pose (from his staggering).
-- **Electrocuted**, he holds a still flinch pose or flinches. **Tortured or casting a spell** uses his flinch.
+- **Sleeping** is a breathing loop lying in the bed. If he floats above it or lies beside it, tell me.
+- **Electrocuted**, he holds a still flinch pose or flinches. **Casting a spell** uses his flinch.
 - **Coming out of the portal** uses his walk once; **walking backwards** uses his normal walk.
-- **Drinking** uses his eating animation; **drunk** uses his fidgeting.
+- **Drinking** uses his eating animation without the chicken; **drunk** uses his fidgeting.
 - His feet may slide a little when he walks.
 
 About the map:
