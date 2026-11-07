@@ -196,7 +196,8 @@ def test_stage3_character_is_the_design_of_2026_11_07():
     bodyguard, eating less, made his own."""
     assert STATS["hp"] == 8000 and STATS["meleeDamage"] == 600            # Bile 6000 / 525
     assert STATS["speed"] == 1843 and STATS["runSpeed"] == 2662           # Bile 1638 / 2293
-    assert STATS["hungerFill"] == 0 and STATS["hpFromChicken"] == 0       # stone: never eats
+    assert STATS["hungerRate"] == 134213632 and STATS["hungerFill"] == 1  # stone: hardly ever eats
+    assert "hpFromChicken" not in STATS     # 0 there (with hungerFill 0) made the Hatchery spawn nonstop
     assert STATS["stunDuration"] == 12288 and STATS["mass"] == 24576
     assert PERSONALITY["attractions[0].roomId"] == 9 and PERSONALITY["attractions[1].roomId"] == 7
     assert PERSONALITY["happyJobs[0].jobType"] == 6 and PERSONALITY["hateJobs[0]"] == 3
@@ -653,7 +654,7 @@ def test_stage3_sets_his_stats_and_personality(bile):
         assert stage3.get(name) == value, name
     for name in ("hp", "meleeDamage", "speed", "runSpeed", "mass", "fear", "threat"):
         assert stage3.get(name) > bile.get(name), name     # stronger, tankier, faster
-    assert stage3.get("hungerFill") == 0 < bile.get("hungerFill")  # never eats
+    assert stage3.get("hungerRate") > 100 * bile.get("hungerRate")  # hardly ever eats
     assert stage3.get("stunDuration") < bile.get("stunDuration")
 
 

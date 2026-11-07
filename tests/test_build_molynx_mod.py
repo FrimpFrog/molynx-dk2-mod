@@ -46,7 +46,7 @@ MAPS = ["Siege", SECOND]  # the Test A maps (built with maps=MAPS: both copied a
 # The folders as handed over (Test A, map 2): Siege as in Test A, and the flat test map under three names;
 # stem -> (Molynx in the portal pool, the name the level file shows).
 FLAT = {"Molynx Test": (False, "Molynx Test"), "Molynx Test Portal": (True, "Molynx Test Portal"),
-        SECOND: (False, "Molynx Test")}
+        SECOND: (True, "Molynx Test")}   # Dead Walking: the portal variant (review round 2)
 SHIPPED_MAPS = sorted(["Siege", *FLAT])
 PANEL_FILES = ["molynx-bg.png", "molynx.png"]
 TEXT_IDS = {"name": 3001, "tooltip": 3002, "general": 3003, "strength": 3004, "weakness": 3005}
@@ -1788,7 +1788,7 @@ def test_the_portal_variant_differs_only_in_the_variables_and_the_level_file(shi
 def test_dead_walking_is_the_flat_map_under_the_shipped_name(shipped1):
     for suffix in MAP_SUFFIXES:
         if suffix != ".kwd":
-            assert map_file(shipped1, SECOND, suffix) == map_file(shipped1, "Molynx Test", suffix), suffix
+            assert map_file(shipped1, SECOND, suffix) == map_file(shipped1, "Molynx Test Portal", suffix), suffix
     name, desc, paths = level_strings(map_file(shipped1, SECOND, ".kwd"))
     assert (name, desc) == ("Molynx Test", DESCRIPTION)
     source = (map_source_dir(SECOND) / f"{SECOND}.kwd").read_bytes()
@@ -1826,11 +1826,11 @@ def test_a_map_both_copied_and_flat_is_refused(tmp_path):
 @needs_data
 def test_explicit_maps_and_flat_maps_build_the_handed_over_layout(tmp_path):
     out = build_mod(1, tmp_path, maps=["Siege"], flat_maps={"Molynx Test": False, "Molynx Test Portal": True,
-                                                            SECOND: False})
+                                                            SECOND: True})
     report = audit(out)
     assert report.ok, "\n".join(report.lines)
     alone = build_mod(1, tmp_path / "alone", maps=[], flat_maps={"Molynx Test": False,
-                                                                 "Molynx Test Portal": True, SECOND: False})
+                                                                 "Molynx Test Portal": True, SECOND: True})
     (line,) = fail_lines(audit(alone))
     assert line.startswith("FAIL (g) folder:") and "map Siege is missing" in line
 

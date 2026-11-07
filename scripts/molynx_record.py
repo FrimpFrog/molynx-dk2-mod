@@ -112,8 +112,10 @@ FX = 4096   # fixed point: float32 fields hold value x 4096
 # Stage 3: his own numbers (raw values; the Bile Demon's in the comments). A tank and a bodyguard:
 # more health and harder hits than the Bile Demon (still below the Horned Reaper's 700 damage), a
 # little faster, quicker out of a stun, heavier, more feared, paid more, loyal under torture. He is
-# rock, so he never eats: the Horned Reaper's hunger values (hungerRate 32767 s, hungerFill 0, no
-# health from a chicken, angerNoFood 1).
+# rock, so he hardly ever eats: the Horned Reaper's hungerRate (32767 s between meals) and no anger
+# when unfed (angerNoFood 1, the Reaper's). A meal stays one chicken (hungerFill 1, a chicken's 200
+# health): with the Reaper's hungerFill 0 and no health from a chicken, the first in-game test had him
+# standing in the Hatchery while chickens and eggs poured out of it without end.
 STATS = {
     "hp": 8000,                              # 6000
     "meleeDamage": 600,                      # 525 (Horned Reaper 700)
@@ -128,8 +130,7 @@ STATS = {
     "pay": 700,                              # 600
     "maxGoldHeld": 7000,                     # 6000
     "hungerRate": 134213632,                 # 220 s; the Horned Reaper's: never hungry
-    "hungerFill": 0,                         # 5 chickens a meal
-    "hpFromChicken": 0,                      # 200
+    "hungerFill": 1,                         # 5 chickens a meal
     "angerNoFood": 1,                        # 150
     "timeAwake": 330,                        # 270 s
     "tortureTimeToConvert": round(240 * FX), # 200 s
@@ -167,8 +168,8 @@ PERSONALITY = {
 TEXTS = {
     "name": "Molynx",
     "general": "Molynx.  Living stone, sworn to guard the Horned Reaper.  {26}.  Fighting Style: {27}.",
-    "strength": "Rock-hard hide and a crushing mace. Made of stone, he never eats, shrugs off blows "
-                "and hardens into Stone Skin when the fighting starts.",
+    "strength": "Rock-hard hide and a crushing mace. Made of stone, he hardly ever eats, shrugs off "
+                "blows and hardens into Stone Skin when the fighting starts.",
     "weakness": "Proud and slow-witted. He won't study in the Library, and slapping him makes him "
                 "furious.",
 }

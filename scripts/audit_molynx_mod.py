@@ -146,7 +146,7 @@ SOURCE_RECORDS = 46
 NAME_FIELD_SIZE = 32
 ICON, PORTRAIT = r"gui\creatures\evil\molynx", r"gui\creatures\evil\molynx-bg"
 # Stage 3: his own character, written out here from the design of 2026-11-07 (a tankier,
-# stronger, slightly faster Bile Demon, the Horned Reaper's bodyguard, never eating (stone); drawn to
+# stronger, slightly faster Bile Demon, the Horned Reaper's bodyguard, hardly ever eating; drawn to
 # a Guard Room and a Training Room, happiest guarding and training, hating research; Cast Armour,
 # creature spell 15, from level 4 in place of the gas spells). Raw
 # record values (float32 fields: value x 4096).
@@ -154,7 +154,7 @@ STAGE3 = {
     "hp": 8000, "meleeDamage": 600, "speed": 1843, "runSpeed": 2662, "meleeRecharge": 12288,
     "meleeRange": 2867, "stunDuration": 12288, "mass": 24576, "fear": 600, "threat": 250,
     "pay": 700, "maxGoldHeld": 7000, "timeAwake": 330,
-    "hungerRate": 134213632, "hungerFill": 0, "hpFromChicken": 0, "angerNoFood": 1,
+    "hungerRate": 134213632, "hungerFill": 1, "angerNoFood": 1,
     "tortureTimeToConvert": 983040, "possessionManaCost": 400, "scoreRating": 115,
     "manufacturePerSecond": 80, "expPerSecondTraining": 25, "manaGenPrayer": 70, "angerSlap": 4500,
     "attractions[0].present": 1, "attractions[0].roomId": 9, "attractions[0].roomSize": 0,
@@ -172,8 +172,8 @@ STAGE3_TEXTS = {
     "nameStringId": "Molynx",
     "generalDescriptionStringId":
         "Molynx.  Living stone, sworn to guard the Horned Reaper.  {26}.  Fighting Style: {27}.",
-    "strengthStringId": "Rock-hard hide and a crushing mace. Made of stone, he never eats, shrugs off "
-                        "blows and hardens into Stone Skin when the fighting starts.",
+    "strengthStringId": "Rock-hard hide and a crushing mace. Made of stone, he hardly ever eats, "
+                        "shrugs off blows and hardens into Stone Skin when the fighting starts.",
     "weaknessStringId": "Proud and slow-witted. He won't study in the Library, and slapping him makes "
                         "him furious.",
 }
@@ -1068,7 +1068,7 @@ FLAT_GLOBALS = "Siege"   # the flat maps' creature table: a normal one (Dead Wal
 # stem -> (Molynx also in the portal pool, the name the level file shows)
 FLAT_VARIANTS = {"Molynx Test": (False, "Molynx Test"),
                  "Molynx Test Portal": (True, "Molynx Test Portal"),
-                 FLAT_BASE: (False, "Molynx Test")}
+                 FLAT_BASE: (True, "Molynx Test")}   # the portal variant (review round 2)
 FLAT_PLAIN, FLAT_PORTAL = "Molynx Test", "Molynx Test Portal"
 FLAT_WITH = ("Siege",)  # the copied map a flat-test-map folder also holds (the shipped-map round's)
 FLAT_SIX = (".kwd", "Map.kld", "Things.kld", "Players.kld", "Triggers.kld", "Variables.kld")
@@ -1688,8 +1688,9 @@ def _audit_flat(mod_dir: Path, stem: str, lines: "_Lines", files: "_Files") -> t
 
 
 def _check_flat_variants(mod_dir: Path) -> tuple[bool, str]:
-    """Rule m13: Dead Walking is Molynx Test under the shipped name; the portal variant differs
-    from Molynx Test only in its Variables (the creature-47 entries) and its level file."""
+    """Rule m13: Dead Walking is Molynx Test Portal under the shipped name (the Skirmish list
+    shows only shipped names, so the portal is tested there); the portal variant differs from
+    Molynx Test only in its Variables (the creature-47 entries) and its level file."""
     maps = mod_dir / MAPS_PATH
     same = ("Map.kld", "Things.kld", "Players.kld", "Triggers.kld", "Globals.kld")
     problems = []
@@ -1701,8 +1702,8 @@ def _check_flat_variants(mod_dir: Path) -> tuple[bool, str]:
         return data
 
     for suffix in (*same, "Variables.kld"):
-        if read(FLAT_BASE, suffix) != read(FLAT_PLAIN, suffix):
-            problems.append(f"{FLAT_BASE}{suffix} is not {FLAT_PLAIN}{suffix}")
+        if read(FLAT_BASE, suffix) != read(FLAT_PORTAL, suffix):
+            problems.append(f"{FLAT_BASE}{suffix} is not {FLAT_PORTAL}{suffix}")
     for suffix in same:
         if read(FLAT_PORTAL, suffix) != read(FLAT_PLAIN, suffix):
             problems.append(f"{FLAT_PORTAL}{suffix} is not {FLAT_PLAIN}{suffix}")
@@ -1720,7 +1721,7 @@ def _check_flat_variants(mod_dir: Path) -> tuple[bool, str]:
                         f"two creature-47 entries (pool 50 and availability ENABLE for player 3)")
     if problems:
         return False, "; ".join(problems)
-    return True, (f"{FLAT_BASE} holds {FLAT_PLAIN}'s Map, Things, Players, Triggers, Variables and Globals "
+    return True, (f"{FLAT_BASE} holds {FLAT_PORTAL}'s Map, Things, Players, Triggers, Variables and Globals "
                   f"byte for byte; {FLAT_PORTAL} differs from {FLAT_PLAIN} only in its level file and in "
                   f"its Variables, by exactly the two creature-47 entries")
 

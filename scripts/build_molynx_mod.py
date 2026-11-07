@@ -97,7 +97,9 @@ TEXTURES_PATH = "Data/EngineTextures"
 EDITOR_CREATURES_PATH = "Data/editor/Creatures.kwd"  # the base creature table with record 47
 STAGE1_FOLDER = "Molynx_slot_only"
 # The flat maps of the handed-over folders: stem -> Molynx also in the portal pool.
-FLAT_MAPS = {"Molynx Test": False, "Molynx Test Portal": True, FLAT_BASE: False}
+# Dead Walking (the only one the Skirmish list shows: Flame does not add new map names to it) is the
+# portal variant, so Molynx can come through the portal there (second review round).
+FLAT_MAPS = {"Molynx Test": False, "Molynx Test Portal": True, FLAT_BASE: True}
 # The name the level file shows in the Skirmish list (default: the stem).
 FLAT_DISPLAY_NAMES = {FLAT_BASE: "Molynx Test"}
 FLAT_GLOBALS = "Siege"   # the flat maps' creature table (see the module notes: not Dead Walking's)
