@@ -146,11 +146,26 @@ STATS = {
 ROOM_TRAINING, ROOM_GUARD = 7, 9
 JOB_RESEARCH, JOB_TRAIN, JOB_GUARD = 3, 4, 6
 SPELL_CAST_ARMOUR = 15   # creature spell IDs are 1 + the entry's place in the CreatureSpells block
+# Ground Slam: creature spell 23 rebuilt by molynx_ground_slam (the game's unused Chicken Arrow
+# spell). It plays his magic clip (ground_slam, molynx_design.slam_frames), whose mace reaches the
+# floor at frame GROUND_SLAM_IMPACT_FRAME of 30 fps: the spell's shot leaves then (shotDelay, in
+# 1/4096 s since the clip began; the Bile Demon's Gas Cloud leaves at 2744, frame 20 of his 65).
+# The shot starts where the mace lands: the spell's shotOffset is (x, y, z) from his feet turned
+# to his facing, -y ahead (every creature casting ahead of itself has a negative y: Warlock -1761,
+# Dark Elf -2048, Salamander -2457). The mace head lands 0.545 of his height ahead (slam_frames);
+# his height in the game is the KMF's 0.74 times his scale 1.4: about one tile, 0.56 tile ahead.
+SPELL_GROUND_SLAM = 23
+GROUND_SLAM_IMPACT_FRAME = 34
+GROUND_SLAM_DELAY = round(GROUND_SLAM_IMPACT_FRAME / 30 * 4096)      # 4642
+GROUND_SLAM_OFFSET = (0, -2300, 205)
+CAST_ARMOUR_OFFSET = (0, -1433, 1638)       # the Monk's (his Cast Armour)
 # Stage 3: what makes him unlike the Bile Demon. Drawn to a Guard Room and a Training Room (the
 # Bile Demon: Workshop and Hatchery), happiest guarding and training (the Bile Demon: training and
 # manufacturing), hates research, and no gas: in place of the Bile Demon's Gas Cloud (level 4) and
-# Gas Missile (level 8) he has one close-range ability, Stone Skin: the game's Cast Armour creature
-# spell (CreatureSpells entry 15, the Monk's and the Fairy's at level 8), his from level 4.
+# Gas Missile (level 8) he has two close-range abilities: Ground Slam from level 2 (his mace into
+# the floor, hurting every enemy within two tiles) and Stone Skin from level 4 (the game's Cast
+# Armour creature spell, CreatureSpells entry 15, the Monk's and the Fairy's at level 8; the game
+# casts it on his allies). Both play his magic clip and leave at its impact frame.
 PERSONALITY = {
     "attractions[0].present": 1, "attractions[0].roomId": ROOM_GUARD, "attractions[0].roomSize": 0,
     "attractions[1].present": 1, "attractions[1].roomId": ROOM_TRAINING,
@@ -158,9 +173,12 @@ PERSONALITY = {
     "happyJobs[0].jobType": JOB_GUARD, "happyJobs[0].chance": 50,
     "happyJobs[1].jobType": JOB_TRAIN, "happyJobs[1].chance": 50,
     "hateJobs[0]": JOB_RESEARCH, "hateJobs[1]": 0,
-    "spells[0].creatureSpellId": SPELL_CAST_ARMOUR, "spells[0].levelAvailable": 4,
-    "spells[0].playAnimation": 1, "spells[0].shotDelay": 3563,     # the Monk's Cast Armour delay
-    **{f"spells[1].{f}": 0 for f in ("playAnimation", "shotDelay", "creatureSpellId", "levelAvailable")},
+    "spells[0].creatureSpellId": SPELL_GROUND_SLAM, "spells[0].levelAvailable": 2,
+    "spells[0].playAnimation": 1, "spells[0].shotDelay": GROUND_SLAM_DELAY,
+    "spells[0].shotOffset": GROUND_SLAM_OFFSET,
+    "spells[1].creatureSpellId": SPELL_CAST_ARMOUR, "spells[1].levelAvailable": 4,
+    "spells[1].playAnimation": 1, "spells[1].shotDelay": GROUND_SLAM_DELAY,
+    "spells[1].shotOffset": CAST_ARMOUR_OFFSET,
 }
 # Stage 3: his texts, by text_ids key ({n}: a value the game fills in, as in the Bile Demon's own
 # description "Bile Demon.  {26}.  Fighting Style: {27}."). The tooltip stays the game's shared one
@@ -169,7 +187,8 @@ TEXTS = {
     "name": "Molynx",
     "general": "Molynx.  Living stone, sworn to guard the Horned Reaper.  {26}.  Fighting Style: {27}.",
     "strength": "Rock-hard hide and a crushing mace. Made of stone, he hardly ever eats, shrugs off "
-                "blows and hardens into Stone Skin when the fighting starts.",
+                "blows, slams the ground to shake every foe around him and hardens into Stone Skin "
+                "when the fighting starts.",
     "weakness": "Proud and slow-witted. He won't study in the Library, and slapping him makes him "
                 "furious.",
 }
@@ -189,13 +208,14 @@ CLIPS = (
     "sleeping", "training", "fighting_another_creature", "patrolling", "guarding", "manufacturing",
     "interacting_with_objects", "being_picked_up",
     "falling", "torture", "drinking",   # the in-game review round (molynx_design.REVIEW_CLIPS)
+    "ground_slam",                      # his spell-casting clip (Ground Slam, molynx_design.slam_frames)
 )
 POSE_STEMS = ("PoseFrame", "DiePose", "DraggedPose", "StunnedPose", "ElecPose")
 STATIC_POSES = {"staggering": "StunnedPose"}  # a type-5 slot assigned this clip takes this pose
 # Whether each clip loops in the clip library itself (molynx_assets checks it against the source).
 SOURCE_WRAP: dict[str, bool] = {clip: clip not in (
     "die", "victory_celebration", "getting_hit", "being_slapped", "waking_up", "knockback",
-    "falling", "torture") for clip in CLIPS}
+    "falling", "torture", "ground_slam") for clip in CLIPS}
 # Non-looping source clips that end far from where they began (last-to-first gap, in median frame
 # steps, as molynx_assets.loop_gap measures it): never closed into a loop (see "File plan").
 MAX_CLOSE_GAP = 10
@@ -218,13 +238,12 @@ SLOT_CLIPS: dict[str, str] = {
     "poseFrame": "PoseFrame", "walk2": "patrolling",
     "entrance": "walk", "walkback": "walk",
     "research": "interacting_with_objects", "loot": "interacting_with_objects",
-    "magic": "getting_hit", "torture": "torture", "elec": "ElecPose",
+    "magic": "ground_slam", "torture": "torture", "elec": "ElecPose",
     "electrocute": "getting_hit",
 }
 
 # Slots that use a clip only as the nearest available, with why (for the in-game review).
 _NEAREST_ONLY = {
-    "magic": "No spell-casting clip in the library; a hit reaction is the nearest.",
     "elec": ("No electrocution pose in the library; the peak frame of flinching (getting_hit) is "
              "the nearest."),
     "electrocute": "No electrocution clip in the library; flinching (getting_hit) is the nearest.",

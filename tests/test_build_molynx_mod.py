@@ -57,7 +57,7 @@ STAGE2_MESHES = sorted(f"Molynx-{stem}.kmf" for stem in (
     "walk", "walk_once", "DraggedPose", "getting_hit", "StunnedPose", "ElecPose", "attack", "die",
     "DiePose", "happy", "angry", "staggering", "being_picked_up", "sleeping", "eating", "stand",
     "being_slapped", "manufacturing", "praying", "falling", "waking_up", "celebrating",
-    "fidgeting", "PoseFrame", "torture", "drinking"))
+    "fidgeting", "PoseFrame", "torture", "drinking", "ground_slam"))
 STAGE2_TEXTURES = ["Molynx_Body.png", "Molynx_Head.png", "Molynx_Mace.png", "Molynx_Neck.png"]
 UNUSED_CLIPS = ["running", "victory_celebration", "training", "fighting_another_creature",
                 "patrolling", "guarding", "interacting_with_objects"]
@@ -73,7 +73,8 @@ angry->angry, swing->being_picked_up, sleep->sleeping, eat/eatCorpse->eating, dr
 building->manufacturing, pray->praying, fallback->falling, getUp->waking_up, dance->celebrating,
 drunk/drunk2/stunnedPose/dejectedPose->staggering, idle1->stand, idle2/drunkIdle->fidgeting,
 poseFrame->PoseFrame, walk2->patrolling, entrance/walkback->walk,
-research/loot->interacting_with_objects, magic/elec/electrocute->getting_hit, torture->torture"""
+research/loot->interacting_with_objects, elec/electrocute->getting_hit, magic->ground_slam,
+torture->torture"""
 VARIANTS = {"entrance": "walk_once", "stunnedPose": "StunnedPose", "elec": "ElecPose"}
 
 
@@ -491,7 +492,8 @@ def test_audit_does_not_grade_the_builder_with_itself():
     source = Path(audit_module.__file__).read_text()
     for forbidden in ("build_molynx", "molynx_record", "build_mod", "splice_creatures",
                       "molynx_for_map", "retarget_creature_thing", "file_plan", "molynx_assets",
-                      "slot_assignment", "SLOT_CLIPS", "art_tail", "anim_info"):
+                      "slot_assignment", "SLOT_CLIPS", "art_tail", "anim_info",
+                      "molynx_ground_slam", "apply_ground_slam", "ground_slam_records"):
         assert forbidden not in source, forbidden
 
 
@@ -935,7 +937,7 @@ def test_stage2_folder_holds_exactly_the_files_the_record_names(stage2_full):
                        *(f"Data/EngineTextures/{f}" for f in STAGE2_TEXTURES),
                        *(f"Data/EngineTextures/GUI/Creatures/Evil/{f}" for f in PANEL_FILES)])
     assert found == expected
-    assert len(STAGE2_MESHES) == 26
+    assert len(STAGE2_MESHES) == 27
     for clip in UNUSED_CLIPS:
         assert not (meshes(stage2_full) / f"Molynx-{clip}.kmf").exists(), clip
 
@@ -1132,14 +1134,14 @@ def test_stage2_audit_of_the_handed_over_folder_passes_every_rule(stage2_full):
         (line,) = pass_lines(report, "b", name)
         assert "stage 2" in line and "24 rewritten" in line
     (g,) = [line for line in report.lines if line.startswith("PASS (g) folder:")]
-    assert "26 meshes" in g and "4 textures" in g
+    assert "27 meshes" in g and "4 textures" in g
 
 
 @needs_data
 @needs_assets
 def test_stage2_audit_passes_with_every_renamed_animation_present(mod2):
     names = renamed_slots(mod2, "Siege")
-    assert "Molynx-walk" in names and len(names) == 26
+    assert "Molynx-walk" in names and len(names) == 27
     report = audit(mod2)
     assert report.ok, "\n".join(report.lines)
     assert any("stage 2" in line for line in report.lines if line.startswith("PASS (b)"))
@@ -2186,3 +2188,111 @@ def test_stage2_ships_his_creature_panel_pictures(stage2_full):
         molynx = record_47(stage2_full, name)
         assert molynx.resource_name("icon1Resource") == r"gui\creatures\evil\molynx"
         assert molynx.resource_name("portraitResource") == r"gui\creatures\evil\molynx-bg"
+
+
+# ---- Ground Slam (stage 3): every Globals, the editor's four tables, the icon; rule (j) ----------
+
+SLAM_FILES = ["Data/EngineTextures/GUI/C-Spells/c-ground_slam.png", "Data/editor/CreatureSpells.kwd",
+              "Data/editor/EffectElements.kwd", "Data/editor/Effects.kwd", "Data/editor/Shots.kwd"]
+
+
+@pytest.fixture(scope="module")
+def stage3_dir(tmp_path_factory, assets_dir):
+    return build_mod(3, tmp_path_factory.mktemp("stage3"), "Molynx_full", maps=["Siege"],
+                     flat_maps={}, assets_dir=assets_dir)
+
+
+@pytest.fixture
+def mod3(stage3_dir, tmp_path):
+    target = tmp_path / "Molynx_full"
+    shutil.copytree(stage3_dir, target)
+    return target
+
+
+@needs_data
+@needs_assets
+def test_stage3_ships_ground_slam_and_passes_rule_j(stage3_dir):
+    files = sorted(p.relative_to(stage3_dir).as_posix() for p in stage3_dir.rglob("*") if p.is_file())
+    assert set(SLAM_FILES) <= set(files)
+    report = audit(stage3_dir)
+    assert report.ok, fail_lines(report)
+    (line,) = [l for l in report.lines if l.startswith("PASS (j)")]
+    assert "Ground Slam in the Globals of 1 map(s)" in line
+    assert any("Ground Slam's 8 records" in l for l in report.lines if l.startswith("PASS (a) Siege"))
+    with Image.open(stage3_dir / SLAM_FILES[0]) as icon:
+        assert icon.size == (64, 64)
+    molynx = record_47(stage3_dir, "Siege")
+    assert (molynx.get("spells[0].creatureSpellId"), molynx.get("spells[1].creatureSpellId")) == (23, 15)
+    assert molynx.resource_name("animMagicResource") == "Molynx-ground_slam"
+
+
+@needs_data
+@needs_assets
+def test_stage2_has_no_ground_slam(stage2_dir):
+    assert not any((stage2_dir / f).exists() for f in SLAM_FILES)
+    report = audit(stage2_dir)
+    (line,) = [l for l in report.lines if l.startswith("PASS (j)")]
+    assert "no Ground Slam at stage 2" in line
+
+
+@needs_data
+@needs_assets
+def test_a_changed_ground_slam_field_fails_rule_a(mod3):
+    from scripts.dk2kwd_tables import read_records
+
+    def edit(blocks):
+        out = []
+        for b in blocks:
+            if b.signature == 0x104:
+                records = read_records(b)
+                (shot,) = [r for r in records if r.id == 51]
+                shot.set("data1", 999)
+                b = _rebuilt(b, records)
+            out.append(b)
+        return out
+    edit_globals(mod3, "Siege", edit)
+    report = audit(mod3)
+    lines = fail_lines(report, "a", "Siege")
+    assert lines and "Shots 51 is not Ground Slam's: fields ['data1']" in lines[0]
+
+
+def _rebuilt(block, records):
+    from scripts.dk2kwd_blocks import rebuilt_block
+    return rebuilt_block(block, [bytes(r.raw) for r in records])
+
+
+@needs_data
+@needs_assets
+def test_ground_slam_in_only_some_tables_fails_rule_a(mod3):
+    source = read_blocks((map_source_dir("Siege") / "SiegeGlobals.kld").read_bytes())
+    effects = next(b for b in source if b.signature == 0x10E)
+    edit_globals(mod3, "Siege", lambda blocks: [effects if b.signature == 0x10E else b for b in blocks])
+    lines = fail_lines(audit(mod3), "a", "Siege")
+    assert lines and "only some of the tables" in lines[0]
+
+
+@needs_data
+@needs_assets
+@pytest.mark.parametrize("missing", SLAM_FILES)
+def test_a_missing_ground_slam_file_fails_rule_j(mod3, missing):
+    (mod3 / missing).unlink()
+    report = audit(mod3)
+    assert not report.ok
+    lines = fail_lines(report, "j")
+    assert lines and "missing" in lines[0]
+
+
+@needs_data
+@needs_assets
+def test_an_editor_table_without_ground_slam_fails_rule_j(mod3):
+    shutil.copyfile(EDITOR_DIR / "Effects.kwd", mod3 / "Data/editor/Effects.kwd")
+    lines = fail_lines(audit(mod3), "j")
+    assert lines and "Effects.kwd is the editor's own, without Ground Slam" in lines[0]
+
+
+@needs_data
+@needs_assets
+def test_a_wrong_sized_icon_fails_rule_j(mod3):
+    Image.new("RGB", (32, 32)).save(mod3 / SLAM_FILES[0])
+    lines = fail_lines(audit(mod3), "j")
+    assert lines and "is not a 64 x 64 PNG" in lines[0]

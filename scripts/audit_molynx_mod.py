@@ -17,7 +17,10 @@ with the format reader (dk2kmf, dk2kmf_write.anim_invariants), never with the bu
 Rules, each one PASS or FAIL line per map (per folder for g and h):
 
   (a) every block of the patched `<map>Globals.kld` except Creatures is byte-identical to the source
-      (same blocks in the same order, header and content).
+      (same blocks in the same order, header and content), except that its CreatureSpells, Shots,
+      Effects and EffectElements may all hold Ground Slam (GROUND_SLAM, stage 3): exactly those
+      records differ, each the source's donor record with the listed fields set, the records it
+      reuses being the game's unused ones in the source, and the records it names all present.
   (b) the Creatures block has 47 records; the first 46 are identical to the source; record 47 is the
       source's Bile Demon with exactly the fields of one stage changed (and only to the ruled values;
       a wrong slot tail names the slot, the sub-field and its record bytes).
@@ -49,6 +52,11 @@ Rules, each one PASS or FAIL line per map (per folder for g and h):
       record 47 in it, picking a Molynx map crashes (Test B, 2026-11-07).
   (h) `resource.toml` is valid TOML with a [resource] table of name, version, authors, description,
       and its name is the name of the folder.
+  (j) Ground Slam (folder): at stage 3 every map's Globals has it (rule a), the folder ships
+      Data/editor/CreatureSpells.kwd, Shots.kwd, Effects.kwd and EffectElements.kwd, the editor's own
+      with exactly Ground Slam's records (checked as in rule a), and its icon, a 64 x 64 PNG at
+      Data/EngineTextures/GUI/C-Spells/c-ground_slam.png (spell 23's GUI icon resource; rule g
+      allows these files at stage 3); below stage 3 none of it is there.
 
 The flat test map. A folder that holds "Molynx Test" or "Molynx Test Portal" is a flat-test-map
 folder: it must hold the three flat maps "Molynx Test", "Molynx Test Portal" and "Dead Walking"
@@ -112,7 +120,8 @@ The stages (written independently of the builder, from the Molynx design):
      stunnedPose and elec included) and a slot of type NONE (0, not loaded by the game) keep the
      Bile Demon's 20 bytes. The frame count and
      loop flag are read from the folder's own file.
-  3  + his character: every field of STAGE3 at its value, and his texts (STAGE3_TEXTS) in the
+  3  + his character: every field of STAGE3 at its value (his spells: Ground Slam and Cast Armour,
+     rule j), and his texts (STAGE3_TEXTS) in the
      folder's Data/Text/Default/Text.str (the game's own entries kept byte for byte, his after
      them) at the IDs record 47 names; the tooltip stays the shared 2408.
 
@@ -131,6 +140,7 @@ from scripts.dk2kld_splice import MAP_SUFFIXES, map_source_dir
 from scripts.dk2kmf import parse_kmf
 from scripts.dk2kmf_write import anim_invariants
 from scripts.dk2kwd_blocks import HEADER_SIZE, read_blocks
+from scripts.dk2kwd_tables import Record, read_records
 from scripts.dk2kwd_creatures import ANIM_SLOTS, FIELDS, RESOURCE_NAME_SIZE, RESOURCE_SIZE, Creature
 from scripts.dk2paths import EDITOR_DIR, GAME_DIR, MAPS_DIR, MESHES_DIR, QUUZ_MAPS_DIR
 from scripts.dk2wad import read_wad
@@ -147,8 +157,8 @@ NAME_FIELD_SIZE = 32
 ICON, PORTRAIT = r"gui\creatures\evil\molynx", r"gui\creatures\evil\molynx-bg"
 # Stage 3: his own character, written out here from the design of 2026-11-07 (a tankier,
 # stronger, slightly faster Bile Demon, the Horned Reaper's bodyguard, hardly ever eating; drawn to
-# a Guard Room and a Training Room, happiest guarding and training, hating research; Cast Armour,
-# creature spell 15, from level 4 in place of the gas spells). Raw
+# a Guard Room and a Training Room, happiest guarding and training, hating research; Ground Slam,
+# creature spell 23, from level 2 and Cast Armour, 15, from level 4 in place of the gas spells). Raw
 # record values (float32 fields: value x 4096).
 STAGE3 = {
     "hp": 8000, "meleeDamage": 600, "speed": 1843, "runSpeed": 2662, "meleeRecharge": 12288,
@@ -162,9 +172,13 @@ STAGE3 = {
     "happyJobs[0].jobType": 6, "happyJobs[0].chance": 50,
     "happyJobs[1].jobType": 4, "happyJobs[1].chance": 50,
     "hateJobs[0]": 3, "hateJobs[1]": 0,
-    "spells[0].creatureSpellId": 15, "spells[0].levelAvailable": 4,
-    "spells[0].playAnimation": 1, "spells[0].shotDelay": 3563,
-    **{f"spells[1].{f}": 0 for f in ("playAnimation", "shotDelay", "creatureSpellId", "levelAvailable")},
+    # Ground Slam (creature spell 23) from level 2, leaving at the impact frame 34 of his 30-fps
+    # magic clip (34 / 30 s = 4642 / 4096 s) from where the mace lands, 0.56 tile ahead (-y) on the
+    # floor; Cast Armour (15) from level 4 with the same delay, from the Monk's offset.
+    "spells[0].creatureSpellId": 23, "spells[0].levelAvailable": 2,
+    "spells[0].playAnimation": 1, "spells[0].shotDelay": 4642, "spells[0].shotOffset": (0, -2300, 205),
+    "spells[1].creatureSpellId": 15, "spells[1].levelAvailable": 4,
+    "spells[1].playAnimation": 1, "spells[1].shotDelay": 4642, "spells[1].shotOffset": (0, -1433, 1638),
 }
 # Stage 3: his texts, in the folder's Data/Text/Default/Text.str at the IDs record 47 names (the
 # game's own entries before them unchanged); the tooltip stays the game's shared one, 2408.
@@ -173,7 +187,8 @@ STAGE3_TEXTS = {
     "generalDescriptionStringId":
         "Molynx.  Living stone, sworn to guard the Horned Reaper.  {26}.  Fighting Style: {27}.",
     "strengthStringId": "Rock-hard hide and a crushing mace. Made of stone, he hardly ever eats, "
-                        "shrugs off blows and hardens into Stone Skin when the fighting starts.",
+                        "shrugs off blows, slams the ground to shake every foe around him and "
+                        "hardens into Stone Skin when the fighting starts.",
     "weaknessStringId": "Proud and slow-witted. He won't study in the Library, and slapping him makes "
                         "him furious.",
 }
@@ -190,6 +205,47 @@ EDITOR_CREATURES = "Data/editor/Creatures.kwd"  # rule (i): the base creature ta
 BLOCK_NAMES = {0x6E: "Terrain", 0x78: "Rooms", 0x82: "Traps", 0x8C: "Doors", 0x96: "KeeperSpells",
                0xA0: "CreatureSpells", 0xAA: "Creatures", 0xF0: "Objects", 0xFA: "EffectElements",
                0x104: "Shots", 0x10E: "Effects"}
+
+# Stage 3: Ground Slam, his special attack, written out here from its design (2026-11-07) and the
+# game's own records it is made from. In every Globals file and in the four editor tables the
+# folder ships (rule j), exactly these records differ from the source; each is the source's record
+# `donor` with `fields` set (and its own id); `was` is the reused record's name in the source (the
+# game's unused placeholders: no creature has spell 23; shot 51 and these effects and elements are
+# named by nothing). (signature, id) -> (was, donor id, fields).
+_GEN = lambda ids: {f"generateIds[{k}]": v for k, v in enumerate(list(ids) + [0] * (8 - len(ids)))}  # noqa: E731
+GROUND_SLAM = {
+    (0xA0, 23): ("Chicken Arrow", 23, {
+        "name": "Ground Slam", "shotData1": 240, "shotData2": 2, "range": 4096, "flags": 0x109,
+        "soundEvent": 0x2EC, "shotTypeId": 51, "alternativeShotId": 0, "alternativeRoomId": 0,
+        "alternativeShot": 0, "rechargeTime": 32768, "guiIcon.name": "GUI\\C-Spells\\c-ground_slam"}),
+    (0x104, 51): ("Dark Angel Hailstorm", 19, {
+        "name": "Ground Slam", "speed": 0, "data1": 240, "data2": 2, "health": 4,
+        "creationEffectId": 36, "attackCategory": 13, "soundCategory": "KEEPER_SPELL_TREMOR"}),
+    (0x10E, 36): ("Alex Spare 0", 103, {"name": "Ground Slam Effect", **_GEN([40, 127, 56]),
+                                        "elementsPerTurn": 4, "minHp": 1, "maxHp": 1}),
+    (0x10E, 40): ("Michaels Crappy Place Holder", 43, {"name": "Ground Slam Rocks", "minHp": 4,
+                                                       "maxHp": 4, **_GEN([305, 306, 305, 306])}),
+    (0x10E, 127): ("Spare", 44, {"name": "Ground Slam Dust", "radius": 6144, "minHp": 2, "maxHp": 2,
+                                 "elementsPerTurn": 6, **_GEN([6, 490, 373])}),
+    (0x10E, 56): ("Test", 325, {"name": "Ground Slam Chips", "minHp": 3, "maxHp": 3,
+                                "elementsPerTurn": 16, **_GEN([536, 77]), "light.radius": 6144,
+                                "light.colour": bytes((0xFF, 0x46, 0x14, 0)), "light.flags": 0}),
+    (0xFA, 77): ("do not use ", 536, {"name": "Ground Slam Ember", "colour": bytes((0xB4, 0x32, 0x0A))}),
+    (0xFA, 490): ("test", 6, {"name": "Ground Slam Red Dust", "colour": bytes((0x8C, 0x28, 0x14))}),
+}
+# The donors' names in the source (a changed donor must be noticed), and the spell's GUI icon's other
+# 20 bytes: the Gas Cloud's (creature spell 5).
+GROUND_SLAM_DONORS = {(0xA0, 23): "Chicken Arrow", (0x104, 19): "Grenade Explosion",
+                      (0x10E, 103): "Tremor Spell Effect", (0x10E, 43): "Tremor Rocks",
+                      (0x10E, 44): "Tremor Dust", (0x10E, 325): "Earth blast",
+                      (0xFA, 536): "Earth blast Element", (0xFA, 6): "Dust"}
+GAS_CLOUD = 5
+SLAM_TABLES = {0xA0: "CreatureSpells", 0x104: "Shots", 0x10E: "Effects", 0xFA: "EffectElements"}
+SLAM_EDITOR_FILES = {"CreatureSpells.kwd": 0xA0, "Shots.kwd": 0x104, "Effects.kwd": 0x10E,
+                     "EffectElements.kwd": 0xFA}
+SLAM_ICON = "Data/EngineTextures/GUI/C-Spells/c-ground_slam.png"   # named by spell 23's GUI icon
+SLAM_ICON_SIZE = (64, 64)
+SLAM_ICON_FOLDER = "Data/EngineTextures/GUI/C-Spells"
 
 _PARSE_ERRORS = (ValueError, KeyError, IndexError, struct.error, OSError, UnicodeDecodeError)
 _STAGE1_FIELDS = frozenset({"name", "creatureId", "orderInEditor"})
@@ -232,7 +288,7 @@ SLOT_FILES = {
     "animPoseFrameResource": "PoseFrame", "animWalk2Resource": "patrolling",
     "animEntranceResource": "walk_once", "animWalkbackResource": "walk",
     "animResearchResource": "interacting_with_objects", "animLootResource": "interacting_with_objects",
-    "animMagicResource": "getting_hit", "animTortureResource": "torture",
+    "animMagicResource": "ground_slam", "animTortureResource": "torture",
     "animElecResource": "ElecPose", "animElectrocuteResource": "getting_hit",
 }
 MESH_SLOT_FILES = {"staggering": "StunnedPose"}
@@ -341,6 +397,7 @@ class _Files:
         self.mesh_names = set(os.listdir(self.meshes)) if self.meshes.is_dir() else set()
         self.texture_names = set(os.listdir(self.textures)) if self.textures.is_dir() else set()
         self._parsed: dict[str, tuple] = {}
+        self.slam: dict[str, bool | None] = {}     # creature-table file -> has Ground Slam (rule a)
 
     def parsed(self, name: str):
         """(model or None, problem or None) of `Data/Meshes/<name>.kmf`."""
@@ -579,15 +636,98 @@ def _creatures_block(blocks, what: str):
     return found[0]
 
 
-def _check_blocks(src_blocks, mod_blocks) -> tuple[bool, str]:
-    """Rule (a)."""
+def _slam_expected(src: dict, sig: int, i: int) -> Record:
+    """The record (sig, i) must be in a folder with Ground Slam, built from the source's records."""
+    was, donor, fields = GROUND_SLAM[(sig, i)]
+    out = Record(sig, bytearray(src[donor].raw))
+    for name, value in fields.items():
+        out.set(name, value)
+    out.set({0xA0: "creatureSpellId", 0x104: "shotId", 0x10E: "effectId",
+             0xFA: "effectElementId"}[sig], i)
+    if sig == 0xA0:
+        for name in ("flags", "data", "type", "extra", "sometimesOne"):
+            out.set(f"guiIcon.{name}", src[GAS_CLOUD].get(f"guiIcon.{name}"))
+    return out
+
+
+def _slam_table(sig: int, src_block, mod_block) -> tuple[str, list[str]]:
+    """("unchanged" | "ground slam" | "wrong", problems) of one of the four tables."""
+    label = SLAM_TABLES[sig]
+    src_records, mod_records = read_records(src_block), read_records(mod_block)
+    if src_block.header != mod_block.header or len(src_records) != len(mod_records):
+        return "wrong", [f"{label}: the block header or record count differs from the source"]
+    if src_block.content == mod_block.content:
+        return "unchanged", []
+    src = {r.id: r for r in src_records}
+    problems, ids = [], {i for (s_, i) in GROUND_SLAM if s_ == sig}
+    for (s_, i), name in GROUND_SLAM_DONORS.items():
+        if s_ == sig and (i not in src or src[i].name != name):
+            problems.append(f"{label} {i} in the source is not the game's {name!r}")
+    for k, (a, b) in enumerate(zip(src_records, mod_records)):
+        if a.id != b.id:
+            problems.append(f"{label} record {k} has id {b.id}, the source's has {a.id}")
+        elif a.id in ids:
+            if a.name != GROUND_SLAM[(sig, a.id)][0]:
+                problems.append(f"{label} {a.id} in the source is {a.name!r}, not the unused "
+                                f"{GROUND_SLAM[(sig, a.id)][0]!r}")
+                continue
+            want = _slam_expected(src, sig, a.id)
+            if b.raw != want.raw:
+                wrong = sorted(n for n in want.fields() if want.get(n) != b.get(n))
+                problems.append(f"{label} {a.id} is not Ground Slam's: fields {wrong} differ")
+        elif a.raw != b.raw:
+            problems.append(f"{label} {a.id} ({a.name!r}) differs from the source")
+    return ("wrong" if problems else "ground slam"), problems
+
+
+def _slam_links(mod_blocks) -> list[str]:
+    """Ground Slam's records name records that are there: spell 23 -> shot 51 -> effect 36 ->
+    its effects -> their elements; the radius (shotData2) is at least 1 tile (it is divided by)."""
+    by_sig = {b.signature: {r.id: r for r in read_records(b)} for b in mod_blocks if b.signature in SLAM_TABLES}
+    spell, shots = by_sig[0xA0][23], by_sig[0x104]
+    effects, elements = by_sig[0x10E], by_sig[0xFA]
+    problems = []
+    if spell.get("shotData2") < 1:
+        problems.append("spell 23's shotData2 (the radius in tiles) is below 1")
+    shot = shots.get(spell.get("shotTypeId"))
+    if shot is None:
+        return problems + [f"spell 23 names shot {spell.get('shotTypeId')}, which is not there"]
+    todo, seen = [shot.get("creationEffectId")], set()
+    while todo:
+        i = todo.pop()
+        if i in seen:
+            continue
+        seen.add(i)
+        if i not in effects:
+            problems.append(f"effect {i} (Ground Slam's) is not there")
+            continue
+        f = effects[i].fields()
+        gen = [f[f"generateIds[{k}]"] for k in range(8) if f[f"generateIds[{k}]"]]
+        if f["flags"] & 0x40:
+            todo += gen
+        if f["flags"] & 0x80:
+            problems += [f"element {e} (of effect {i}) is not there" for e in gen if e not in elements]
+        for k in ("nextEffectId", "deathEffectId", "hitSolidEffectId"):
+            if f[k]:
+                todo.append(f[k])
+    return problems
+
+
+def _check_blocks(src_blocks, mod_blocks) -> tuple:
+    """Rule (a): every block but Creatures byte-identical to the source, except that the four
+    tables of GROUND_SLAM may all hold exactly Ground Slam's records (stage 3, rule j). Returns
+    (ok, message, True if the file has Ground Slam / False if not / None if wrong)."""
     src_sigs, mod_sigs = [b.signature for b in src_blocks], [b.signature for b in mod_blocks]
     if src_sigs != mod_sigs:
         return False, ("the blocks are " + ", ".join(hex(s) for s in mod_sigs)
-                       + " but the source has " + ", ".join(hex(s) for s in src_sigs))
-    problems = []
+                       + " but the source has " + ", ".join(hex(s) for s in src_sigs)), None
+    problems, status = [], {}
     for i, (src, mod) in enumerate(zip(src_blocks, mod_blocks)):
         if src.signature == CREATURES:
+            continue
+        if src.signature in SLAM_TABLES:
+            status[src.signature], more = _slam_table(src.signature, src, mod)
+            problems += more
             continue
         if src.header != mod.header:
             problems.append(f"{_block_label(i, src.signature)} differs from the source: header, "
@@ -595,9 +735,21 @@ def _check_blocks(src_blocks, mod_blocks) -> tuple[bool, str]:
         elif src.content != mod.content:
             problems.append(f"{_block_label(i, src.signature)} differs from the source: content, "
                             f"first differing byte {_first_difference(src.content, mod.content)}")
+    kinds = set(status.values())
+    if not problems and len(kinds) > 1:
+        problems.append("Ground Slam is in only some of the tables: " + ", ".join(
+            f"{SLAM_TABLES[s]} {k}" for s, k in sorted(status.items())))
+    slam = kinds == {"ground slam"}
+    if slam and not problems and len(status) == len(SLAM_TABLES):
+        problems += _slam_links(mod_blocks)
     if problems:
-        return False, "; ".join(problems)
-    return True, f"all {len(src_blocks) - 1} blocks other than Creatures are byte-identical to the source"
+        return False, "; ".join(problems), None
+    if slam:
+        return True, (f"all {len(src_blocks) - 1 - len(status)} blocks other than Creatures and the "
+                      f"{len(status)} Ground Slam tables are byte-identical to the source; the "
+                      f"{len(status)} tables differ exactly by Ground Slam's "
+                      f"{sum(1 for k in GROUND_SLAM if k[0] in status)} records"), True
+    return True, f"all {len(src_blocks) - 1} blocks other than Creatures are byte-identical to the source", False
 
 
 def _header_problems(block, index: int) -> list[str]:
@@ -988,8 +1140,9 @@ def _audit_globals(mod_dir: Path, name: str, source: Path, lines: _Lines, files:
             for rule in "abc":
                 lines.add(False, rule, name, f"the Globals file does not parse: {err}")
         else:
-            ok, message = _safe(_check_blocks, src_blocks, mod_blocks)
+            ok, message, *slam = _safe(_check_blocks, src_blocks, mod_blocks)
             lines.add(ok, "a", name, message)
+            files.slam[name] = slam[0] if slam else None
             ok, message, *rest = _safe(_check_creatures, src_blocks, mod_blocks, files)
             info = rest[0] if rest else None
             lines.add(ok, "b", name, message)
@@ -1040,8 +1193,9 @@ def _audit_globals_file(mod_path: Path, source: Path, label: str, lines: _Lines,
             for rule in "abc":
                 lines.add(False, rule, label, f"the file does not parse: {err}")
         else:
-            ok, message = _safe(_check_blocks, src_blocks, mod_blocks)
+            ok, message, *slam = _safe(_check_blocks, src_blocks, mod_blocks)
             lines.add(ok, "a", label, message)
+            files.slam[label] = slam[0] if slam else None
             ok, message, *rest = _safe(_check_creatures, src_blocks, mod_blocks, files)
             info = rest[0] if rest else None
             lines.add(ok, "b", label, message)
@@ -1773,14 +1927,15 @@ def _check_layout(mod_dir: Path, names: list[str], stage: int | None, meshes: se
             rel = d if here == "." else f"{here}/{d}"
             if not (rel in ("Data", "Data/editor", maps_rel)
                     or (stage2 and rel in ("Data/Meshes", "Data/EngineTextures") + PANEL_FOLDERS)
-                    or (stage3 and rel in ("Data/Text", "Data/Text/Default"))):
+                    or (stage3 and rel in ("Data/Text", "Data/Text/Default", SLAM_ICON_FOLDER))):
                 problems.append(f"unexpected folder {rel}")
         for f in sorted(names_here):
             rel = f if here == "." else f"{here}/{f}"
             files.append(rel)
             if rel in ("resource.toml", EDITOR_CREATURES) or (here == maps_rel and f in expected_maps):
                 continue
-            if stage3 and rel == TEXT_FILE.as_posix():
+            if stage3 and (rel == TEXT_FILE.as_posix() or rel == SLAM_ICON
+                           or rel in {f"Data/editor/{n}" for n in SLAM_EDITOR_FILES}):
                 continue
             if here == "Data/Meshes" and f in expected_meshes:
                 mesh_count += 1
@@ -1815,6 +1970,61 @@ def _check_layout(mod_dir: Path, names: list[str], stage: int | None, meshes: se
              f"meshes name and his {panel_count} creature-panel pictures") if stage2 else ""
     return True, (f"holds only resource.toml and {len(names) * len(MAP_SUFFIXES)} map files of "
                   f"{len(names)} map(s) ({', '.join(names)}){extra}")
+
+
+def _check_ground_slam(mod_dir: Path, names: list[str], stage: int | None, files: "_Files") -> tuple[bool, str]:
+    """Rule (j): at stage 3 every map's Globals has Ground Slam (rule a checked its records), the
+    folder ships the editor's four tables with it (the game's base tables: the same records, checked
+    the same way against the editor's files) and its icon, a 64 x 64 PNG at SLAM_ICON; below stage 3
+    none of this is there."""
+    if stage is None:
+        return False, "not checked: the folder's stage is unknown"
+    with_slam = sorted(n for n in names if files.slam.get(n))
+    without = sorted(n for n in names if files.slam.get(n) is False)
+    editor = {name: mod_dir / "Data" / "editor" / name for name in SLAM_EDITOR_FILES}
+    icon = mod_dir / SLAM_ICON
+    if stage < 3:
+        present = [p.name for p in editor.values() if p.exists()] + ([SLAM_ICON] if icon.exists() else [])
+        problems = ([f"Ground Slam is in the Globals of {', '.join(with_slam)}"] if with_slam else []) + (
+            [f"Ground Slam files at stage {stage}: {', '.join(present)}"] if present else [])
+        return (False, "; ".join(problems)) if problems else (
+            True, f"no Ground Slam at stage {stage} (none in the Globals files, no editor tables, no icon)")
+    problems = []
+    if without:
+        problems.append(f"the Globals of {', '.join(without)} lack Ground Slam")
+    unread = sorted(set(names) - set(with_slam) - set(without))
+    if unread:
+        problems.append(f"the Globals of {', '.join(unread)} could not be checked (rule a)")
+    blocks = []
+    for name, sig in SLAM_EDITOR_FILES.items():
+        mod, src = _read(editor[name]), _read(EDITOR_DIR / name)
+        if mod is None:
+            problems.append(f"Data/editor/{name} is missing")
+            continue
+        if src is None:
+            problems.append(f"the editor's own {name} is missing")
+            continue
+        (mod_block,), (src_block,) = read_blocks(mod), read_blocks(src)
+        if mod_block.signature != sig or src_block.signature != sig:
+            problems.append(f"Data/editor/{name} is not one {SLAM_TABLES[sig]} block")
+            continue
+        kind, more = _slam_table(sig, src_block, mod_block)
+        problems += more
+        if kind != "ground slam" and not more:
+            problems.append(f"Data/editor/{name} is the editor's own, without Ground Slam")
+        blocks.append(mod_block)
+    if not problems:
+        problems += _slam_links(blocks)
+    data = _read(icon)
+    if data is None:
+        problems.append(f"{SLAM_ICON} is missing (spell 23's GUI icon)")
+    elif data[:8] != PNG_SIGNATURE or data[12:16] != b"IHDR" or _png_size(data) != SLAM_ICON_SIZE:
+        problems.append(f"{SLAM_ICON} is not a {SLAM_ICON_SIZE[0]} x {SLAM_ICON_SIZE[1]} PNG")
+    if problems:
+        return False, "; ".join(problems)
+    return True, (f"Ground Slam in the Globals of {len(with_slam)} map(s), in the 4 editor tables "
+                  f"({', '.join(SLAM_EDITOR_FILES)}), and its {SLAM_ICON_SIZE[0]} x "
+                  f"{SLAM_ICON_SIZE[1]} icon at {SLAM_ICON}")
 
 
 def _check_resource_toml(mod_dir: Path) -> tuple[bool, str]:
@@ -1870,6 +2080,8 @@ def audit(mod_dir: Path) -> AuditReport:
         folder.add(ok, "m13", "folder", message)
     ok, message = _safe(_check_resource_toml, mod_dir)
     folder.add(ok, "h", "folder", message)
+    ok, message = _safe(_check_ground_slam, mod_dir, names, stage, files)
+    folder.add(ok, "j", "folder", message)
     if len(distinct) > 1:
         shown = ", ".join(f"{n}: {s if s else 'unreadable'}" for n, s in stages.items())
         maps.add(False, "b", "folder", f"the maps do not agree on one stage ({shown})")

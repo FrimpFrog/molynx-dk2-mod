@@ -29,4 +29,5 @@ ANIM_INFO = {stem: {"frames": frames, "fps": 30, "wrap": wrap} for stem, frames,
     ("guarding", 24, True), ("manufacturing", 69, True), ("interacting_with_objects", 18, True),
     ("being_picked_up", 61, True),
     ("falling", 15, False), ("torture", 100, False), ("drinking", 83, False),   # review round
+    ("ground_slam", 61, False),                                                 # Ground Slam
 ]}

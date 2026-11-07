@@ -1018,6 +1018,7 @@ def export_molynx_assets(out_dir: Path, height_ratio: float = DESIGN_HEIGHT_RATI
     `reduce=True` (the default) keeps only the keyframes each vertex needs; `reduce=False` keys
     every frame.
     -> {"meshes": {stem: path}, "textures": {name: path}, "portraits": {name: path},
+        "icon": path of Ground Slam's spell icon (molynx_ground_slam.ICON_FILE),
         "preview": path | None, "info": {file stem: {frames, fps, wrap}} (final files),
         "wrap_exceptions": [molynx_record.WrapException] (default wraps only, else []),
         "scale": float, "target_height": float}"""
@@ -1057,6 +1058,9 @@ def export_molynx_assets(out_dir: Path, height_ratio: float = DESIGN_HEIGHT_RATI
             continue
         textures[name] = out_dir / f"{name}.png"
         _texture(images[key], sizes[name], plan.crops.get(name)).save(textures[name])
+    from scripts.molynx_ground_slam import ICON_FILE, make_icon
+    icon_path = out_dir / ICON_FILE                    # Ground Slam's spell icon (stage 3)
+    make_icon(texture_cache(game_dir)).save(icon_path)
     portraits, preview = {}, None
     if portrait_src is not None:
         cache = texture_cache(game_dir)
@@ -1079,4 +1083,5 @@ def export_molynx_assets(out_dir: Path, height_ratio: float = DESIGN_HEIGHT_RATI
         _preview([("Molynx -bg", bg), ("Molynx", icon), ("Bile Demon -bg", bile_bg),
                   ("Bile Demon", bile_icon)]).save(preview)
     return {"meshes": meshes, "textures": textures, "portraits": portraits, "preview": preview,
+            "icon": icon_path,
             "info": info, "wrap_exceptions": exceptions, "scale": plan.scale, "target_height": plan.target_height}

@@ -29,6 +29,15 @@ molynx_assets.export_molynx_assets; the builder never runs that export itself):
                                          reads the name's folders as folders, as for
                                          LoadingScreen\\Titlescreen)
 
+At stage 3 the folder also holds Ground Slam (molynx_ground_slam: his special attack, made from
+records the game does not use), in every map's Globals.kld and in
+
+  <name>/Data/editor/CreatureSpells.kwd, Shots.kwd, Effects.kwd, EffectElements.kwd
+                                         the editor's tables (the game's base tables) with it
+  <name>/Data/EngineTextures/GUI/C-Spells/c-ground_slam.png
+                                         its icon (the export's c-ground_slam.png), named by the
+                                         spell's GUI icon resource GUI\\C-Spells\\c-ground_slam
+
 What the record says about each file (frame count, loop flag) is not taken from a separate list: it
 is read from the exported files themselves, and the build stops (ValueError, nothing written) when a
 file the record names is missing, is named differently (also in case, or inside the file), does not
@@ -86,6 +95,8 @@ from scripts.dk2paths import EDITOR_DIR
 from scripts.dk2kwd_blocks import read_blocks
 from scripts.dk2kwd_creatures import Creature, read_creatures
 from scripts.molynx_assets import MAX_TEXTURE, bile_file_wraps
+from scripts.molynx_ground_slam import ICON_FILE as SLAM_ICON_FILE, ICON_SIZE as SLAM_ICON_SIZE
+from scripts.molynx_ground_slam import apply_ground_slam, editor_files as slam_editor_files
 from scripts.molynx_record import CREATURE_ID, GAME_FPS, POSE_STEMS, PREFIX, file_plan
 
 # Flame lists mods by folder name: names are split at ';' in alt-resources, the launcher skips a
@@ -271,6 +282,8 @@ def _map_files(name: str, stage: int, text_ids: dict[str, int] | None, assets: _
         info, wraps, stems = _files_for(_map_bile(globals_kld), assets, anim_info, file_wraps)
     files[globals_path] = splice_creatures(globals_kld, [molynx_for_map(
         globals_kld, stage, text_ids, anim_info=info, file_wraps=wraps)])
+    if stage >= 3:
+        files[globals_path] = apply_ground_slam(files[globals_path])
     things_kld = files[things_path]
     files[things_path] = retarget_creature_thing(things_kld, first_player_bile_thing(things_kld),
                                                  CREATURE_ID)
@@ -295,6 +308,8 @@ def _flat_map_files(stem: str, in_pool: bool, stage: int, text_ids: dict[str, in
     out = {f"{MAPS_PATH}/{name}": data for name, data in files.items()}
     out[f"{MAPS_PATH}/{stem}Globals.kld"] = splice_creatures(globals_kld, [molynx_for_map(
         globals_kld, stage, text_ids, anim_info=info, file_wraps=wraps)])
+    if stage >= 3:
+        out[f"{MAPS_PATH}/{stem}Globals.kld"] = apply_ground_slam(out[f"{MAPS_PATH}/{stem}Globals.kld"])
     return out, stems
 
 
@@ -353,6 +368,20 @@ def _panel_files(assets: _Assets) -> dict[str, bytes]:
 
 
 TEXT_PATH = "Data/Text/Default/Text.str"
+EDITOR_PATH = "Data/editor"
+SLAM_ICON_PATH = f"{TEXTURES_PATH}/GUI/C-Spells"
+
+
+def _ground_slam_files(assets: _Assets) -> dict[str, bytes]:
+    """Stage 3: Ground Slam (molynx_ground_slam) in the editor's four tables the game loads as its
+    base (the maps' Globals get it in _map_files / _flat_map_files) and its icon, named by the
+    spell's GUI icon resource GUI\\C-Spells\\c-ground_slam."""
+    files = {f"{EDITOR_PATH}/{name}": data for name, data in slam_editor_files(EDITOR_DIR).items()}
+    icon = assets.texture(SLAM_ICON_FILE[:-4])
+    if struct.unpack_from(">II", icon, 16) != SLAM_ICON_SIZE:
+        raise ValueError(f"{SLAM_ICON_FILE} in assets_dir is not {SLAM_ICON_SIZE[0]}x{SLAM_ICON_SIZE[1]}")
+    files[f"{SLAM_ICON_PATH}/{SLAM_ICON_FILE}"] = icon
+    return files
 
 
 def molynx_text_file(text_dir: Path | None = None) -> tuple[bytes, dict[str, int]]:
@@ -437,6 +466,8 @@ def build_mod(stage: int, out_dir: Path, name: str = "Molynx", maps: list[str] |
         files.update(_panel_files(assets))
     if text_file is not None:
         files[TEXT_PATH] = text_file
+    if stage >= 3:
+        files.update(_ground_slam_files(assets))
 
     target.mkdir(parents=True)  # not exist_ok: never reuse a folder
     for relative, data in files.items():

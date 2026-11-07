@@ -10,7 +10,7 @@ import hashlib
 import numpy as np
 import pytest
 
-REVIEW = {"falling", "torture", "drinking", "eating", "sleeping", "manufacturing"}
+REVIEW = {"falling", "torture", "drinking", "eating", "sleeping", "manufacturing", "ground_slam"}
 from PIL import Image
 
 import scripts.molynx_assets as assets
@@ -198,7 +198,7 @@ def test_review_round_clips(built):
     assert design.REVIEW_CLIPS["torture"][:2] == ("giant", "torture")
     for name in REVIEW:
         assert name in new, name
-    assert not new["falling"]["wrap"] and not new["torture"]["wrap"]
+    assert not new["falling"]["wrap"] and not new["torture"]["wrap"] and not new["ground_slam"]["wrap"]
     assert new["sleeping"]["wrap"] and new["manufacturing"]["wrap"] and new["eating"]["wrap"]
     # drinking is the eating motion (no chicken: the chicken is added to the eat file only)
     assert all(np.array_equal(a[0], b[0]) for a, b in zip(new["drinking"]["frames"], new["eating"]["frames"]))
@@ -221,3 +221,34 @@ def test_hammer_strikes_at_bench_height():
     assert np.allclose(frames[0], frames[-1])                                   # loops
     strikes = np.sum((low[1:-1] <= low[:-2]) & (low[1:-1] < low[2:] + 1e-9) & (low[1:-1] < low.max() * 0.6))
     assert strikes >= 2 and 1.5 < seconds < 4
+
+
+@needs_data
+def test_ground_slam_brings_the_mace_down_on_the_floor_ahead_at_the_records_impact_frame():
+    """His magic clip (Ground Slam): from his stand pose, the swing with its wind-up slowed, the
+    mace head down on the floor ahead of him at the frame the spells leave (molynx_record), held
+    there, then back to his stand pose; it does not loop."""
+    from scripts.behemoth_rig import CLUB_VERTICES, behemoth_rest
+    from scripts.custom_character import native_clips
+    from scripts.molynx_record import GROUND_SLAM_DELAY, GROUND_SLAM_IMPACT_FRAME
+    frames, impact = design.slam_frames(BEHEMOTH_DIR)
+    rest, _, _ = behemoth_rest(BEHEMOTH_DIR)
+    height = rest[:, 1].max() - rest[:, 1].min()
+    low = frames[:, :CLUB_VERTICES, 1].min(axis=1) - rest[:, 1].min()
+    assert impact == GROUND_SLAM_IMPACT_FRAME == 34 and GROUND_SLAM_DELAY == round(34 / 30 * 4096)
+    assert abs(low[impact] - design.SLAM_GROUND * height) < 0.005 * height   # on the floor
+    assert low[:impact].min() > 0.1 * height                            # not before
+    assert np.allclose(low[impact:impact + design.SLAM_HOLD], low[impact])  # held there
+    head = frames[impact, np.argmin(frames[impact, :CLUB_VERTICES, 1])]
+    assert 0.45 * height < head[2] < 0.65 * height and abs(head[0]) < 0.1 * height  # ahead (+z)
+    stand = native_clips(BEHEMOTH_DIR)["stand"][0][0]
+    assert np.allclose(frames[0], stand) and np.allclose(frames[-1], stand)
+    assert len(frames) == 61 and 1.8 < len(frames) / 30 < 2.3          # the Bile Demon's: 65
+
+
+@needs_data
+def test_ground_slam_is_a_native_clip_with_the_mace_in_hand(built):
+    new, _, _old, _ = built
+    assert "ground_slam" in design.NATIVE and "ground_slam" not in design.MACELESS | design.LOCKED
+    clip = new["ground_slam"]
+    assert len(clip["frames"]) == 61 and clip["fps"] == 30.0 and not clip["wrap"]

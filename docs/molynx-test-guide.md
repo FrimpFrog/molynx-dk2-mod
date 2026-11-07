@@ -145,6 +145,26 @@ Room of at least 25 tiles: those are what attract him.
 9. **If a file-checksum error appears,** open `config.toml`, find `NoFileChecksum = false` (in the
    `[dk2]` part), make it `NoFileChecksum = true`, save, and try again. Tell me you did.
 
+## Ground Slam (his special attack)
+
+From level 2 Molynx has **Ground Slam**: he raises his mace and smashes it into the floor in front
+of him. Rocks, black and red-hot chips and dust burst up with a red glow, a rock-crash sound plays,
+and every enemy within about two tiles is hurt (most where the mace lands). He uses it only on an
+enemy within one tile, about every 8 seconds. From level 4 he also has **Stone Skin** (Cast
+Armour), which he puts on his allies with the same swing. The Molynx by your heart starts at
+level 5, so he has both.
+
+How to see it on the flat map (no enemies there):
+
+1. Cast **Possession** on Molynx. Ground Slam is one of his spells (a mace-and-cracked-ground icon);
+   pick it from his abilities and use it. Watch the swing, the burst, the sound and the icon.
+2. If you can, also watch him fight a real enemy (another map or a later test): does he slam on
+   his own, and does the enemy lose health? It may never happen in the Combat Pit (the game may
+   not let creatures use spells there).
+
+Tell me if: the game crashes when he slams or when the map loads; the icon is blank; nothing
+bursts; the burst is in the wrong place (it should be where the mace hits); or the sound is wrong.
+
 ## Taking screenshots and video
 
 A photo of the monitor with your phone is fine. If you want real screenshots, run the game in a
@@ -162,7 +182,8 @@ window:
 Some of his actions borrow the nearest animation he has. These are expected in this test:
 
 - **Sleeping** is a breathing loop lying in the bed. If he floats above it or lies beside it, tell me.
-- **Electrocuted**, he holds a still flinch pose or flinches. **Casting a spell** uses his flinch.
+- **Electrocuted**, he holds a still flinch pose or flinches. **Casting a spell** is his Ground Slam
+  swing (below).
 - **Coming out of the portal** uses his walk once; **walking backwards** uses his normal walk.
 - **Drinking** uses his eating animation without the chicken; **drunk** uses his fidgeting.
 - His feet may slide a little when he walks.

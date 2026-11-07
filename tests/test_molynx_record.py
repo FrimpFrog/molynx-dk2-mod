@@ -36,9 +36,10 @@ CLIP_LIBRARY = {
     "knockback", "sleeping", "training", "fighting_another_creature", "patrolling", "guarding",
     "manufacturing", "interacting_with_objects", "being_picked_up",
     "falling", "torture", "drinking",   # the in-game review round (2026-11-07)
+    "ground_slam",                      # his spell-casting clip (Ground Slam, 2026-11-07)
 }
 NEAREST_ONLY = [
-    "magic", "elec", "electrocute", "research", "loot", "special", "entrance", "walkback",
+    "elec", "electrocute", "research", "loot", "special", "entrance", "walkback",
     "melee2", "drink", "eatCorpse", "stunnedPose", "dejectedPose", "drunkIdle",
 ]
 # The Bile Demon record (editor and every map) leaves exactly these animation slots empty.
@@ -63,8 +64,8 @@ TAILS = {
                               "00000000110000001e0000000000000006000000"),
     "animMelee1Resource": ("attack", "000000005a0000001e0000000000000006000000",
                            "00000000290000001e0000000000000006000000"),
-    "animMagicResource": ("getting_hit", "00000000410000001e0000000000000006000000",
-                          "00000000110000001e0000000000000006000000"),
+    "animMagicResource": ("ground_slam", "00000000410000001e0000000000000006000000",
+                          "000000003d0000001e0000000000000006000000"),  # 61 (Ground Slam)
     "animDieResource": ("die", "010000004f0000001e0000000000000006000000",
                         "010000001f0000001e0000000000000006000000"),
     "animHappyResource": ("happy", "00000000820000001e0000000000000006000000",
@@ -201,13 +202,19 @@ def test_stage3_character_is_the_design_of_2026_11_07():
     assert STATS["stunDuration"] == 12288 and STATS["mass"] == 24576
     assert PERSONALITY["attractions[0].roomId"] == 9 and PERSONALITY["attractions[1].roomId"] == 7
     assert PERSONALITY["happyJobs[0].jobType"] == 6 and PERSONALITY["hateJobs[0]"] == 3
-    assert PERSONALITY["spells[0].creatureSpellId"] == 15                 # Cast Armour, no gas
-    assert PERSONALITY["spells[1].creatureSpellId"] == 0
+    # no gas: Ground Slam (creature spell 23) from level 2, Cast Armour (15) from level 4, both
+    # leaving at the impact frame (34) of his 30-fps magic clip
+    assert PERSONALITY["spells[0].creatureSpellId"] == 23 and PERSONALITY["spells[0].levelAvailable"] == 2
+    assert PERSONALITY["spells[1].creatureSpellId"] == 15 and PERSONALITY["spells[1].levelAvailable"] == 4
+    assert PERSONALITY["spells[0].shotDelay"] == PERSONALITY["spells[1].shotDelay"] == 4642
+    assert PERSONALITY["spells[0].shotOffset"] == (0, -2300, 205)       # where the mace lands
+    assert PERSONALITY["spells[1].shotOffset"] == (0, -1433, 1638)      # the Monk's Cast Armour
+    assert PERSONALITY["spells[0].playAnimation"] == PERSONALITY["spells[1].playAnimation"] == 1
     assert TEXTS["name"] == "Molynx" and set(TEXTS) == {"name", "general", "strength", "weakness"}
 
 
-def test_clip_library_is_the_28_clips():
-    assert len(CLIPS) == 28 and set(CLIPS) == CLIP_LIBRARY
+def test_clip_library_is_the_29_clips():
+    assert len(CLIPS) == 29 and set(CLIPS) == CLIP_LIBRARY
     assert set(POSE_STEMS) == {"PoseFrame", "DiePose", "DraggedPose", "StunnedPose", "ElecPose"}
     assert STATIC_POSES == {"staggering": "StunnedPose"}
 
@@ -240,7 +247,7 @@ def test_table_entries_from_the_brief():
         "idle2": "fidgeting", "drunkIdle": "fidgeting", "poseFrame": "PoseFrame",
         "walk2": "patrolling", "entrance": "walk", "walkback": "walk",
         "research": "interacting_with_objects", "loot": "interacting_with_objects",
-        "magic": "getting_hit", "torture": "torture", "elec": "ElecPose",
+        "magic": "ground_slam", "torture": "torture", "elec": "ElecPose",
         "electrocute": "getting_hit",
     }
     assert SLOT_CLIPS == expected
@@ -373,7 +380,7 @@ def test_stage2_slot_names_for_the_real_bile_demon(bile):
         "walk": "Molynx-walk", "draggedPose": "Molynx-DraggedPose", "poseFrame": "Molynx-PoseFrame",
         "diePose": "Molynx-DiePose", "swing": "Molynx-being_picked_up", "idle1": "Molynx-stand",
         "idle2": "Molynx-fidgeting", "drunkIdle": "Molynx-fidgeting", "entrance": "Molynx-walk_once",
-        "walkback": "Molynx-walk", "magic": "Molynx-getting_hit", "building": "Molynx-manufacturing",
+        "walkback": "Molynx-walk", "magic": "Molynx-ground_slam", "building": "Molynx-manufacturing",
         "stunnedPose": "Molynx-StunnedPose", "recoilHfb": "Molynx-being_slapped",
         "elec": "Molynx-ElecPose", "recoilHff": "Molynx-getting_hit",
     }
@@ -384,6 +391,7 @@ def test_stage2_slot_names_for_the_real_bile_demon(bile):
 SOURCE_WRAPS = {  # the clip library's own flags (test_molynx_assets checks them on the source)
     "die": False, "victory_celebration": False, "getting_hit": False, "being_slapped": False,
     "waking_up": False, "knockback": False, "falling": False, "torture": False,
+    "ground_slam": False,
 }
 
 
@@ -403,6 +411,7 @@ def test_file_plan_for_the_real_bile_demon(bile):
         "angry": False, "celebrating": False, "die": False, "being_slapped": False,
         "falling": False, "waking_up": False, "sleeping": True, "being_picked_up": True,
         "manufacturing": True, "praying": True, "torture": False, "drinking": False,
+        "ground_slam": False,
     }
     assert "staggering" not in stems_used(bile, plan)  # the editor's Bile Demon has no staggering slot
     assert stems_used(bile, plan) == set(plan.slots.values()) == set(plan.wraps) | set(POSE_STEMS)
@@ -611,7 +620,7 @@ def test_slot_assignment_and_stems_used(bile):
     assert stems_used(bile) == {
         "walk", "DraggedPose", "getting_hit", "being_slapped", "attack", "die", "DiePose", "happy",
         "angry", "being_picked_up", "sleeping", "eating", "manufacturing", "praying", "falling",
-        "torture", "drinking",
+        "torture", "drinking", "ground_slam",
         "waking_up", "celebrating", "StunnedPose", "ElecPose", "stand", "fidgeting", "PoseFrame",
     }
     assert set(CLIPS) - stems_used(bile) == {

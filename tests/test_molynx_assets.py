@@ -39,6 +39,7 @@ REQUIRED = {
     "angry": False, "celebrating": False, "die": False, "being_slapped": False,
     "falling": False, "waking_up": False, "sleeping": True, "being_picked_up": True,
     "manufacturing": True, "praying": True, "drinking": False, "torture": False,
+    "ground_slam": False,
 }
 RATIO = 1.38  # the redesign: as tall as the Horned Reaper (was 1.15 x the Bile Demon)
 GAME_FPS = 30
@@ -162,6 +163,7 @@ GEOM = {
     "sleeping": 6703, "training": 31942, "fighting_another_creature": 34076, "patrolling": 16934,
     "guarding": 1700, "manufacturing": 16395, "interacting_with_objects": 5977,
     "being_picked_up": 6464, "falling": 7827, "torture": 24247, "drinking": 19947,
+    "ground_slam": 12338,
 }
 GAME_MAX_GEOM = 34_816
 # The reduction tolerance (quantisation steps) of the files reduced wider than one step.

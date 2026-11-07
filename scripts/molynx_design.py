@@ -106,7 +106,8 @@ REVIEW_CLIPS = {  # clip -> (donor creature, donor animation, options)
 SLEEP_BREATH = 48        # frames of the breathing loop that ends behemoth_anims' sleeping clip
 REVIEW_SOURCES = {"falling": "Giant fallback", "eating": "Knight eat", "drinking": "Knight eat (no chicken)",
                   "torture": "Giant torture", "sleeping": "Lying breathing (end of Giant die), on the Bile Demon's bed",
-                  "manufacturing": "His own mace smash, cut at bench height, twice"}
+                  "manufacturing": "His own mace smash, cut at bench height, twice",
+                  "ground_slam": "His own mace swing, slowed in the wind-up, held on the floor (Ground Slam)"}
 BENCH_HEIGHT = 0.40      # the mace head's lowest point at the strike, as a fraction of his rest height
 
 
@@ -151,6 +152,47 @@ def hammer_frames(unit_dir) -> tuple[np.ndarray, float]:
     one = down + hold + up
     frames = np.asarray(one[:-1] + one[:-1] + [swing[0]])
     return frames, (len(frames) - 1) / DK2_FPS
+
+
+# Ground Slam (his spell-casting clip, the animMagicResource slot): his own MegaGlest swing, which
+# brings the mace over his head and down onto the floor in front of him, played as one heavy blow.
+SLAM_GROUND = 0.012      # the mace head's lowest point at the impact, as a fraction of his rest height
+SLAM_LEAD_IN = 8         # frames from his stand pose to the swing's first frame
+SLAM_WIND_UP_END = 16    # the swing's frame (at 30 fps) where the mace is high behind his head
+SLAM_WIND_UP_SLOW = 1.4  # the wind-up (swing frames 0..SLAM_WIND_UP_END) played this much slower
+SLAM_HOLD = 8            # frames the mace stays on the floor (the burst happens here)
+SLAM_RECOVER = 18        # frames back to his stand pose
+
+
+def slam_frames(unit_dir) -> tuple[np.ndarray, int]:
+    """(frames at 30 fps, index of the impact frame) of the Ground Slam clip: from his stand pose
+    into the swing, the wind-up slowed down, the swing down to the frame where the mace head's
+    lowest point reaches SLAM_GROUND (interpolated), the mace held on the floor, then back to the
+    stand pose. It does not loop: it starts and ends in his stand pose (stand frame 0)."""
+    from scripts.behemoth_rig import CLUB_VERTICES, behemoth_rest
+    from scripts.custom_character import native_clips
+    from scripts.golem_anims import _resample
+    rest, _, _ = behemoth_rest(unit_dir)
+    height = float(rest[:, 1].max() - rest[:, 1].min())
+    native = native_clips(unit_dir)
+    stand = np.asarray(native["stand"][0][0], float)
+    swing = np.asarray(native["attack"][0], float)
+    swing = _resample(swing, int(round(len(swing) / 0.75 / 18 * 30)))  # its real speed, as hammer_frames
+    low = swing[:, :CLUB_VERTICES, 1].min(axis=1) - rest[:, 1].min()
+    target = SLAM_GROUND * height
+    k = next(i for i in range(SLAM_WIND_UP_END + 1, len(swing)) if low[i] <= target < low[i - 1])
+    t = (low[k - 1] - target) / (low[k - 1] - low[k])
+    strike = swing[k - 1] + t * (swing[k] - swing[k - 1])
+    ease_in = (1 - np.cos(np.linspace(0, np.pi, SLAM_LEAD_IN + 1))) / 2
+    lead = [stand + e * (swing[0] - stand) for e in ease_in[:-1]]
+    wind = list(_resample(swing[:SLAM_WIND_UP_END + 1],
+                          int(round(SLAM_WIND_UP_END * SLAM_WIND_UP_SLOW)) + 1))
+    down = list(swing[SLAM_WIND_UP_END + 1:k]) + [strike]
+    impact = len(lead) + len(wind) + len(down) - 1
+    hold = [strike] * SLAM_HOLD
+    ease = (1 - np.cos(np.linspace(0, np.pi, SLAM_RECOVER + 1))) / 2
+    back = [strike + e * (stand - strike) for e in ease[1:]]
+    return np.asarray(lead + wind + down + hold + back), impact
 
 
 SLEEP_HEAD_SETTLE = 0.85  # how far his sleeping head goes back to where it sits on his chest standing
@@ -200,6 +242,9 @@ def review_clips(meshes_dir, cache, unit_dir, lib: dict) -> dict:
     out["manufacturing"] = {"frames": [np.asarray(f) for f in ham], "wrap": True,
                             "fps": round((len(ham) - 1) / secs, 3), "kind": "native",
                             "source": REVIEW_SOURCES["manufacturing"]}
+    slam, _ = slam_frames(unit_dir)
+    out["ground_slam"] = {"frames": [np.asarray(f) for f in slam], "wrap": False, "fps": float(DK2_FPS),
+                          "kind": "native", "source": REVIEW_SOURCES["ground_slam"]}
     return out
 
 
@@ -210,7 +255,8 @@ CLAW_SINK = 0.02
 HAND = np.array([231, 560, 226, 566, 238, 240, 236, 559, 564, 558, 556, 237])
 CLUB = np.arange(142)                      # behemoth_rig.CLUB_VERTICES
 ARM_N = np.r_[382:430, 654:694]
-NATIVE = {"stand", "walk", "attack", "die", "tpose", "manufacturing"}   # manufacturing: his own smash
+NATIVE = {"stand", "walk", "attack", "die", "tpose", "manufacturing",   # manufacturing: his own smash
+          "ground_slam"}                                                 # and his own swing
 MACELESS = {"torture"}   # strapped to the wheel: no mace (molynx_assets.MIRRORED_ARM spreads both arms alike)
 LOCKED = {"eating", "drinking", "praying", "happy", "celebrating", "victory_celebration"}
 
