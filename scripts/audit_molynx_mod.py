@@ -298,6 +298,9 @@ DEFAULT_FILE = "stand"
 WRAP_EXCEPTIONS: dict[str, tuple[str, str]] = {}
 
 
+GAME_DEFAULTS = {18: 16, 23: 60, 26: 60, 95: 5, 96: 2, 150: 30}   # rule m8
+
+
 @dataclass(frozen=True)
 class AuditReport:
     ok: bool
@@ -1648,7 +1651,9 @@ class _Flat:
         return True, (f"{len(new)} player records, {FLAT_BASE}'s, except Keeper 1's starting gold "
                       f"{STARTING_GOLD} (Keeper 1 human: isAi 0)")
 
-    # rule m8: variables
+    # rule m8: variables. Dead Walking overrides these game settings away from the game's defaults
+    # (GlobalVariables.kwd); with its 32000 for 23 and 26 (default 60) the hatchery floods with eggs
+    # (in-game test 2026-11-08), so the flat maps take the defaults, as Furnace has them.
     def m8(self):
         new = [struct.unpack("<i12s", e) for e in _records(self.file("Variables.kld"), VARIABLE_ENTRY, "Variables.kld")]
         old = [struct.unpack("<i12s", e) for e in _records(self.src["base"]["Variables.kld"], VARIABLE_ENTRY,
@@ -1663,6 +1668,8 @@ class _Flat:
             return False, f"{len(new)} entries, fewer than {FLAT_BASE}'s {len(old)}"
         for i, ((vid, rest), (bvid, brest)) in enumerate(zip(new, old)):
             k1_av = bvid == AVAILABILITY_VARIABLE and av(brest)[0][1] == HUMAN_PLAYER
+            if bvid in GAME_DEFAULTS:   # the base's override of a game setting: the game's default
+                brest = struct.pack("<i", GAME_DEFAULTS[bvid]) + brest[4:]
             if (vid, rest[:8] if k1_av else rest) != (bvid, brest[:8] if k1_av else brest):
                 problems.append(f"entry {i} of {FLAT_BASE}'s Variables moved or changed")
                 break

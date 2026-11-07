@@ -32,6 +32,8 @@ isAi (u32 at +4) is already 0. Keeper 1's heart keeps its base position, so its 
 still looks at it. Keeper 2's record is unchanged.
 
 Variables (0xE6). 16-byte entries (i32 variable id, then 12 bytes). Base entries keep their order;
+the game settings the base overrides (ids 3..240) take the game's defaults (GlobalVariables.kwd):
+Dead Walking's own values flood the hatchery (see misc_defaults);
 for player 3 every room, door, trap and keeper-spell availability (id 2: u16 type, u16 player,
 i32 type id, i32 value) is set to ENABLE (3), the missing ones are appended; the creature pool
 (id 1: creature id, value, player) and creature availability of Siege's player 3 are appended, and
@@ -430,8 +432,33 @@ def _shifted(structure: Structure, to: tuple[int, int]) -> list[Thing]:
     return [_moved(t, _xy(t)[0] + dx, _xy(t)[1] + dy) for t in structure.things]
 
 
+# Game settings ids (3..240) that a map may override. Dead Walking overrides some of them away from
+# the game's defaults (GlobalVariables.kwd), and the test maps are built from it. One of them
+# floods the hatchery (in-game test 2026-11-08: eggs pour out on the flat map, not on Furnace,
+# whose overrides equal the defaults): 23 and 26 are 32000 instead of 60. The flat maps take the
+# game's default for every overridden setting.
+MISC_IDS = range(3, 241)
+
+
+def misc_defaults() -> dict[int, int]:
+    """id -> the game's default value (GlobalVariables.kwd, block 0xE6) for the ids in MISC_IDS that
+    are a single setting (ids listed more than once there, such as 17, 43, 65 and 224, are per-type
+    tables and are left out)."""
+    blocks = [b for b in read_blocks((EDITOR_DIR / "GlobalVariables.kwd").read_bytes()) if b.signature == 0xE6]
+    (block,) = blocks
+    ents = [struct.unpack_from("<ii", block.content, i) for i in range(0, len(block.content), VARIABLE_SIZE)]
+    count = Counter(vid for vid, _v in ents)
+    return {vid: value for vid, value in ents if vid in MISC_IDS and count[vid] == 1}
+
+
+def _with_default(e: tuple, defaults: dict[int, int]) -> tuple:
+    return (e[0], defaults[e[0]], e[2], e[3]) if e[0] in defaults else e
+
+
 def _variables(base_vars: bytes, molynx_in_pool: bool) -> bytes:
     block, recs = read_variables(base_vars)
+    defaults = misc_defaults()
+    recs = [struct.pack("<iiii", *_with_default(_var(r), defaults)) for r in recs]
     ents = [_var(r) for r in recs]
     out = list(recs)
     have = {}
@@ -774,7 +801,8 @@ def _variable_errors(new: bytes, base: bytes, molynx_in_pool: bool) -> list[str]
     except ValueError as exc:
         return [f"rule 8: {exc}"]
     _bb, brecs = read_variables(base)
-    ents, bents = [_var(r) for r in recs], [_var(r) for r in brecs]
+    defaults = misc_defaults()
+    ents, bents = [_var(r) for r in recs], [_with_default(_var(r), defaults) for r in brecs]
     if len(ents) < len(bents):
         return ["rule 8: fewer entries than the base"]
     for old, cur in zip(bents, ents):
@@ -785,6 +813,9 @@ def _variable_errors(new: bytes, base: bytes, molynx_in_pool: bool) -> list[str]
         elif cur != old:
             errors.append("rule 8: a base entry moved or changed")
             break
+    off = sorted({e[0] for e in ents if e[0] in defaults and e[1] != defaults[e[0]]})
+    if off:
+        errors.append(f"rule 8: game settings {off} are not the game's defaults")
     keys = [_av_key(e) for e in ents if e[0] == AVAILABILITY]
     dup = sorted(k for k, n in Counter(keys).items() if n > 1)
     if dup:

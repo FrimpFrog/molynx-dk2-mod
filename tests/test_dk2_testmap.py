@@ -346,9 +346,14 @@ def test_rule8_variables(files, files_pool, pool):
     ents = _entries(v)
     base = _entries(_base()["Variables.kld"])
     assert len(ents) >= len(base)
+    # the game settings the base overrides take the game's defaults (written out: Dead Walking's
+    # 23 and 26 of 32000 instead of 60 flooded the hatchery in the 2026-11-08 test)
+    defaults = {18: 16, 23: 60, 26: 60, 95: 5, 96: 2, 150: 30}
     for old, new in zip(base, ents):  # the base entries keep their place
         if old[0] == 2 and old[1] >> 16 == 3:
             assert new[:3] == old[:3] and new[3] == 3
+        elif old[0] in defaults:
+            assert new == (old[0], defaults[old[0]], old[2], old[3])
         else:
             assert new == old
     avail = [(e[1] & 0xFFFF, e[1] >> 16, e[2]) for e in ents if e[0] == 2]
