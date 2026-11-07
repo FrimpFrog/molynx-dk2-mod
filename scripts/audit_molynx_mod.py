@@ -112,9 +112,9 @@ The stages (written independently of the builder, from the Molynx design):
      stunnedPose and elec included) and a slot of type NONE (0, not loaded by the game) keep the
      Bile Demon's 20 bytes. The frame count and
      loop flag are read from the folder's own file.
-  3  + hp, meleeDamage, fear, threat, mass, pay above the Bile Demon's, icon1Resource
-     `gui\\creatures\\evil\\molynx`, portraitResource `gui\\creatures\\evil\\molynx-bg`, and the five
-     text id fields changed.
+  3  + his character: every field of STAGE3 at its value, and his texts (STAGE3_TEXTS) in the
+     folder's Data/Text/Default/Text.str (the game's own entries kept byte for byte, his after
+     them) at the IDs record 47 names; the tooltip stays the shared 2408.
 
 LICENCE: GPL-3.0.
 """
@@ -145,7 +145,40 @@ MOLYNX_ID, MOLYNX_NAME, MOLYNX_PREFIX = 47, "Molynx", "Molynx-"
 SOURCE_RECORDS = 46
 NAME_FIELD_SIZE = 32
 ICON, PORTRAIT = r"gui\creatures\evil\molynx", r"gui\creatures\evil\molynx-bg"
-STATS = ("hp", "meleeDamage", "fear", "threat", "mass", "pay")
+# Stage 3: his own character, written out here from the design of 2026-11-07 (a tankier,
+# stronger, slightly faster Bile Demon, the Horned Reaper's bodyguard, never eating (stone); drawn to
+# a Guard Room and a Training Room, happiest guarding and training, hating research; Cast Armour,
+# creature spell 15, from level 4 in place of the gas spells). Raw
+# record values (float32 fields: value x 4096).
+STAGE3 = {
+    "hp": 8000, "meleeDamage": 600, "speed": 1843, "runSpeed": 2662, "meleeRecharge": 12288,
+    "meleeRange": 2867, "stunDuration": 12288, "mass": 24576, "fear": 600, "threat": 250,
+    "pay": 700, "maxGoldHeld": 7000, "timeAwake": 330,
+    "hungerRate": 134213632, "hungerFill": 0, "hpFromChicken": 0, "angerNoFood": 1,
+    "tortureTimeToConvert": 983040, "possessionManaCost": 400, "scoreRating": 115,
+    "manufacturePerSecond": 80, "expPerSecondTraining": 25, "manaGenPrayer": 70, "angerSlap": 4500,
+    "attractions[0].present": 1, "attractions[0].roomId": 9, "attractions[0].roomSize": 0,
+    "attractions[1].present": 1, "attractions[1].roomId": 7, "attractions[1].roomSize": 25,
+    "happyJobs[0].jobType": 6, "happyJobs[0].chance": 50,
+    "happyJobs[1].jobType": 4, "happyJobs[1].chance": 50,
+    "hateJobs[0]": 3, "hateJobs[1]": 0,
+    "spells[0].creatureSpellId": 15, "spells[0].levelAvailable": 4,
+    "spells[0].playAnimation": 1, "spells[0].shotDelay": 3563,
+    **{f"spells[1].{f}": 0 for f in ("playAnimation", "shotDelay", "creatureSpellId", "levelAvailable")},
+}
+# Stage 3: his texts, in the folder's Data/Text/Default/Text.str at the IDs record 47 names (the
+# game's own entries before them unchanged); the tooltip stays the game's shared one, 2408.
+STAGE3_TEXTS = {
+    "nameStringId": "Molynx",
+    "generalDescriptionStringId":
+        "Molynx.  Living stone, sworn to guard the Horned Reaper.  {26}.  Fighting Style: {27}.",
+    "strengthStringId": "Rock-hard hide and a crushing mace. Made of stone, he never eats, shrugs off "
+                        "blows and hardens into Stone Skin when the fighting starts.",
+    "weaknessStringId": "Proud and slow-witted. He won't study in the Library, and slapping him makes "
+                        "him furious.",
+}
+SHARED_TOOLTIP_ID = 2408
+TEXT_FILE = Path("Data") / "Text" / "Default" / "Text.str"
 # Stage 2 also gives him the Horned Reaper's size (editor Creatures.kwd, "Horny": scale 5734 = 1.4,
 # height 4096 = 1.0, eyeHeight 2744 = 0.67), his model files being as tall as Horny's.
 SIZE = {"scale": 5734, "height": 4096, "eyeHeight": 2744}
@@ -302,6 +335,7 @@ class _Files:
     """The folder's Data/Meshes and Data/EngineTextures files, each read and parsed once."""
 
     def __init__(self, mod_dir: Path) -> None:
+        self.mod_dir = mod_dir
         self.meshes = mod_dir / "Data" / "Meshes"
         self.textures = mod_dir / "Data" / "EngineTextures"
         self.mesh_names = set(os.listdir(self.meshes)) if self.meshes.is_dir() else set()
@@ -383,7 +417,8 @@ def _stage_field_sets(bile: Creature) -> dict[int, frozenset[str]]:
     """The set of record fields in which record 47 must differ from the Bile Demon, per stage."""
     renamed = frozenset(slot for slot in _anim_slots() if bile.resource_name(slot))
     stage2 = _STAGE1_FIELDS | renamed | set(SIZE) | {"icon1Resource", "portraitResource"}
-    stage3 = stage2 | set(STATS) | set(TEXT_ID_FIELDS)
+    stage3 = (stage2 | {f for f, v in STAGE3.items() if bile.get(f) != v}
+              | {f for f in STAGE3_TEXTS if bile.get(f) is not None})
     return {1: _STAGE1_FIELDS, 2: stage2, 3: stage3}
 
 
@@ -440,6 +475,33 @@ def _name_field_bytes(record: Creature) -> bytes:
     return bytes(record.raw[start:start + NAME_FIELD_SIZE])
 
 
+def _text_problems(molynx: Creature, mod_dir: Path) -> list[str]:
+    """Stage 3: the folder's Text.str is the game's with his texts after its own entries, and record
+    47's text IDs name them."""
+    from scripts.dk2paths import TEXT_DIR
+    from scripts.dk2str import StrFile
+    path = mod_dir / TEXT_FILE
+    if not path.is_file():
+        return [f"{TEXT_FILE.as_posix()} is missing (stage 3 ships his texts)"]
+    try:
+        mine = StrFile.read(path, TEXT_DIR / "MBToUni.dat")
+        game = StrFile.read(TEXT_DIR / "Text.str")
+    except (ValueError, struct.error) as err:
+        return [f"{TEXT_FILE.as_posix()} does not read: {err}"]
+    problems = []
+    if mine.entries[:len(game.entries)] != game.entries or mine.header != game.header:
+        problems.append(f"{TEXT_FILE.as_posix()}: the game's own {len(game.entries)} entries are not "
+                        "kept byte for byte")
+    for field, want in STAGE3_TEXTS.items():
+        sid = molynx.get(field)
+        if not len(game.entries) <= sid < len(mine.entries):
+            problems.append(f"{field} is {sid}, not one of the entries added after the game's "
+                            f"{len(game.entries)}")
+        elif mine.text(sid) != want:
+            problems.append(f"{field} {sid} reads {mine.text(sid)!r}, expected {want!r}")
+    return problems
+
+
 def _value_problems(molynx: Creature, bile: Creature, stage: int, order: int,
                     files: "_Files") -> tuple[list[str], dict[str, int]]:
     """Where record 47 has the right fields changed but not the ruled values; also counts of how
@@ -485,9 +547,13 @@ def _value_problems(molynx: Creature, bile: Creature, stage: int, order: int,
             if molynx.get(field) != want:
                 problems.append(f"{field} is {molynx.get(field)}, expected {want} (the Horned Reaper's)")
     if stage >= 3:
-        for stat in STATS:
-            if not molynx.get(stat) > bile.get(stat):
-                problems.append(f"{stat} is {molynx.get(stat)}, not above the Bile Demon's {bile.get(stat)}")
+        for field, want in STAGE3.items():
+            if molynx.get(field) != want:
+                problems.append(f"{field} is {molynx.get(field)}, expected {want} (stage 3)")
+        if molynx.get("tooltipStringId") != SHARED_TOOLTIP_ID:
+            problems.append(f"tooltipStringId is {molynx.get('tooltipStringId')}, expected the "
+                            f"shared {SHARED_TOOLTIP_ID}")
+        problems += _text_problems(molynx, files.mod_dir)
     if stage >= 2:
         for slot, expected in (("icon1Resource", ICON), ("portraitResource", PORTRAIT)):
             raw = _resource_bytes(molynx, slot)
@@ -847,10 +913,6 @@ def _check_assets(stage: int, molynx: Creature, bile: Creature,
     if stage >= 2:
         more, exceptions = _wrap_problems(renamed, bile, files)
         problems += more
-    if stage >= 3:
-        problems.append("stage 3 is not audited yet (until Task 10): its texts and stats are not "
-                        "checked (the icon and portrait pictures are, from stage 2), so a stage-3 "
-                        "folder never passes")
     if problems:
         return False, "; ".join(problems), set(changed), textures
     if stage == 1:
@@ -1689,6 +1751,7 @@ def _check_layout(mod_dir: Path, names: list[str], stage: int | None, meshes: se
     maps_rel = MAPS_PATH.as_posix()
     expected_maps = {name + suffix for name in names for suffix in MAP_SUFFIXES}
     stage2 = stage is not None and stage >= 2
+    stage3 = stage is not None and stage >= 3
     expected_meshes = {n + ".kmf" for n in meshes} if stage2 else set()
     expected_textures = {t + ".png" for t in textures} if stage2 else set()
     problems, files, mesh_count, texture_count, panel_count = [], [], 0, 0, 0
@@ -1697,12 +1760,15 @@ def _check_layout(mod_dir: Path, names: list[str], stage: int | None, meshes: se
         for d in sorted(dirs):
             rel = d if here == "." else f"{here}/{d}"
             if not (rel in ("Data", "Data/editor", maps_rel)
-                    or (stage2 and rel in ("Data/Meshes", "Data/EngineTextures") + PANEL_FOLDERS)):
+                    or (stage2 and rel in ("Data/Meshes", "Data/EngineTextures") + PANEL_FOLDERS)
+                    or (stage3 and rel in ("Data/Text", "Data/Text/Default"))):
                 problems.append(f"unexpected folder {rel}")
         for f in sorted(names_here):
             rel = f if here == "." else f"{here}/{f}"
             files.append(rel)
             if rel in ("resource.toml", EDITOR_CREATURES) or (here == maps_rel and f in expected_maps):
+                continue
+            if stage3 and rel == TEXT_FILE.as_posix():
                 continue
             if here == "Data/Meshes" and f in expected_meshes:
                 mesh_count += 1

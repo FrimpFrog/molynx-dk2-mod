@@ -350,6 +350,21 @@ def _panel_files(assets: _Assets) -> dict[str, bytes]:
     return files
 
 
+TEXT_PATH = "Data/Text/Default/Text.str"
+
+
+def molynx_text_file(text_dir: Path | None = None) -> tuple[bytes, dict[str, int]]:
+    """(the game's Text.str with his texts added at the end, his text_ids). The tooltip stays the
+    game's shared creature tooltip."""
+    from scripts.dk2paths import TEXT_DIR
+    from scripts.dk2str import StrFile
+    from scripts.molynx_record import SHARED_TOOLTIP_ID, TEXTS
+    text = StrFile.read(Path(text_dir or TEXT_DIR) / "Text.str")
+    keys = list(TEXTS)
+    ids = dict(zip(keys, text.append([TEXTS[k] for k in keys])))
+    return text.to_bytes(), {**ids, "tooltip": SHARED_TOOLTIP_ID}
+
+
 def _game_textures() -> set[str]:
     """Lower-case names of the game's own textures (EngineTextures cache, without the MMn suffix)."""
     from scripts.molynx_assets import texture_cache
@@ -362,7 +377,10 @@ def build_mod(stage: int, out_dir: Path, name: str = "Molynx", maps: list[str] |
               flat_maps: Mapping[str, bool] | None = None, editor_creatures: bool = True) -> Path:
     """Create `out_dir/<name>/` (see the module docstring) and return its path.
 
-    `stage` is 1, 2 or 3 (molynx_record); stage 3 needs `text_ids`; stages 2 and 3 need
+    `stage` is 1, 2 or 3 (molynx_record); at stage 3 without `text_ids` his texts
+    (molynx_record.TEXTS) are added to the game's Text.str and the folder ships it
+    (`molynx_text_file`); with `text_ids` the record names those and no text file is shipped. Stages
+    2 and 3 need
     `assets_dir`, an export folder of molynx_assets.export_molynx_assets: the frame counts and loop
     flags the record gives each slot are read from its files, and the Bile Demon files' loop flags
     from the game's meshes. `anim_info` / `file_wraps`, when given, must agree with what is read
@@ -376,8 +394,9 @@ def build_mod(stage: int, out_dir: Path, name: str = "Molynx", maps: list[str] |
     """
     _check_stage(stage)
     _check_name(name)
-    if stage == 3 and text_ids is None:
-        raise ValueError("stage 3 needs text_ids (keys name, tooltip, general, strength, weakness)")
+    text_file = None
+    if stage == 3 and text_ids is None:   # his texts added to the game's Text.str, shipped with him
+        text_file, text_ids = molynx_text_file()
     if stage >= 2 and assets_dir is None:
         raise ValueError(f"stage {stage} needs assets_dir (an export folder of "
                          "molynx_assets.export_molynx_assets); anim_info and file_wraps are read "
@@ -414,6 +433,8 @@ def build_mod(stage: int, out_dir: Path, name: str = "Molynx", maps: list[str] |
     if assets is not None:
         files.update(_asset_files(assets, stems))
         files.update(_panel_files(assets))
+    if text_file is not None:
+        files[TEXT_PATH] = text_file
 
     target.mkdir(parents=True)  # not exist_ok: never reuse a folder
     for relative, data in files.items():
@@ -427,20 +448,22 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Build a Molynx Flame mod folder. Stage 1: the 47th creature as an exact Bile "
                     "Demon copy (folder Molynx_slot_only). Stage 2: with his own model and "
-                    "animations, copied from an export folder (--assets).")
-    parser.add_argument("--stage", type=int, choices=(1, 2), default=1, help="1 (default) or 2")
+                    "animations, copied from an export folder (--assets). Stage 3: also his own "
+                    "stats, character and texts.")
+    parser.add_argument("--stage", type=int, choices=(1, 2, 3), default=1,
+                        help="1 (default), 2 or 3 (his own stats, character and texts)")
     parser.add_argument("--out", type=Path, required=True, help="folder that will hold the mod folder")
     parser.add_argument("--assets", type=Path,
-                        help="stage 2 only: the folder molynx_assets.export_molynx_assets wrote")
+                        help="stages 2 and 3: the folder molynx_assets.export_molynx_assets wrote")
     parser.add_argument("--name", help=f"mod folder name (default {STAGE1_FOLDER} at stage 1, else Molynx)")
     parser.add_argument("--maps", nargs="+",
                         help="copied map names only, no flat map (default: Siege copied and the "
                              "flat maps " + ", ".join(FLAT_MAPS) + ")")
     args = parser.parse_args(argv)
-    if args.stage == 2 and args.assets is None:
-        parser.error("--stage 2 needs --assets (the export folder with Molynx's files)")
+    if args.stage >= 2 and args.assets is None:
+        parser.error(f"--stage {args.stage} needs --assets (the export folder with Molynx's files)")
     if args.stage == 1 and args.assets is not None:
-        parser.error("--assets is only for --stage 2")
+        parser.error("--assets is only for --stage 2 or 3")
     name = args.name or (STAGE1_FOLDER if args.stage == 1 else "Molynx")
     print(build_mod(args.stage, args.out, name, args.maps, assets_dir=args.assets))
     return 0

@@ -10,7 +10,9 @@ test bundle build all three):
      the name that describe the file (frames, fps, flags, type; see "Slot tails"); and his size,
      SIZE_FIELDS (the redesign, 2026-11-06); and the icon1 / portrait resource names (his own
      creature-panel pictures, second review round 2026-11-07).
-  3  + the six stats of MULTIPLIERS and the five text IDs.
+  3  + his own character (2026-11-07, the user's brief: a tankier, stronger, slightly faster Bile
+     Demon, the Horned Reaper's bodyguard, eating less, made his own): STATS, PERSONALITY and the
+     five text IDs (his texts are TEXTS, added to the game's Text.str by the builder).
 
 Everything else (sound category, lair, spells, attractions, jobs, anger values, flags, the
 88-byte tail of a 5537-byte record, ...) stays the Bile Demon's. The Bile Demon is not modified.
@@ -20,10 +22,8 @@ cloneCreatureId is 0. The 33 creatures that are not "Unique ..." copies all have
 creature they clone (Unique Bile Demon -> 3); see creature_table.txt in the scratchpad and
 `test_clone_creature_id_follows_the_non_unique_pattern`. Molynx is not a unique copy, so it gets 0.
 
-Stats: float32 / float16 fields are fixed-point ints (value / 4096); MULTIPLIERS apply to the raw
-integer `Creature.get` returns (Bile Demon mass 20480 raw = 5.0). The cap of
-`min(cap, round(bile * multiplier))` is the field's own maximum from its type: 65535 for the ushort
-fields (hp, meleeDamage, fear, threat, pay), 2**31 - 1 for the int32 mass.
+Stats: float32 / float16 fields are fixed-point ints (value / 4096): STATS holds the raw integers
+`Creature.set` takes (mass 24576 raw = 6.0).
 
 Animation slots. SLOT_CLIPS maps an animation slot (short name, as `anim_slot` accepts) to the key
 of the Molynx clip that drives it: a clip name as in the clip library (lowercase, underscores,
@@ -107,7 +107,72 @@ DEFAULT_STEM = "stand"
 # height and eyeHeight he stands exactly as tall as the Horned Reaper in the game. `width` stays the
 # Bile Demon's (0.425; Horny 0.348): Molynx is as bulky as the Bile Demon.
 SIZE_FIELDS = {"scale": 5734, "height": 4096, "eyeHeight": 2744}
-MULTIPLIERS = {"hp": 1.6, "meleeDamage": 1.4, "fear": 1.2, "threat": 1.4, "mass": 1.2, "pay": 1.3}
+FX = 4096   # fixed point: float32 fields hold value x 4096
+
+# Stage 3: his own numbers (raw values; the Bile Demon's in the comments). A tank and a bodyguard:
+# more health and harder hits than the Bile Demon (still below the Horned Reaper's 700 damage), a
+# little faster, quicker out of a stun, heavier, more feared, paid more, loyal under torture. He is
+# rock, so he never eats: the Horned Reaper's hunger values (hungerRate 32767 s, hungerFill 0, no
+# health from a chicken, angerNoFood 1).
+STATS = {
+    "hp": 8000,                              # 6000
+    "meleeDamage": 600,                      # 525 (Horned Reaper 700)
+    "speed": round(0.45 * FX),               # 0.40
+    "runSpeed": round(0.65 * FX),            # 0.56
+    "meleeRecharge": round(3.0 * FX),        # 3.5 s
+    "meleeRange": round(0.7 * FX),           # 0.8 (his gas reached further than the mace)
+    "stunDuration": round(3.0 * FX),         # 5 s
+    "mass": round(6.0 * FX),                 # 5.0
+    "fear": 600,                             # 300
+    "threat": 250,                           # 120
+    "pay": 700,                              # 600
+    "maxGoldHeld": 7000,                     # 6000
+    "hungerRate": 134213632,                 # 220 s; the Horned Reaper's: never hungry
+    "hungerFill": 0,                         # 5 chickens a meal
+    "hpFromChicken": 0,                      # 200
+    "angerNoFood": 1,                        # 150
+    "timeAwake": 330,                        # 270 s
+    "tortureTimeToConvert": round(240 * FX), # 200 s
+    "possessionManaCost": 400,               # 300
+    "scoreRating": 115,                      # 90
+    "manufacturePerSecond": 80,              # 50
+    "expPerSecondTraining": 25,              # 20
+    "manaGenPrayer": 70,                     # 50
+    "angerSlap": 4500,                       # 3000: proud, slaps anger him more
+}
+# Room and job IDs (OpenKeeper's tables; the room order is Rooms.kwd's): 4 Hatchery, 7 Training
+# Room, 9 Guard Room, 10 Workshop; jobs 3 research, 4 train, 5 manufacture, 6 guard.
+ROOM_TRAINING, ROOM_GUARD = 7, 9
+JOB_RESEARCH, JOB_TRAIN, JOB_GUARD = 3, 4, 6
+SPELL_CAST_ARMOUR = 15   # creature spell IDs are 1 + the entry's place in the CreatureSpells block
+# Stage 3: what makes him unlike the Bile Demon. Drawn to a Guard Room and a Training Room (the
+# Bile Demon: Workshop and Hatchery), happiest guarding and training (the Bile Demon: training and
+# manufacturing), hates research, and no gas: in place of the Bile Demon's Gas Cloud (level 4) and
+# Gas Missile (level 8) he has one close-range ability, Stone Skin: the game's Cast Armour creature
+# spell (CreatureSpells entry 15, the Monk's and the Fairy's at level 8), his from level 4.
+PERSONALITY = {
+    "attractions[0].present": 1, "attractions[0].roomId": ROOM_GUARD, "attractions[0].roomSize": 0,
+    "attractions[1].present": 1, "attractions[1].roomId": ROOM_TRAINING,
+    "attractions[1].roomSize": 25,
+    "happyJobs[0].jobType": JOB_GUARD, "happyJobs[0].chance": 50,
+    "happyJobs[1].jobType": JOB_TRAIN, "happyJobs[1].chance": 50,
+    "hateJobs[0]": JOB_RESEARCH, "hateJobs[1]": 0,
+    "spells[0].creatureSpellId": SPELL_CAST_ARMOUR, "spells[0].levelAvailable": 4,
+    "spells[0].playAnimation": 1, "spells[0].shotDelay": 3563,     # the Monk's Cast Armour delay
+    **{f"spells[1].{f}": 0 for f in ("playAnimation", "shotDelay", "creatureSpellId", "levelAvailable")},
+}
+# Stage 3: his texts, by text_ids key ({n}: a value the game fills in, as in the Bile Demon's own
+# description "Bile Demon.  {26}.  Fighting Style: {27}."). The tooltip stays the game's shared one
+# ("{28} the {29} ...", text 2408), so TEXTS has no "tooltip".
+TEXTS = {
+    "name": "Molynx",
+    "general": "Molynx.  Living stone, sworn to guard the Horned Reaper.  {26}.  Fighting Style: {27}.",
+    "strength": "Rock-hard hide and a crushing mace. Made of stone, he never eats, shrugs off blows "
+                "and hardens into Stone Skin when the fighting starts.",
+    "weakness": "Proud and slow-witted. He won't study in the Library, and slapping him makes him "
+                "furious.",
+}
+SHARED_TOOLTIP_ID = 2408
 
 # text_ids key -> creature field
 TEXT_ID_FIELDS = {
@@ -373,8 +438,8 @@ def build_molynx(bile: Creature, stage: int, order_in_editor: int,
         molynx.set_resource_name("icon1Resource", ICON_RESOURCE)
         molynx.set_resource_name("portraitResource", PORTRAIT_RESOURCE)
     if stage >= 3:
-        for name, multiplier in MULTIPLIERS.items():
-            molynx.set(name, min(_field_max(name), round(bile.get(name) * multiplier)))
+        for name, value in {**STATS, **PERSONALITY}.items():
+            molynx.set(name, value)
         if text_ids is not None:
             for key, field in TEXT_ID_FIELDS.items():
                 molynx.set(field, text_ids[key])

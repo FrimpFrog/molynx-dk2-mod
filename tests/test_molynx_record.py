@@ -9,7 +9,7 @@ from scripts.dk2kwd_creatures import (
 from scripts.dk2paths import EDITOR_DIR, MAPS_DIR, have
 from molynx_files import ANIM_INFO, FILE_WRAPS
 from scripts.molynx_record import (
-    CLIPS, MAX_CLOSE_GAP, MULTIPLIERS, ONE_WAY_GAPS, POSE_STEMS, SLOT_CLIPS, SOURCE_WRAP, STATIC_POSES,
+    CLIPS, MAX_CLOSE_GAP, PERSONALITY, STATS, TEXTS, ONE_WAY_GAPS, POSE_STEMS, SLOT_CLIPS, SOURCE_WRAP, STATIC_POSES,
     WrapException, build_molynx, file_plan, review_list, slot_assignment, stems_used,
 )
 
@@ -25,7 +25,9 @@ TEXT_FIELDS = {
 STAGE1_FIELDS = {"name", "creatureId", "orderInEditor"}
 # Stage 2 also gives him the Horned Reaper's size (the editor's "Horny" record).
 SIZE = {"scale": 5734, "height": 4096, "eyeHeight": 2744}
-STAT_FIELDS = {"hp", "meleeDamage", "fear", "threat", "mass", "pay"}
+def stat_fields(bile):
+    """The fields stage 3 changes for his character (those whose value is not the Bile Demon's)."""
+    return {k for k, v in {**STATS, **PERSONALITY}.items() if bile.get(k) != v}
 PORTRAIT_FIELDS = {"icon1Resource", "portraitResource"}
 
 CLIP_LIBRARY = {
@@ -189,8 +191,18 @@ def expected_slot_names(bile: Creature) -> dict[str, str]:
 
 # ---- the tables --------------------------------------------------------------------------------
 
-def test_multipliers_are_the_specified_ones():
-    assert MULTIPLIERS == {"hp": 1.6, "meleeDamage": 1.4, "fear": 1.2, "threat": 1.4, "mass": 1.2, "pay": 1.3}
+def test_stage3_character_is_the_design_of_2026_11_07():
+    """The user's brief: a stronger, tankier, slightly faster Bile Demon, the Horned Reaper's
+    bodyguard, eating less, made his own."""
+    assert STATS["hp"] == 8000 and STATS["meleeDamage"] == 600            # Bile 6000 / 525
+    assert STATS["speed"] == 1843 and STATS["runSpeed"] == 2662           # Bile 1638 / 2293
+    assert STATS["hungerFill"] == 0 and STATS["hpFromChicken"] == 0       # stone: never eats
+    assert STATS["stunDuration"] == 12288 and STATS["mass"] == 24576
+    assert PERSONALITY["attractions[0].roomId"] == 9 and PERSONALITY["attractions[1].roomId"] == 7
+    assert PERSONALITY["happyJobs[0].jobType"] == 6 and PERSONALITY["hateJobs[0]"] == 3
+    assert PERSONALITY["spells[0].creatureSpellId"] == 15                 # Cast Armour, no gas
+    assert PERSONALITY["spells[1].creatureSpellId"] == 0
+    assert TEXTS["name"] == "Molynx" and set(TEXTS) == {"name", "general", "strength", "weakness"}
 
 
 def test_clip_library_is_the_28_clips():
@@ -611,10 +623,10 @@ def test_slot_assignment_and_stems_used(bile):
 def test_stage3_adds_only_stats_and_text_ids(bile):
     stage2, stage3 = build(bile, 2), build(bile, 3, text_ids=TEXT_IDS)
     changed = changed_fields(stage2, stage3)
-    assert changed == STAT_FIELDS | set(TEXT_FIELDS.values())
+    assert changed == stat_fields(bile) | set(TEXT_FIELDS.values())
     # The change from the Bile Demon is stage 1 + the slot names and tails + that.
     assert changed_fields(bile, stage3) == (
-        STAGE1_FIELDS | set(expected_slot_names(bile)) | set(SIZE) | STAT_FIELDS | PORTRAIT_FIELDS
+        STAGE1_FIELDS | set(expected_slot_names(bile)) | set(SIZE) | stat_fields(bile) | PORTRAIT_FIELDS
         | set(TEXT_FIELDS.values()))
     assert bytes(stage3.raw[RECORD_SIZE:]) == bytes(bile.raw[RECORD_SIZE:])
     for offset in changed_offsets(bile, stage2):
@@ -635,26 +647,14 @@ def test_stage2_names_his_own_panel_pictures(bile):
 
 
 @needs_data
-def test_stage3_stats_are_the_scaled_bile_values_capped_at_the_field_maximum(bile):
+def test_stage3_sets_his_stats_and_personality(bile):
     stage3 = build(bile, 3, text_ids=TEXT_IDS)
-    for name, multiplier in MULTIPLIERS.items():
-        fmt = FIELDS[name].fmt
-        bits = 8 * struct.calcsize(fmt)
-        cap = 2 ** (bits - 1) - 1 if fmt[-1].islower() else 2 ** bits - 1  # u16 -> 65535, int32 -> 2**31-1
-        assert stage3.get(name) == min(cap, round(bile.get(name) * multiplier)), name
-        assert stage3.get(name) > bile.get(name), name
-    # Pinned for the real Bile Demon (hp 6000, melee 525, fear 300, threat 120, mass 5.0, pay 600).
-    assert {n: stage3.get(n) for n in MULTIPLIERS} == {
-        "hp": 9600, "meleeDamage": 735, "fear": 360, "threat": 168, "mass": 24576, "pay": 780}
-
-
-@needs_data
-def test_stat_cap_is_the_field_maximum_not_a_fixed_65535(bile):
-    bile.set("hp", 60000)       # u16: 60000 * 1.6 = 96000 -> capped at 65535
-    bile.set("mass", 2 ** 31 - 10)  # int32: capped at 2**31 - 1, not 65535
-    stage3 = build(bile, 3, text_ids=TEXT_IDS)
-    assert stage3.get("hp") == 65535
-    assert stage3.get("mass") == 2 ** 31 - 1
+    for name, value in {**STATS, **PERSONALITY}.items():
+        assert stage3.get(name) == value, name
+    for name in ("hp", "meleeDamage", "speed", "runSpeed", "mass", "fear", "threat"):
+        assert stage3.get(name) > bile.get(name), name     # stronger, tankier, faster
+    assert stage3.get("hungerFill") == 0 < bile.get("hungerFill")  # never eats
+    assert stage3.get("stunDuration") < bile.get("stunDuration")
 
 
 @needs_data
@@ -668,7 +668,7 @@ def test_stage3_text_ids(bile):
 @needs_data
 def test_stage3_without_text_ids_keeps_the_bile_demons(bile):
     stage2, stage3 = build(bile, 2), build(bile, 3)
-    assert changed_fields(stage2, stage3) == STAT_FIELDS
+    assert changed_fields(stage2, stage3) == stat_fields(bile)
     for field in TEXT_FIELDS.values():
         assert stage3.get(field) == bile.get(field)
 

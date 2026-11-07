@@ -342,8 +342,8 @@ def test_build_stage_1_takes_no_assets_dir(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
-def test_build_stage_3_needs_text_ids(tmp_path):
-    with pytest.raises(ValueError, match="text_ids"):
+def test_build_stage_3_needs_assets_too(tmp_path):
+    with pytest.raises(ValueError, match="assets_dir"):
         build_mod(3, tmp_path)
     assert list(tmp_path.iterdir()) == []
 
@@ -1446,14 +1446,35 @@ def test_stage2_empty_bile_slots_stay_empty_and_other_fields_are_unchanged(mod2)
 
 @needs_data
 @needs_assets
-def test_stage3_fields_are_recognised_but_texts_are_not_yet_checked(tmp_path, assets_dir):
+def test_stage3_ships_his_texts_and_passes_the_audit(tmp_path, assets_dir):
+    """Stage 3 without text_ids: his texts are added after the game's own in Text.str, the record
+    names them, and the audit reads them back."""
+    from scripts.dk2paths import TEXT_DIR
+    from scripts.dk2str import StrFile
+    from scripts.molynx_record import TEXTS
+    out = build_mod(3, tmp_path, "Molynx_full", maps=["Siege"], assets_dir=assets_dir)
+    report = audit(out)
+    assert report.ok, fail_lines(report)
+    assert any("stage 3" in line for line in report.lines if line.startswith("PASS (b)"))
+    text = StrFile.read(out / "Data" / "Text" / "Default" / "Text.str", TEXT_DIR / "MBToUni.dat")
+    game = StrFile.read(TEXT_DIR / "Text.str")
+    molynx = record_47(out, "Siege")
+    fields = {"name": "nameStringId", "general": "generalDescriptionStringId",
+              "strength": "strengthStringId", "weakness": "weaknessStringId"}
+    for key, field in fields.items():
+        assert molynx.get(field) >= len(game.entries)
+        assert text.text(molynx.get(field)) == TEXTS[key]
+    assert molynx.get("tooltipStringId") == 2408
+
+
+@needs_data
+@needs_assets
+def test_stage3_with_text_ids_but_no_text_file_fails_the_audit(tmp_path, assets_dir):
     out = build_mod(3, tmp_path, "Molynx_full", maps=["Siege"], text_ids=TEXT_IDS, assets_dir=assets_dir)
     report = audit(out)
-    assert any("stage 3" in line for line in report.lines if line.startswith("PASS (b)"))
     assert not report.ok
     (line,) = fail_lines(report)
-    assert line.startswith("FAIL (f)") and "texts" in line and "not checked" in line
-    assert "stage 3 is not audited yet" in line
+    assert line.startswith("FAIL (b)") and "Text.str is missing" in line
 
 
 @needs_data
