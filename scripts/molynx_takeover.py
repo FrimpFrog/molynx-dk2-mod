@@ -1,5 +1,12 @@
 """Move Molynx from the new creatureId 47 into an existing, unused creature slot (default 46, "Jack").
 
+No longer the shipped form (2026-11-08): Molynx runs as creature 47 in the game (build 260228 of
+Flame with the Molynx patches, flame_patch/), Skirmish -> Dead Walking tested: he loads by the
+heart, plays, and can be possessed. Slot 46 is not usable for him anyway: the game treats type 46
+as the Jack In The Box (the spell-target search CThing sub_44DEC0 skips it, so Possession cannot
+reach him, and processTakeDamage makes it explode with shot 65 when it dies). The notes below are
+the reasoning of 2026-11-07.
+
 Why. Creature 47 cannot work in the unpatched game: the player structure (CPlayer, 4389 bytes, Flame
 mapping DKII_EXE_v170.sgmap) holds `fB57_creatureEntranceInfo[46][9]`, one entry per creature type
 1..46, used by the portal code (Entrance_cpp_4DBF90) and `fFCE_creaturesUsed[47]` (types 0..46).
