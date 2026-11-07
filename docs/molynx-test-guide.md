@@ -165,6 +165,37 @@ How to see it on the flat map (no enemies there):
 Tell me if: the game crashes when he slams or when the map loads; the icon is blank; nothing
 bursts; the burst is in the wrong place (it should be where the mace hits); or the sound is wrong.
 
+## Creatures 48, 49 and 50 and the portal (Flame patch v2)
+
+This build needs **Flame with the Molynx patches v2** (`PATCH.dll`, `flame\Flame.dll`,
+`flame\DKII.dll`). It adds three placeholder creatures. Each is a copy of one of the game's elite
+("Unique") creatures, made into an ordinary portal creature:
+
+| Type | Name | Copy of |
+|---|---|---|
+| 48 | Elite Troll | Unique Troll (35) |
+| 49 | Elite Dark Angel | Unique Dark Angel (44) |
+| 50 | Elite Salamander | Unique Salamander (39) |
+
+They start next to Molynx at his level. On the portal maps (Dead Walking, Molynx Test Portal) they
+are also in your portal pool, just like Molynx.
+
+1. Start Skirmish, then Dead Walking. Check that the three stand by your heart next to Molynx and
+   carry their own names.
+2. **Possess** each of them and use their abilities.
+3. **The portal.** Claim the portal and build a Lair, a Hatchery and a Training Room (plus a Library
+   and a Workshop if you like). Wait for creatures to come. Molynx (47) and 48 to 50 should be able
+   to arrive like the normal portal creatures.
+4. Send `flame\molynx.log`. It should say `7 of 7 patches applied` and list the portal slots. With
+   50 creature types, the list has 47, 48, 49 and 50 at its end, in place of Jack, Unique Dark
+   Angel, Unique Black Knight and Unique Vampire (creatures that never come through a portal anyway).
+5. Also try: one of them dying, slapping and picking them up, and save then load.
+
+To add other creatures the same way, use `scripts/dk2_add_creatures.py` (see its notes): it clones
+a record into every creature table, can give it a new name, and puts it wherever an existing
+creature already stands and in that creature's pools. New ids must follow the last one with no gap
+(47, 48, 49, ...).
+
 ## Taking screenshots and video
 
 A photo of the monitor with your phone is fine. If you want real screenshots, run the game in a
