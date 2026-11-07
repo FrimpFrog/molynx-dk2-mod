@@ -153,6 +153,26 @@ def hammer_frames(unit_dir) -> tuple[np.ndarray, float]:
     return frames, (len(frames) - 1) / DK2_FPS
 
 
+SLEEP_HEAD_SETTLE = 0.85  # how far his sleeping head goes back to where it sits on his chest standing
+
+
+def settle_head(frames: list, rig, amount: float) -> list:
+    """The head moved `amount` of the way back to where it sits on his chest when he stands (his
+    chest's rigid move from the rest pose), each vertex as much as it is skinned to the head: in
+    the lying clip the head was thrown back and the neck stretched (second review round)."""
+    rest = np.asarray(rig.rest, float)
+    w = np.asarray(rig.weights)
+    bones = list(rig.bones)
+    chest = np.nonzero(w[:, bones.index("torso")] > 0.9)[0]
+    chest = chest[chest >= len(CLUB)]
+    a = amount * w[:, bones.index("head")][:, None]
+    out = []
+    for f in frames:
+        R, t = kabsch(rest[chest], f[chest])
+        out.append(f * (1 - a) + (rest @ R.T + t) * a)
+    return out
+
+
 def review_clips(meshes_dir, cache, unit_dir, lib: dict) -> dict:
     """{clip: library entry} of the review round (see REVIEW_CLIPS), made like build_all's clips."""
     from scripts.behemoth_anims import DK2_FPS
@@ -174,7 +194,7 @@ def review_clips(meshes_dir, cache, unit_dir, lib: dict) -> dict:
                      "fps": round(len(frames) / seconds, 3), "kind": "dk2", "source": REVIEW_SOURCES[name]}
     out["drinking"] = {**out["eating"], "source": REVIEW_SOURCES["drinking"]}
     old = lib["sleeping"]
-    breath = [np.asarray(f) for f in old["frames"][-SLEEP_BREATH:]]
+    breath = settle_head([np.asarray(f) for f in old["frames"][-SLEEP_BREATH:]], rig, SLEEP_HEAD_SETTLE)
     out["sleeping"] = {**old, "frames": breath + [breath[0]], "wrap": True, "source": REVIEW_SOURCES["sleeping"]}
     ham, secs = hammer_frames(unit_dir)
     out["manufacturing"] = {"frames": [np.asarray(f) for f in ham], "wrap": True,

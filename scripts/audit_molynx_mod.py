@@ -382,8 +382,8 @@ def _anim_slots() -> list[str]:
 def _stage_field_sets(bile: Creature) -> dict[int, frozenset[str]]:
     """The set of record fields in which record 47 must differ from the Bile Demon, per stage."""
     renamed = frozenset(slot for slot in _anim_slots() if bile.resource_name(slot))
-    stage2 = _STAGE1_FIELDS | renamed | set(SIZE)
-    stage3 = stage2 | set(STATS) | {"icon1Resource", "portraitResource"} | set(TEXT_ID_FIELDS)
+    stage2 = _STAGE1_FIELDS | renamed | set(SIZE) | {"icon1Resource", "portraitResource"}
+    stage3 = stage2 | set(STATS) | set(TEXT_ID_FIELDS)
     return {1: _STAGE1_FIELDS, 2: stage2, 3: stage3}
 
 
@@ -488,6 +488,7 @@ def _value_problems(molynx: Creature, bile: Creature, stage: int, order: int,
         for stat in STATS:
             if not molynx.get(stat) > bile.get(stat):
                 problems.append(f"{stat} is {molynx.get(stat)}, not above the Bile Demon's {bile.get(stat)}")
+    if stage >= 2:
         for slot, expected in (("icon1Resource", ICON), ("portraitResource", PORTRAIT)):
             raw = _resource_bytes(molynx, slot)
             if molynx.resource_name(slot) != expected:
@@ -847,8 +848,8 @@ def _check_assets(stage: int, molynx: Creature, bile: Creature,
         more, exceptions = _wrap_problems(renamed, bile, files)
         problems += more
     if stage >= 3:
-        problems.append("stage 3 is not audited yet (until Task 10): its icon and portrait files "
-                        "(icon1Resource, portraitResource) and texts are not checked, so a stage-3 "
+        problems.append("stage 3 is not audited yet (until Task 10): its texts and stats are not "
+                        "checked (the icon and portrait pictures are, from stage 2), so a stage-3 "
                         "folder never passes")
     if problems:
         return False, "; ".join(problems), set(changed), textures
@@ -1674,6 +1675,13 @@ def _map_names(files: list[str]) -> list[str]:
     return sorted(names)
 
 
+# His creature-panel pictures (stage 2 on): the textures the record's icon1 / portrait resources
+# name, GUI\Creatures\Evil\molynx(-bg), as Flame reads them (a name's folders are folders).
+PANEL_FOLDERS = ("Data/EngineTextures/GUI", "Data/EngineTextures/GUI/Creatures",
+                 "Data/EngineTextures/GUI/Creatures/Evil")
+PANEL_FILES = {"molynx.png", "molynx-bg.png"}
+
+
 def _check_layout(mod_dir: Path, names: list[str], stage: int | None, meshes: set[str],
                   textures: set[str], required: tuple[str, ...] = ()) -> tuple[bool, str]:
     """Rule (g): `meshes` / `textures` are the names record 47 and its meshes use (stage >= 2);
@@ -1683,13 +1691,13 @@ def _check_layout(mod_dir: Path, names: list[str], stage: int | None, meshes: se
     stage2 = stage is not None and stage >= 2
     expected_meshes = {n + ".kmf" for n in meshes} if stage2 else set()
     expected_textures = {t + ".png" for t in textures} if stage2 else set()
-    problems, files, mesh_count, texture_count = [], [], 0, 0
+    problems, files, mesh_count, texture_count, panel_count = [], [], 0, 0, 0
     for root, dirs, names_here in os.walk(mod_dir):
         here = Path(root).relative_to(mod_dir).as_posix()
         for d in sorted(dirs):
             rel = d if here == "." else f"{here}/{d}"
             if not (rel in ("Data", "Data/editor", maps_rel)
-                    or (stage2 and rel in ("Data/Meshes", "Data/EngineTextures"))):
+                    or (stage2 and rel in ("Data/Meshes", "Data/EngineTextures") + PANEL_FOLDERS)):
                 problems.append(f"unexpected folder {rel}")
         for f in sorted(names_here):
             rel = f if here == "." else f"{here}/{f}"
@@ -1698,6 +1706,8 @@ def _check_layout(mod_dir: Path, names: list[str], stage: int | None, meshes: se
                 continue
             if here == "Data/Meshes" and f in expected_meshes:
                 mesh_count += 1
+            elif stage2 and here == PANEL_FOLDERS[-1] and f in PANEL_FILES:
+                panel_count += 1
             elif here == "Data/EngineTextures" and f in expected_textures:
                 texture_count += 1
             elif here == "Data/Meshes" and f.endswith(".kmf") and stage2:
@@ -1708,6 +1718,8 @@ def _check_layout(mod_dir: Path, names: list[str], stage: int | None, meshes: se
                 problems.append(f"unexpected file {rel}")
     if "resource.toml" not in files:
         problems.append("resource.toml is missing")
+    if stage2 and panel_count != len(PANEL_FILES):
+        problems.append(f"{PANEL_FOLDERS[-1]} must hold " + " and ".join(sorted(PANEL_FILES)))
     if not names:
         problems.append(f"no map files in {maps_rel}")
     present = set(files)
@@ -1721,8 +1733,8 @@ def _check_layout(mod_dir: Path, names: list[str], stage: int | None, meshes: se
             problems.append(f"map {name} is missing " + ", ".join(missing))
     if problems:
         return False, "; ".join(problems)
-    extra = (f", {mesh_count} meshes that record 47 names and {texture_count} textures those "
-             "meshes name") if stage2 else ""
+    extra = (f", {mesh_count} meshes that record 47 names, {texture_count} textures those "
+             f"meshes name and his {panel_count} creature-panel pictures") if stage2 else ""
     return True, (f"holds only resource.toml and {len(names) * len(MAP_SUFFIXES)} map files of "
                   f"{len(names)} map(s) ({', '.join(names)}){extra}")
 

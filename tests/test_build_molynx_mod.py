@@ -48,6 +48,7 @@ MAPS = ["Siege", SECOND]  # the Test A maps (built with maps=MAPS: both copied a
 FLAT = {"Molynx Test": (False, "Molynx Test"), "Molynx Test Portal": (True, "Molynx Test Portal"),
         SECOND: (False, "Molynx Test")}
 SHIPPED_MAPS = sorted(["Siege", *FLAT])
+PANEL_FILES = ["molynx-bg.png", "molynx.png"]
 TEXT_IDS = {"name": 3001, "tooltip": 3002, "general": 3003, "strength": 3004, "weakness": 3005}
 # The files a stage-2 folder delivers (literal; the record's file plan for the test maps' Bile Demons):
 # 20 clips (staggering only for Siege's type NONE dejectedPose slot), the variant walk_once, the 5
@@ -199,7 +200,7 @@ def mod(stage1_dir, tmp_path):
 def assets_dir(tmp_path_factory):
     """A fresh export of Molynx's files (models, variants, poses, textures; no portraits)."""
     out = tmp_path_factory.mktemp("assets") / "molynx_assets"
-    molynx_assets.export_molynx_assets(out, portrait_src=None)
+    molynx_assets.export_molynx_assets(out, portrait_src=molynx_assets.RENDERED)
     return out
 
 
@@ -931,7 +932,8 @@ def test_stage2_folder_holds_exactly_the_files_the_record_names(stage2_full):
                        *(f"Data/editor/maps/{name}{suffix}" for name in SHIPPED_MAPS
                          for suffix in MAP_SUFFIXES),
                        *(f"Data/Meshes/{f}" for f in STAGE2_MESHES),
-                       *(f"Data/EngineTextures/{f}" for f in STAGE2_TEXTURES)])
+                       *(f"Data/EngineTextures/{f}" for f in STAGE2_TEXTURES),
+                       *(f"Data/EngineTextures/GUI/Creatures/Evil/{f}" for f in PANEL_FILES)])
     assert found == expected
     assert len(STAGE2_MESHES) == 26
     for clip in UNUSED_CLIPS:
@@ -1162,8 +1164,10 @@ def test_stage2_audit_fails_naming_every_missing_mesh_when_none_is_delivered(mod
     shutil.rmtree(textures(mod2))
     report = audit(mod2)
     assert not report.ok
-    (line,) = fail_lines(report)
-    assert line.startswith("FAIL (f) Siege:")
+    # rule (f) for the meshes, and rule (g): the panel pictures went with the textures
+    (line,) = [x for x in fail_lines(report) if x.startswith("FAIL (f) Siege:")]
+    (folder,) = [x for x in fail_lines(report) if x.startswith("FAIL (g) folder:")]
+    assert len(fail_lines(report)) == 2 and "GUI/Creatures/Evil must hold" in folder
     for name in ("Molynx-walk", "Molynx-DraggedPose", "Molynx-stand"):
         assert f"Data/Meshes/{name}.kmf is missing" in line
     (b,) = pass_lines(report, "b", "Siege")
@@ -1382,9 +1386,9 @@ def test_stage2_an_extra_unreferenced_texture_fails_rule_g(mod2):
 @needs_data
 @needs_assets
 def test_stage2_a_subfolder_of_engine_textures_fails_rule_g(mod2):
-    (textures(mod2) / "GUI").mkdir()
+    (textures(mod2) / "Extra").mkdir()
     (line,) = fail_lines(audit(mod2))
-    assert line.startswith("FAIL (g) folder:") and "Data/EngineTextures/GUI" in line
+    assert line.startswith("FAIL (g) folder:") and "Data/EngineTextures/Extra" in line
 
 
 @needs_data
@@ -1442,13 +1446,13 @@ def test_stage2_empty_bile_slots_stay_empty_and_other_fields_are_unchanged(mod2)
 
 @needs_data
 @needs_assets
-def test_stage3_fields_are_recognised_but_icons_and_textures_are_not_yet_checked(tmp_path, assets_dir):
+def test_stage3_fields_are_recognised_but_texts_are_not_yet_checked(tmp_path, assets_dir):
     out = build_mod(3, tmp_path, "Molynx_full", maps=["Siege"], text_ids=TEXT_IDS, assets_dir=assets_dir)
     report = audit(out)
     assert any("stage 3" in line for line in report.lines if line.startswith("PASS (b)"))
     assert not report.ok
     (line,) = fail_lines(report)
-    assert line.startswith("FAIL (f)") and "icon" in line and "not checked" in line
+    assert line.startswith("FAIL (f)") and "texts" in line and "not checked" in line
     assert "stage 3 is not audited yet" in line
 
 
@@ -1739,7 +1743,7 @@ def test_stage2_flat_maps_carry_the_stage2_record_and_need_no_other_files(stage2
         assert {n + ".kmf" for n in renamed_slots_from(stage2_full, stem, "Siege")} \
             == set(STAGE2_MESHES)
     assert files_under(meshes(stage2_full)) == STAGE2_MESHES
-    assert files_under(textures(stage2_full)) == STAGE2_TEXTURES
+    assert files_under(textures(stage2_full)) == sorted(STAGE2_TEXTURES + ["GUI"])  # GUI: the panel pictures
 
 
 def renamed_slots_from(mod: Path, stem: str, base: str) -> set[str]:
@@ -2146,3 +2150,18 @@ def test_flat_maps_imps_can_be_picked_up(shipped1):
         & CAN_BE_PICKED_UP
     for stem in FLAT:
         assert imp(map_file(shipped1, stem, "Globals.kld")).get("flags") & CAN_BE_PICKED_UP, stem
+
+
+@needs_data
+@needs_assets
+def test_stage2_ships_his_creature_panel_pictures(stage2_full):
+    """Second review round: his own panel pictures, where Flame finds the textures the record's
+    icon1 / portrait resources name (GUI\\Creatures\\Evil\\molynx and molynx-bg)."""
+    from PIL import Image
+    folder = stage2_full / "Data" / "EngineTextures" / "GUI" / "Creatures" / "Evil"
+    assert {p.name: Image.open(p).size for p in folder.iterdir()} == {
+        "molynx.png": (64, 64), "molynx-bg.png": (64, 128)}
+    for name in MAPS:
+        molynx = record_47(stage2_full, name)
+        assert molynx.resource_name("icon1Resource") == r"gui\creatures\evil\molynx"
+        assert molynx.resource_name("portraitResource") == r"gui\creatures\evil\molynx-bg"

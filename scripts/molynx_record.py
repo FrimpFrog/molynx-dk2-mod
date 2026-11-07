@@ -8,8 +8,9 @@ test bundle build all three):
   2  + the animation slots: each assigned slot's name (`Molynx-<file stem>`, see SLOT_CLIPS,
      RULING F and the file plan below) and, for a slot that plays an animation, the 20 bytes after
      the name that describe the file (frames, fps, flags, type; see "Slot tails"); and his size,
-     SIZE_FIELDS (the redesign, 2026-11-06).
-  3  + the six stats of MULTIPLIERS, the icon1 / portrait resource names, and the five text IDs.
+     SIZE_FIELDS (the redesign, 2026-11-06); and the icon1 / portrait resource names (his own
+     creature-panel pictures, second review round 2026-11-07).
+  3  + the six stats of MULTIPLIERS and the five text IDs.
 
 Everything else (sound category, lair, spells, attractions, jobs, anger values, flags, the
 88-byte tail of a 5537-byte record, ...) stays the Bile Demon's. The Bile Demon is not modified.
@@ -369,11 +370,11 @@ def build_molynx(bile: Creature, stage: int, order_in_editor: int,
         _write_slots(molynx, bile, plan, anim_info)
         for name, value in SIZE_FIELDS.items():
             molynx.set(name, value)
+        molynx.set_resource_name("icon1Resource", ICON_RESOURCE)
+        molynx.set_resource_name("portraitResource", PORTRAIT_RESOURCE)
     if stage >= 3:
         for name, multiplier in MULTIPLIERS.items():
             molynx.set(name, min(_field_max(name), round(bile.get(name) * multiplier)))
-        molynx.set_resource_name("icon1Resource", ICON_RESOURCE)
-        molynx.set_resource_name("portraitResource", PORTRAIT_RESOURCE)
         if text_ids is not None:
             for key, field in TEXT_ID_FIELDS.items():
                 molynx.set(field, text_ids[key])

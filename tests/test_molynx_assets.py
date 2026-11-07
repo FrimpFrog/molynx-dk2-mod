@@ -50,9 +50,8 @@ def export(tmp_path_factory):
             and have(BEHEMOTH_DIR / "behemoth.xml")):
         pytest.skip("game data not present")
     out = tmp_path_factory.mktemp("molynx") / "assets"
-    portrait = assets.DESIGN_PORTRAIT if have(assets.DESIGN_PORTRAIT) else None
     plan = assets.plan_molynx(height_ratio=RATIO)
-    result = assets.export_molynx_assets(out, height_ratio=RATIO, portrait_src=portrait, plan=plan)
+    result = assets.export_molynx_assets(out, height_ratio=RATIO, portrait_src=assets.RENDERED, plan=plan)
     models = {stem: parse_kmf(p.read_bytes()) for stem, p in result["meshes"].items()}
     return {"out": out, "plan": plan, "result": result, "models": models}
 
@@ -160,7 +159,7 @@ GEOM = {
     "fidgeting": 18949, "running": 14901, "eating": 21117, "praying": 18226, "happy": 21917,
     "angry": 9844, "celebrating": 34442, "victory_celebration": 74003, "getting_hit": 6219,
     "being_slapped": 10092, "staggering": 33973, "waking_up": 16024, "knockback": 25785,
-    "sleeping": 6400, "training": 31942, "fighting_another_creature": 34076, "patrolling": 16934,
+    "sleeping": 6703, "training": 31942, "fighting_another_creature": 34076, "patrolling": 16934,
     "guarding": 1700, "manufacturing": 16395, "interacting_with_objects": 5977,
     "being_picked_up": 6464, "falling": 7827, "torture": 24247, "drinking": 19947,
 }
@@ -512,7 +511,7 @@ def test_textures_are_power_of_two_rgb_within_the_games_largest_size(export):
 # ---------------------------------------------------------------- portraits
 
 @needs_data
-@needs_portrait
+@needs_data
 def test_portraits_have_the_games_sizes_and_frame(export):
     portraits = export["result"]["portraits"]
     assert sorted(p.name for p in portraits.values()) == ["molynx-bg.png", "molynx.png"]
@@ -522,6 +521,31 @@ def test_portraits_have_the_games_sizes_and_frame(export):
         assert Image.open(p).mode == "RGB"
     preview = export["result"]["preview"]
     assert preview.exists() and Image.open(preview).size[0] > 4 * 64
+
+
+@needs_data
+def test_panel_pictures_are_in_the_bile_demons_frames(export):
+    """Second review round: his panel portrait (him holding his mace, rendered from his own clip
+    on the portraits' blue) and his emblem (a white mace on the emblems' green), each inside the
+    game's frame: the FRAME-pixel border is the Bile Demon's picture's, pixel for pixel."""
+    from scripts import molynx_portrait as mp
+    cache = assets.texture_cache()
+    bile = assets.bile_demon_record()
+    portraits = export["result"]["portraits"]
+    for name, slot in (("molynx-bg", "portraitResource"), ("molynx", "icon1Resource")):
+        mine = np.asarray(Image.open(portraits[name]).convert("RGB")).astype(int)
+        theirs = np.asarray(assets._cache_image(cache, bile.resource_name(slot))).astype(int)
+        edge = np.ones(mine.shape[:2], bool)
+        edge[mp.FRAME:-mp.FRAME, mp.FRAME:-mp.FRAME] = False
+        assert (mine[edge] == theirs[edge]).all(), name
+    bg = np.asarray(Image.open(portraits["molynx-bg"]).convert("RGB")).astype(int)
+    inner = bg[mp.FRAME:-mp.FRAME, mp.FRAME:-mp.FRAME].reshape(-1, 3)
+    red = (inner[:, 0] > inner[:, 2] + 40).mean()
+    blue = (inner[:, 2] > inner[:, 0] + 30).mean()
+    assert red > 0.3 and blue > 0.1        # him, on the blue ground
+    icon = np.asarray(Image.open(portraits["molynx"]).convert("RGB")).astype(int)
+    inner = icon[mp.FRAME:-mp.FRAME, mp.FRAME:-mp.FRAME].reshape(-1, 3)
+    assert ((inner.min(1) > 170)).mean() > 0.08     # the white emblem
 
 
 # ---------------------------------------------------------------- guards
@@ -883,18 +907,40 @@ def test_torture_puts_his_torso_where_the_bile_demon_is_on_the_wheel(export):
 
 @needs_data
 def test_he_sleeps_in_the_bed(export):
-    """The bed file carries the Bile Demon's bed, and his body lies over it with his lowest point
-    BED_SINK of the way from the bed's top to the floor (z grows downwards)."""
+    """The bed file carries the Bile Demon's bed; he lies centred over it with the underside of
+    his head BED_HEAD above its rim (z grows downwards), his back sunk into the straw, and his
+    head on his shoulders (no stretched neck: the head is settled back toward his chest)."""
     anim = export["models"]["sleeping"].anim
     n_mine = len(export["models"]["stand"].anim.sprites)
+    plan = export["plan"]
+    head = [k for k, sp in enumerate(plan.sprites) if sp.part == assets.HEAD_PART]
+    bound = anim.scale / 511 * 4
+    pts = evaluate_anim_frame(anim, 0)
+    bed = np.concatenate(pts[n_mine:])
+    assert np.concatenate([pts[k] for k in head])[:, 2].max() == pytest.approx(
+        bed[:, 2].min() - assets.BED_HEAD, abs=bound)
     for f in (0, anim.frame_count // 2):
         pts = evaluate_anim_frame(anim, f)
         mine, bed = np.concatenate(pts[:n_mine]), np.concatenate(pts[n_mine:])
-        top, floor = bed[:, 2].min(), bed[:, 2].max()
-        bound = anim.scale / 511 * 4
-        assert mine[:, 2].max() == pytest.approx(top + assets.BED_SINK * (floor - top), abs=bound)
         centre = (bed[:, :2].min(0) + bed[:, :2].max(0)) / 2
         np.testing.assert_allclose((mine[:, :2].min(0) + mine[:, :2].max(0)) / 2, centre, atol=bound)
+
+
+@needs_data
+def test_the_sleeping_neck_is_no_longer_than_standing(export):
+    """Second review round: his neck looked stretched lying down. The gap from his chest to his
+    head is within 10% of the standing one."""
+    plan = export["plan"]
+    rest = np.asarray(plan.source[0]["stand"]["frames"][0][0], float)
+    chest = assets._part_vertices(plan, 0, assets._torso_ids(rest))
+    head = [k for k, sp in enumerate(plan.sprites) if sp.part == assets.HEAD_PART]
+
+    def gap(frame):
+        return float(np.linalg.norm(np.concatenate([frame[k] for k in head]).mean(0)
+                                    - assets._gather(frame, chest).mean(0)))
+    stand = gap(plan.clips["stand"].frames[0])
+    for frame in plan.clips["sleeping"].frames[::10]:
+        assert gap(frame) < 1.1 * stand
 
 
 @needs_data

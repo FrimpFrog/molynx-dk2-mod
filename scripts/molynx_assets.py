@@ -196,6 +196,10 @@ FRAME = 7                       # the game portraits' frame, pixels on every sid
 # The redesign's portrait pictures: renders of the design (stand frame 0, turned 15 degrees, on the
 # blue of the user's picture, 10/23/89), made by data/molynx_design/painting_tools/portrait_render.py.
 _DESIGN_DIR = Path(__file__).resolve().parent.parent / "data" / "molynx_design"
+# RENDERED (the default portrait source): the panel pictures are drawn from his own model by
+# scripts.molynx_portrait (second review round: him holding his mace, and a mace emblem in the
+# game's emblem style); a path instead gives the first redesign's pictures (make_portraits).
+RENDERED = "rendered"
 DESIGN_PORTRAIT = _DESIGN_DIR / "portrait_bg_A2.png"      # upper body, head centred: the -bg panel
 DESIGN_ICON = _DESIGN_DIR / "portrait_icon_A2.png"        # the face with the horns: the icon
 FACE_BOX = (0.503, 0.355, 0.508)  # the face square in the user's image: centre x, y and side, as
@@ -470,7 +474,11 @@ PROPS = {"eating": ("Knight-Eat", ("chicken",), "hand"),
 # reached twice as far in, into the temple).
 ANCHORS = {"torture": ("Bil-Torture", "centre"), "sleeping": ("BileDemon-bed(sleeping)", "bed"),
            "praying": ("Bile_Demon-Pray", "average")}
-BED_SINK = 0.85          # his lowest point, as a fraction of the way from the bed's top to the floor: the Bile Demon sits in its bed with its bottom at the floor (z -0.03 of -0.24)
+BED_HEAD = 0.02          # in the bed the underside of his head rests this far above the bed's rim (KMF
+                         # units, z down). His lying clip half sits up (head and knees raised), so with
+                         # his lowest point on the bed's floor his head hung in the air well above the
+                         # rim (second review round); placed by his head, his back sinks into the straw.
+HEAD_PART = 2            # the character's parts: 0 body, 1 mace, 2 head, 3 neck band
 HAND_GRAB_DISTANCE = 0.06   # the donor's chicken counts as held once this close to the donor's hand
 # MIRRORED_ARM: clips where both his arms are spread the same way (strapped to the torture wheel).
 # His two arms are not built alike (the mace arm is bent up to hold the mace), so the mace arm is
@@ -548,6 +556,7 @@ def _anchor(plan: "MolynxPlan", clip: "Clip", donor: str, how: str, meshes_dir: 
         mine = np.mean([np.concatenate(f).mean(0) for f in clip.frames], axis=0)
         shift = np.array([theirs[0] - mine[0], theirs[1] - mine[1], 0.0])
         return Clip([[p + shift for p in frame] for frame in clip.frames], clip.wrap)
+    lay = None
     for i, frame in enumerate(clip.frames):
         dfr = dframes[_donor_index(i, len(clip.frames), len(dframes))]
         if how == "centre":
@@ -556,12 +565,13 @@ def _anchor(plan: "MolynxPlan", clip: "Clip", donor: str, how: str, meshes_dir: 
         else:   # bed: z is down in KMF space (the lowest point has the largest z)
             b = np.concatenate([dfr[k] for k in bed])
             mine = np.concatenate(frame)
-            top, floor = b[:, 2].min(), b[:, 2].max()
+            if lay is None:   # one height for the whole clip, set by his head on its first frame
+                head = np.concatenate([clip.frames[0][k] for k, sp in enumerate(plan.sprites)
+                                       if sp.part == HEAD_PART])
+                lay = b[:, 2].min() - BED_HEAD - head[:, 2].max()
             centre = (b[:, :2].min(0) + b[:, :2].max(0)) / 2
-            lay = top + BED_SINK * (floor - top)
             shift = np.array([centre[0] - (mine[:, 0].min() + mine[:, 0].max()) / 2,
-                              centre[1] - (mine[:, 1].min() + mine[:, 1].max()) / 2,
-                              lay - mine[:, 2].max()])
+                              centre[1] - (mine[:, 1].min() + mine[:, 1].max()) / 2, lay])
         out.append([p + shift for p in frame])
     if clip.wrap:   # a loop still ends on a copy of its first frame
         out[-1] = [p.copy() for p in out[0]]
@@ -994,7 +1004,7 @@ def _preview(images: list[tuple[str, Image.Image]]) -> Image.Image:
 # ---------------------------------------------------------------- export
 
 def export_molynx_assets(out_dir: Path, height_ratio: float = DESIGN_HEIGHT_RATIO,
-                         portrait_src: Path | None = DESIGN_PORTRAIT, *, portrait_icon: Path | None = DESIGN_ICON,
+                         portrait_src: Path | str | None = RENDERED, *, portrait_icon: Path | None = DESIGN_ICON,
                          plan: MolynxPlan | None = None,
                          body_size: int = MAX_TEXTURE, reduce: bool = True,
                          editor_dir: Path = EDITOR_DIR, game_dir: Path = GAME_DIR,
@@ -1014,7 +1024,7 @@ def export_molynx_assets(out_dir: Path, height_ratio: float = DESIGN_HEIGHT_RATI
     out_dir = Path(out_dir)
     if out_dir.exists() and (not out_dir.is_dir() or any(out_dir.iterdir())):
         raise FileExistsError(f"{out_dir} exists and is not an empty folder")
-    for src in (portrait_src, portrait_icon if portrait_src is not None else None):
+    for src in ((portrait_src, portrait_icon) if portrait_src not in (None, RENDERED) else ()):
         if src is not None and not Path(src).is_file():
             raise FileNotFoundError(f"portrait source {src} not found")
     if plan is None:
@@ -1051,8 +1061,16 @@ def export_molynx_assets(out_dir: Path, height_ratio: float = DESIGN_HEIGHT_RATI
     if portrait_src is not None:
         cache = texture_cache(game_dir)
         bile = bile_demon_record(editor_dir)
-        bg, icon, bile_bg, bile_icon = make_portraits(
-            Path(portrait_src), bile, cache, None if portrait_icon is None else Path(portrait_icon))
+        if portrait_src == RENDERED:
+            from scripts import molynx_portrait
+            bile_bg = _cache_image(cache, bile.resource_name("portraitResource"))
+            bile_icon = _cache_image(cache, bile.resource_name("icon1Resource"))
+            mine = molynx_portrait.PanelCache(cache, {n: Image.open(p) for n, p in textures.items()})
+            model = parse_kmf(meshes[molynx_portrait.PORTRAIT_CLIP].read_bytes())
+            bg, icon = molynx_portrait.make_panel_pictures(model, mine, bile_bg, bile_icon)
+        else:
+            bg, icon, bile_bg, bile_icon = make_portraits(
+                Path(portrait_src), bile, cache, None if portrait_icon is None else Path(portrait_icon))
         for name, image in (("molynx-bg", bg), ("molynx", icon)):
             portraits[name] = out_dir / f"{name}.png"
             image.save(portraits[name])

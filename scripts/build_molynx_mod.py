@@ -22,6 +22,12 @@ molynx_assets.export_molynx_assets; the builder never runs that export itself):
   <name>/Data/EngineTextures/<t>.png     the textures those files' materials name (Molynx_Body,
                                          Molynx_Head, Molynx_Mace, Molynx_Neck), where the user's
                                          Flame texture mods put theirs
+  <name>/Data/EngineTextures/GUI/Creatures/Evil/molynx.png, molynx-bg.png
+                                         his creature-panel pictures (the export's molynx.png and
+                                         molynx-bg.png), named by the record's icon1 / portrait
+                                         resources (texture GUI\\Creatures\\Evil\\molynx: Flame
+                                         reads the name's folders as folders, as for
+                                         LoadingScreen\\Titlescreen)
 
 What the record says about each file (frame count, loop flag) is not taken from a separate list: it
 is read from the exported files themselves, and the build stops (ValueError, nothing written) when a
@@ -329,6 +335,21 @@ def _asset_files(assets: _Assets, stems: set[str]) -> dict[str, bytes]:
     return files
 
 
+PANEL_PATH = f"{TEXTURES_PATH}/GUI/Creatures/Evil"
+PANEL_PICTURES = {"molynx": (64, 64), "molynx-bg": (64, 128)}
+
+
+def _panel_files(assets: _Assets) -> dict[str, bytes]:
+    """His creature-panel pictures, checked for the game's sizes."""
+    files = {}
+    for name, size in PANEL_PICTURES.items():
+        data = assets.texture(name)
+        if struct.unpack_from(">II", data, 16) != size:
+            raise ValueError(f"{name}.png in assets_dir is not {size[0]}x{size[1]}")
+        files[f"{PANEL_PATH}/{name}.png"] = data
+    return files
+
+
 def _game_textures() -> set[str]:
     """Lower-case names of the game's own textures (EngineTextures cache, without the MMn suffix)."""
     from scripts.molynx_assets import texture_cache
@@ -392,6 +413,7 @@ def build_mod(stage: int, out_dir: Path, name: str = "Molynx", maps: list[str] |
         stems |= used
     if assets is not None:
         files.update(_asset_files(assets, stems))
+        files.update(_panel_files(assets))
 
     target.mkdir(parents=True)  # not exist_ok: never reuse a folder
     for relative, data in files.items():

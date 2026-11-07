@@ -303,10 +303,12 @@ def test_stage2_differs_only_in_slot_names_and_the_tails_of_animation_slots(bile
     expected = expected_slot_names(bile)
     assert len(expected) == 29  # 48 slots - unk_1 - the 18 the Bile Demon leaves empty
     assert set(TAILS) == set(expected)
-    assert changed_fields(stage1, stage2) == set(expected) | set(SIZE)
-    assert changed_fields(bile, stage2) == STAGE1_FIELDS | set(expected) | set(SIZE)
+    # since the second review round stage 2 also names his own creature-panel pictures
+    assert changed_fields(stage1, stage2) == set(expected) | set(SIZE) | PORTRAIT_FIELDS
+    assert changed_fields(bile, stage2) == STAGE1_FIELDS | set(expected) | set(SIZE) | PORTRAIT_FIELDS
     assert {k: stage2.get(k) for k in SIZE} == SIZE
-    changed = {(f, part) for f, part in _changed_tail_fields(stage1, stage2) if f not in SIZE}
+    changed = {(f, part) for f, part in _changed_tail_fields(stage1, stage2)
+               if f not in SIZE and f not in PORTRAIT_FIELDS}
     assert {field for field, part in changed if part == "name"} == set(expected)
     tails = {(field, part) for field, part in changed if part != "name"}
     poses = {"animPoseFrameResource", "animDiePoseResource", "animDraggedPoseResource",
@@ -606,24 +608,24 @@ def test_slot_assignment_and_stems_used(bile):
 
 
 @needs_data
-def test_stage3_adds_only_stats_portrait_resources_and_text_ids(bile):
+def test_stage3_adds_only_stats_and_text_ids(bile):
     stage2, stage3 = build(bile, 2), build(bile, 3, text_ids=TEXT_IDS)
     changed = changed_fields(stage2, stage3)
-    assert changed == STAT_FIELDS | PORTRAIT_FIELDS | set(TEXT_FIELDS.values())
+    assert changed == STAT_FIELDS | set(TEXT_FIELDS.values())
     # The change from the Bile Demon is stage 1 + the slot names and tails + that.
     assert changed_fields(bile, stage3) == (
         STAGE1_FIELDS | set(expected_slot_names(bile)) | set(SIZE) | STAT_FIELDS | PORTRAIT_FIELDS
         | set(TEXT_FIELDS.values()))
     assert bytes(stage3.raw[RECORD_SIZE:]) == bytes(bile.raw[RECORD_SIZE:])
-    for offset in changed_offsets(stage2, stage3):
+    for offset in changed_offsets(bile, stage2):
         field = _FIELD_AT[offset]
         if field in PORTRAIT_FIELDS:
             assert offset - FIELDS[field].offset < RESOURCE_NAME_SIZE
 
 
 @needs_data
-def test_stage3_portrait_resources(bile):
-    stage3 = build(bile, 3, text_ids=TEXT_IDS)
+def test_stage2_names_his_own_panel_pictures(bile):
+    stage3 = build(bile, 2)
     assert stage3.resource_name("icon1Resource") == r"gui\creatures\evil\molynx"
     assert stage3.resource_name("portraitResource") == r"gui\creatures\evil\molynx-bg"
     # RULING A: the second icon (CreatureIcons#N) is the Bile Demon's.
@@ -666,7 +668,7 @@ def test_stage3_text_ids(bile):
 @needs_data
 def test_stage3_without_text_ids_keeps_the_bile_demons(bile):
     stage2, stage3 = build(bile, 2), build(bile, 3)
-    assert changed_fields(stage2, stage3) == STAT_FIELDS | PORTRAIT_FIELDS
+    assert changed_fields(stage2, stage3) == STAT_FIELDS
     for field in TEXT_FIELDS.values():
         assert stage3.get(field) == bile.get(field)
 

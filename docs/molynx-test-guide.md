@@ -17,8 +17,8 @@ there is nothing to dig except the gems and gold. There is no win or lose, so th
 end by itself.
 
 He lives by the same rules as the Bile Demon in this test: what he likes, when he gets angry, how
-long he stays stunned, his strength and his pay are all copied from the Bile Demon. His name and
-panel picture are still the Bile Demon's in this test; they come next.
+long he stays stunned, his strength and his pay are all copied from the Bile Demon. His name is
+still the Bile Demon's in this test; it comes next.
 
 This is an honest test. The game might crash, and that is a useful answer too. Nothing in your
 real game files changes: the test is one folder that Flame loads on top of the game. Take it out and
@@ -92,7 +92,8 @@ back when you take the folder out).
    - **Make him fight** - in the training room he swings his mace. There are no enemies on this
      map, so being hit, knocked back, getting up and dying are hard to see here; if you do see
      them anywhere, tell me how they looked.
-   - **Put him to sleep** - in a lair he lies in his bed (the bed stays visible) and breathes.
+   - **Put him to sleep** - in a lair he lies in his bed (the bed stays visible) and breathes, his
+     head resting on the bed's rim, not hanging in the air.
    - **Eat** - in the hatchery a chicken appears; he picks it up with his free hand (not the mace
      hand) and eats it.
    - **Pray** - in a temple he prays.
@@ -102,6 +103,8 @@ back when you take the folder out).
    - **Moods** - when he is happy or angry he shows it.
    - **Dance** - if he dances, it is his own dance (a stompy Troll-style dance, mace on his shoulder).
    - **His creature panel opens** - click his picture or open his panel; the game does not crash.
+   - **His own panel pictures** - his tab shows him holding his mace on the blue ground, and his
+     small icon is a white mace on green (not the Bile Demon's pictures).
 
    **Fail** is: a crash or freeze (while loading, or at one of the points above), or Molynx
    invisible, white or grey, or his head or face missing, white or grey (his head has its own two
