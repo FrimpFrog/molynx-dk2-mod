@@ -157,7 +157,7 @@ def test_clips_are_animations_that_pass_the_format_invariants(export):
 # 34,076 (2); victory_celebration (shipped by no slot) stays at one step.
 GEOM = {
     "stand": 1833, "walk": 8044, "walk_once": 8044, "attack": 11407, "die": 5547,
-    "fidgeting": 18949, "running": 14901, "eating": 21117, "praying": 16564, "happy": 21917,
+    "fidgeting": 18949, "running": 14901, "eating": 21117, "praying": 18226, "happy": 21917,
     "angry": 9844, "celebrating": 34442, "victory_celebration": 74003, "getting_hit": 6219,
     "being_slapped": 10092, "staggering": 33973, "waking_up": 16024, "knockback": 25785,
     "sleeping": 6400, "training": 31942, "fighting_another_creature": 34076, "patrolling": 16934,
@@ -947,3 +947,17 @@ def test_on_the_wheel_both_arms_are_spread_alike_and_the_mace_is_gone(export):
         np.testing.assert_allclose(np.cross(d, normal), 0, atol=1e-9)
         offs = ((a + b) / 2) @ normal
         assert np.ptp(offs) < 1e-9
+
+
+@needs_data
+def test_praying_keeps_to_where_the_bile_demon_prays(export):
+    """Second review round: his bow reached into the temple. The clip is moved once across the
+    floor so his average place is the Bile Demon's in Bile_Demon-Pray (heights untouched)."""
+    bile = parse_kmf(assets.game_mesh_path("Bile_Demon-Pray").read_bytes()).anim
+    anim = export["models"]["praying"].anim
+    theirs = np.mean([np.concatenate(evaluate_anim_frame(bile, f)).mean(0)
+                      for f in range(bile.frame_count)], axis=0)
+    plan = export["plan"]
+    mine = np.mean([np.concatenate(f).mean(0) for f in plan.clips["praying"].frames], axis=0)
+    np.testing.assert_allclose(mine[:2], theirs[:2], atol=0.01)
+    assert anim.wrap is True

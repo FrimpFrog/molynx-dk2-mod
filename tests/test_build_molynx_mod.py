@@ -943,7 +943,8 @@ def test_stage2_folder_holds_exactly_the_files_the_record_names(stage2_full):
 def test_stage2_names_every_delivered_mesh_in_record_47_of_each_map(stage2_full):
     named = {name: {n + ".kmf" for n in renamed_slots(stage2_full, name)} for name in MAPS}
     assert named["Siege"] == set(STAGE2_MESHES)
-    assert named[SECOND] == set(STAGE2_MESHES) - {"Molynx-staggering.kmf"}  # no dejectedPose there
+    # Dead Walking is the flat map here, whose creature table is Siege's (its own pins its Imps)
+    assert named[SECOND] == set(STAGE2_MESHES)
 
 
 @needs_data
@@ -1468,8 +1469,8 @@ def test_stage3_text_ids_are_part_of_the_record(tmp_path, assets_dir):
 def test_stage2_every_slot_names_the_file_of_the_slot_table_on_both_maps(stage2_full):
     table = expected_slot_files()
     assert set(table) <= set(ANIM_SLOTS)
-    for name in MAPS:
-        molynx, bile = record_47(stage2_full, name), source_bile(name)
+    for name in MAPS:   # Dead Walking is the flat map here: its creature table is Siege's
+        molynx, bile = record_47(stage2_full, name), source_bile("Siege")
         for slot in ANIM_SLOTS:
             if slot == "unk_1":
                 continue
@@ -1717,9 +1718,10 @@ def test_flat_maps_are_the_generators_files(shipped1):
 
 
 @needs_data
-def test_flat_maps_globals_are_dead_walkings_with_record_47(shipped1, stage1_dir):
-    """The base map's Globals spliced with the folder's record 47: the bytes of Test A's Dead Walking."""
-    test_a = map_file(stage1_dir, SECOND, "Globals.kld")
+def test_flat_maps_globals_are_siege_s_with_record_47(shipped1, stage1_dir):
+    """Siege's Globals spliced with the folder's record 47 (the bytes of the copied Siege): not
+    Dead Walking's, whose creature table makes its Imps impossible to pick up."""
+    test_a = map_file(stage1_dir, "Siege", "Globals.kld")
     for stem in FLAT:
         data = map_file(shipped1, stem, "Globals.kld")
         assert data == test_a, stem
@@ -1734,8 +1736,8 @@ def test_stage2_flat_maps_carry_the_stage2_record_and_need_no_other_files(stage2
     first = map_file(stage2_full, "Molynx Test", "Globals.kld")
     for stem in FLAT:
         assert map_file(stage2_full, stem, "Globals.kld") == first, stem
-        assert {n + ".kmf" for n in renamed_slots_from(stage2_full, stem, SECOND)} \
-            == set(STAGE2_MESHES) - {"Molynx-staggering.kmf"}
+        assert {n + ".kmf" for n in renamed_slots_from(stage2_full, stem, "Siege")} \
+            == set(STAGE2_MESHES)
     assert files_under(meshes(stage2_full)) == STAGE2_MESHES
     assert files_under(textures(stage2_full)) == STAGE2_TEXTURES
 
@@ -2126,3 +2128,21 @@ def test_a_level_file_with_the_bases_script_root_fails_m10(flat_mod):
     struct.pack_into("<H", data, audit_module.LEVEL_SCRIPT_ROOT, 1)
     path.write_bytes(bytes(data))
     assert any("root trigger" in line for line in fail_lines(audit(flat_mod), "m10", "Molynx Test"))
+
+
+CAN_BE_PICKED_UP = 0x2   # CreatureFlag bit (OpenKeeper's Creature.CreatureFlag)
+
+
+@needs_data
+def test_flat_maps_imps_can_be_picked_up(shipped1):
+    """Second review round: on the flat maps the Imps could only be slapped. Dead Walking's own
+    creature table clears the Imp's can-be-picked-up flag; the flat maps now use Siege's table,
+    whose Imp is the editor's."""
+    def imp(data):
+        (block,) = [b for b in read_blocks(data) if b.signature == CREATURES]
+        (rec,) = [c for c in read_creatures(block) if c.get("creatureId") == 1]
+        return rec
+    assert not imp((map_source_dir(SECOND) / f"{SECOND}Globals.kld").read_bytes()).get("flags") \
+        & CAN_BE_PICKED_UP
+    for stem in FLAT:
+        assert imp(map_file(shipped1, stem, "Globals.kld")).get("flags") & CAN_BE_PICKED_UP, stem

@@ -49,8 +49,10 @@ it lists no new map name). The six files come from `testmap_files` (checked by `
 before anything is written); the level file shows "Molynx Test" for both "Molynx Test" and "Dead
 Walking", "Molynx Test Portal" for the variant, and its path records name the stem's own files
 (for "Dead Walking" the shipped paths). The level file names a Globals file too and the game opens
-it, so `<stem>Globals.kld` is the base map's (Dead Walking's) Globals spliced with this folder's
-record 47, exactly as for a copied map. The default build (`maps` and `flat_maps` both left out)
+it, so `<stem>Globals.kld` is FLAT_GLOBALS' (Siege's) Globals spliced with this folder's record 47,
+exactly as for a copied map. Not Dead Walking's own Globals: that map changes its creature table (its
+Imps cannot be picked up, hit for 200 and more; most creatures lose a flag), which the first in-game
+test showed as Imps that could only be slapped. The default build (`maps` and `flat_maps` both left out)
 is Siege copied plus the three flat maps.
 
 Nothing is ever deleted or overwritten: `build_mod` refuses an existing `out_dir/<name>`, builds all
@@ -92,6 +94,7 @@ STAGE1_FOLDER = "Molynx_slot_only"
 FLAT_MAPS = {"Molynx Test": False, "Molynx Test Portal": True, FLAT_BASE: False}
 # The name the level file shows in the Skirmish list (default: the stem).
 FLAT_DISPLAY_NAMES = {FLAT_BASE: "Molynx Test"}
+FLAT_GLOBALS = "Siege"   # the flat maps' creature table (see the module notes: not Dead Walking's)
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 _DESCRIPTIONS = {
@@ -276,7 +279,7 @@ def _flat_map_files(stem: str, in_pool: bool, stage: int, text_ids: dict[str, in
     errors = validate_testmap(files, stem, molynx_in_pool=in_pool)
     if errors:
         raise ValueError(f"the flat map {stem!r} breaks its layout rules: " + "; ".join(errors))
-    globals_kld = (map_source_dir(FLAT_BASE) / f"{FLAT_BASE}Globals.kld").read_bytes()
+    globals_kld = (map_source_dir(FLAT_GLOBALS) / f"{FLAT_GLOBALS}Globals.kld").read_bytes()
     stems: set[str] = set()
     info = wraps = None
     if stage >= 2:

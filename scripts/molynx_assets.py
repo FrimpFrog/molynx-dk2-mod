@@ -463,7 +463,13 @@ def _mm_factor(points: np.ndarray, uv: np.ndarray, tris) -> float:
 # over the bed sprite and lays his lowest point on the bed's top, BED_SINK of the bed's height in.
 PROPS = {"eating": ("Knight-Eat", ("chicken",), "hand"),
          "sleeping": ("BileDemon-bed(sleeping)", ("Creature Bed_Bile Demon1",), "fixed")}
-ANCHORS = {"torture": ("Bil-Torture", "centre"), "sleeping": ("BileDemon-bed(sleeping)", "bed")}
+# ANCHORS: clips placed on the Bile Demon's own file of that slot. "centre": his torso on the Bile
+# Demon's body, frame by frame (the torture wheel); "bed": in the bed (see BED_SINK); "average": the
+# whole clip moved across the floor once, so his body's average place is the Bile Demon's (praying:
+# the game stands a creature at the temple's edge and the file says how far in it bows; his own bow
+# reached twice as far in, into the temple).
+ANCHORS = {"torture": ("Bil-Torture", "centre"), "sleeping": ("BileDemon-bed(sleeping)", "bed"),
+           "praying": ("Bile_Demon-Pray", "average")}
 BED_SINK = 0.85          # his lowest point, as a fraction of the way from the bed's top to the floor: the Bile Demon sits in its bed with its bottom at the floor (z -0.03 of -0.24)
 HAND_GRAB_DISTANCE = 0.06   # the donor's chicken counts as held once this close to the donor's hand
 # MIRRORED_ARM: clips where both his arms are spread the same way (strapped to the torture wheel).
@@ -537,6 +543,11 @@ def _anchor(plan: "MolynxPlan", clip: "Clip", donor: str, how: str, meshes_dir: 
     rest = np.asarray(plan.source[0]["stand"]["frames"][0][0], float)
     at = _part_vertices(plan, 0, _torso_ids(rest))
     out = []
+    if how == "average":    # across the floor only (x, y); z is up and down in KMF space
+        theirs = np.mean([np.concatenate(f).mean(0) for f in dframes], axis=0)
+        mine = np.mean([np.concatenate(f).mean(0) for f in clip.frames], axis=0)
+        shift = np.array([theirs[0] - mine[0], theirs[1] - mine[1], 0.0])
+        return Clip([[p + shift for p in frame] for frame in clip.frames], clip.wrap)
     for i, frame in enumerate(clip.frames):
         dfr = dframes[_donor_index(i, len(clip.frames), len(dframes))]
         if how == "centre":

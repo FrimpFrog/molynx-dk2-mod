@@ -54,8 +54,9 @@ The flat test map. A folder that holds "Molynx Test" or "Molynx Test Portal" is 
 folder: it must hold the three flat maps "Molynx Test", "Molynx Test Portal" and "Dead Walking"
 and the copied map "Siege" (rule g), and in it "Dead Walking" is the flat map under the shipped name, not the shipped map, so
 rules (d) and (e) no longer apply to it (an `N/A (d, e)` line says so; the same for the two new
-names). Rules (a), (b), (c) and (f) apply to their Globals files with the shipped Dead Walking's
-Globals as the source (the folder's record 47 spliced exactly as on a copied map). The map files are
+names). Rules (a), (b), (c) and (f) apply to their Globals files with Siege's Globals (FLAT_GLOBALS,
+the Quuz copy when there is one) as the source (the folder's record 47 spliced exactly as on a
+copied map; Dead Walking's own creature table makes Imps impossible to pick up). The map files are
 checked by these rules, written from the test-map design without the map generator (no import of
 it: own parsing, own literals; the references are the shipped Dead Walking in the editor folder,
 the user's Quuz copy of Siege for the portal, and the editor's AutoSaveTriggers.kld):
@@ -1000,6 +1001,7 @@ def _audit_globals_file(mod_path: Path, source: Path, label: str, lines: _Lines,
 # AutoSaveTriggers.kld) and from the literals below.
 
 FLAT_BASE = "Dead Walking"
+FLAT_GLOBALS = "Siege"   # the flat maps' creature table: a normal one (Dead Walking's pins its Imps)
 # stem -> (Molynx also in the portal pool, the name the level file shows)
 FLAT_VARIANTS = {"Molynx Test": (False, "Molynx Test"),
                  "Molynx Test Portal": (True, "Molynx Test Portal"),
@@ -1606,7 +1608,8 @@ class _Flat:
 
 def _audit_flat(mod_dir: Path, stem: str, lines: "_Lines", files: "_Files") -> tuple:
     """Rules (a), (b), (c), (f) on the Globals file against the base map's, and m1 to m12."""
-    result = _audit_globals(mod_dir, stem, MAPS_DIR / f"{FLAT_BASE}Globals.kld", lines, files)
+    result = _audit_globals(mod_dir, stem, map_source_dir(FLAT_GLOBALS) / f"{FLAT_GLOBALS}Globals.kld",
+                            lines, files)
     if stem == FLAT_BASE:
         note = (f"rules (d) and (e) no longer apply: {FLAT_BASE} is no longer the shipped map but "
                 f"the flat test map (rules m1 to m13)")
