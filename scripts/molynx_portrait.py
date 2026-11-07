@@ -30,8 +30,8 @@ EMBLEM_WHITE = (228, 230, 214)
 
 # The picture: a frame of one of his clips, turned a little to one side, the camera a little below
 # his chin.
-PORTRAIT_CLIP, PORTRAIT_FRAME = "training", 30     # the mace raised in his fist, glaring ahead
-PORTRAIT_AZIMUTH, PORTRAIT_ELEVATION = 215.0, 8.0
+PORTRAIT_CLIP, PORTRAIT_FRAME = "attack", 20     # facing ahead, mace raised behind his head
+PORTRAIT_AZIMUTH, PORTRAIT_ELEVATION = 200.0, 8.0
 KEY_LIGHT = np.array([-0.55, 0.55, -0.65])    # x right, y up, z away from the camera
 RIM_LIGHT = np.array([0.7, 0.35, 0.6])        # from behind
 AMBIENT, KEY, RIM = 0.30, 0.95, 0.85
@@ -44,14 +44,91 @@ def _camera(azimuth: float, elevation: float) -> np.ndarray:
     return tilt @ _rotation(azimuth)
 
 
+PN_LEVEL = 4          # each triangle drawn as PN_LEVEL**2 curved pieces (point-normal triangles)
+BEHIND_BIAS = 100.0   # depth added to the mace (shaft and head): drawn only where nothing of him is
+
+
+def _smooth_normals(points: list[np.ndarray], sprites) -> list[np.ndarray]:
+    """Vertex normals averaged over every triangle at the same place (across sprites too), so the
+    curved pieces of neighbouring triangles meet without cracks."""
+    allp = np.concatenate(points)
+    keys = np.round(allp / (np.ptp(allp, axis=0).max() * 1e-4)).astype(np.int64)
+    _, weld = np.unique(keys, axis=0, return_inverse=True)
+    weld = weld.reshape(-1)
+    acc = np.zeros((weld.max() + 1, 3))
+    start = 0
+    for sprite, p in zip(sprites, points):
+        t = np.asarray(sprite.triangles[0], int).reshape(-1, 3)
+        if len(t):
+            face = np.cross(p[t[:, 1]] - p[t[:, 0]], p[t[:, 2]] - p[t[:, 0]])
+            for k in range(3):
+                np.add.at(acc, weld[start + t[:, k]], face)
+        start += len(p)
+    acc /= np.maximum(np.linalg.norm(acc, axis=1, keepdims=True), 1e-12)
+    out, start = [], 0
+    for p in points:
+        out.append(acc[weld[start:start + len(p)]])
+        start += len(p)
+    return out
+
+
+def _pn_patch(P: np.ndarray, N: np.ndarray, level: int):
+    """(points, barycentric weights, sub-triangles) of a point-normal triangle cut `level` times
+    along each side (Vlachos et al. 2001)."""
+    P1, P2, P3 = P
+    N1, N2, N3 = N
+    w = lambda i, j: float((P[j] - P[i]) @ N[i])
+    b210 = (2 * P1 + P2 - w(0, 1) * N1) / 3
+    b120 = (2 * P2 + P1 - w(1, 0) * N2) / 3
+    b021 = (2 * P2 + P3 - w(1, 2) * N2) / 3
+    b012 = (2 * P3 + P2 - w(2, 1) * N3) / 3
+    b102 = (2 * P3 + P1 - w(2, 0) * N3) / 3
+    b201 = (2 * P1 + P3 - w(0, 2) * N1) / 3
+    E = (b210 + b120 + b021 + b012 + b102 + b201) / 6
+    b111 = E + (E - (P1 + P2 + P3) / 3) / 2
+    bary, index = [], {}
+    for i in range(level + 1):
+        for j in range(level + 1 - i):
+            index[i, j] = len(bary)
+            bary.append(((level - i - j) / level, i / level, j / level))
+    bary = np.array(bary)
+    a, u, v = bary[:, :1], bary[:, 1:2], bary[:, 2:3]
+    pts = (P1 * a ** 3 + P2 * u ** 3 + P3 * v ** 3 + 3 * b210 * a * a * u + 3 * b120 * a * u * u
+           + 3 * b201 * a * a * v + 3 * b021 * u * u * v + 3 * b102 * a * v * v
+           + 3 * b012 * u * v * v + 6 * b111 * a * u * v)
+    tris = []
+    for i in range(level):
+        for j in range(level - i):
+            tris.append((index[i, j], index[i + 1, j], index[i, j + 1]))
+            if i + j < level - 1:
+                tris.append((index[i + 1, j], index[i + 1, j + 1], index[i, j + 1]))
+    return pts, bary, tris
+
+
+def _bilinear(tex: np.ndarray, u: np.ndarray, t: np.ndarray) -> np.ndarray:
+    th, tw = tex.shape[:2]
+    x, y = u * tw - 0.5, t * th - 0.5
+    x0, y0 = np.floor(x).astype(int), np.floor(y).astype(int)
+    fx, fy = (x - x0)[..., None], (y - y0)[..., None]
+    x0, y0 = x0 % tw, y0 % th
+    x1, y1 = (x0 + 1) % tw, (y0 + 1) % th
+    return ((tex[y0, x0] * (1 - fx) + tex[y0, x1] * fx) * (1 - fy)
+            + (tex[y1, x0] * (1 - fx) + tex[y1, x1] * fx) * fy)
+
+
 def render_portrait(model: Kmf, cache, frame: int, size: tuple[int, int], box: tuple, *,
                     azimuth: float = PORTRAIT_AZIMUTH, elevation: float = PORTRAIT_ELEVATION,
-                    supersample: int = 3) -> Image.Image:
+                    supersample: int = 3, behind: list | None = None,
+                    level: int = PN_LEVEL) -> Image.Image:
     """RGBA picture (`size` = width, height) of `model` at `frame`, seeing the camera-space window
-    `box` = (x centre, y centre, height); transparent where there is no model."""
+    `box` = (x centre, y centre, height); transparent where there is no model. Smooth: every
+    triangle is drawn curved (point-normal triangles on normals averaged across the mesh) with
+    filtered textures. `behind` (per sprite, a flag per vertex) marks triangles drawn behind all
+    the others (the mace: the hands that hold it come in front, and it never pokes through him)."""
     sprites = model.anim.sprites
-    pts = [_yup(p) for p in evaluate_anim_frame(model.anim, frame)]
     rot = _camera(azimuth, elevation)
+    pts = [_yup(p) @ rot.T for p in evaluate_anim_frame(model.anim, frame)]
+    nrms = _smooth_normals(pts, sprites)
     w, h = size[0] * supersample, size[1] * supersample
     cx, cy, span = box
     scale = h / span
@@ -61,7 +138,7 @@ def render_portrait(model: Kmf, cache, frame: int, size: tuple[int, int], box: t
     key = KEY_LIGHT / np.linalg.norm(KEY_LIGHT)
     rim = RIM_LIGHT / np.linalg.norm(RIM_LIGHT)
     texcache = {}
-    for sprite, p in zip(sprites, pts):
+    for k, (sprite, v, nrm) in enumerate(zip(sprites, pts, nrms)):
         if not sprite.triangles[0]:
             continue
         name = material_texture_name(cache, model.materials[sprite.material])
@@ -70,45 +147,50 @@ def render_portrait(model: Kmf, cache, frame: int, size: tuple[int, int], box: t
         if name not in texcache:
             texcache[name] = np.asarray(cache.get(name).convert("RGB"), np.float32)
         tex = texcache[name]
-        th, tw = tex.shape[:2]
-        v = p @ rot.T
-        sx = w / 2 + (v[:, 0] - cx) * scale
-        sy = h / 2 - (v[:, 1] - cy) * scale
-        z = v[:, 2]                                          # nearer is smaller
         uv = np.array([(x.uv[0] / 32768.0, x.uv[1] / 32768.0) for x in sprite.vertices])
-        nrm = _yup(np.array([x.normal for x in sprite.vertices])) @ rot.T
-        for a, b, c in sprite.triangles[0]:
-            x0, x1 = int(max(min(sx[[a, b, c]]) - 1, 0)), int(min(max(sx[[a, b, c]]) + 2, w))
-            y0, y1 = int(max(min(sy[[a, b, c]]) - 1, 0)), int(min(max(sy[[a, b, c]]) + 2, h))
-            if x1 <= x0 or y1 <= y0:
-                continue
-            den = (sy[b] - sy[c]) * (sx[a] - sx[c]) + (sx[c] - sx[b]) * (sy[a] - sy[c])
-            if abs(den) < 1e-9:
-                continue
-            gx, gy = np.meshgrid(np.arange(x0, x1) + 0.5, np.arange(y0, y1) + 0.5)
-            w0 = ((sy[b] - sy[c]) * (gx - sx[c]) + (sx[c] - sx[b]) * (gy - sy[c])) / den
-            w1 = ((sy[c] - sy[a]) * (gx - sx[c]) + (sx[a] - sx[c]) * (gy - sy[c])) / den
-            w2 = 1 - w0 - w1
-            inside = (w0 >= -1e-4) & (w1 >= -1e-4) & (w2 >= -1e-4)
-            if not inside.any():
-                continue
-            zz = w0 * z[a] + w1 * z[b] + w2 * z[c]
-            win = inside & (zz < zbuf[y0:y1, x0:x1])
-            if not win.any():
-                continue
-            u = (w0 * uv[a, 0] + w1 * uv[b, 0] + w2 * uv[c, 0]) % 1.0
-            t = (w0 * uv[a, 1] + w1 * uv[b, 1] + w2 * uv[c, 1]) % 1.0
-            texel = tex[np.minimum((t * th).astype(int), th - 1), np.minimum((u * tw).astype(int), tw - 1)]
-            n = w0[..., None] * nrm[a] + w1[..., None] * nrm[b] + w2[..., None] * nrm[c]
-            n /= np.maximum(np.linalg.norm(n, axis=-1, keepdims=True), 1e-9)
-            n = np.where((n[..., 2:3] > 0), -n, n)            # face the camera (two-sided)
-            diffuse = AMBIENT + KEY * np.clip(n @ key, 0, 1)
-            edge = (1 - np.clip(-n[..., 2], 0, 1)) ** 2
-            rimlight = RIM * edge * np.clip(n @ rim + 0.35, 0, 1)
-            lit = texel * diffuse[..., None] + 255 * rimlight[..., None] * RIM_COLOUR * 0.55
-            colour[y0:y1, x0:x1][win] = lit[win]
-            alpha[y0:y1, x0:x1][win] = 255
-            zbuf[y0:y1, x0:x1][win] = zz[win]
+        flag = behind[k] if behind is not None and k < len(behind) else np.zeros(len(v), bool)
+        for tri in sprite.triangles[0]:
+            tri = list(tri)
+            P, N = v[tri], nrm[tri]
+            sub, bary, pieces = _pn_patch(P, N, level)
+            subn = bary @ N
+            subuv = bary @ uv[tri]
+            bias = BEHIND_BIAS if all(flag[tri]) else 0.0
+            sx = w / 2 + (sub[:, 0] - cx) * scale
+            sy = h / 2 - (sub[:, 1] - cy) * scale
+            z = sub[:, 2] + bias                                 # nearer is smaller
+            for a, b, c in pieces:
+                x0, x1 = int(max(min(sx[[a, b, c]]) - 1, 0)), int(min(max(sx[[a, b, c]]) + 2, w))
+                y0, y1 = int(max(min(sy[[a, b, c]]) - 1, 0)), int(min(max(sy[[a, b, c]]) + 2, h))
+                if x1 <= x0 or y1 <= y0:
+                    continue
+                den = (sy[b] - sy[c]) * (sx[a] - sx[c]) + (sx[c] - sx[b]) * (sy[a] - sy[c])
+                if abs(den) < 1e-9:
+                    continue
+                gx, gy = np.meshgrid(np.arange(x0, x1) + 0.5, np.arange(y0, y1) + 0.5)
+                w0 = ((sy[b] - sy[c]) * (gx - sx[c]) + (sx[c] - sx[b]) * (gy - sy[c])) / den
+                w1 = ((sy[c] - sy[a]) * (gx - sx[c]) + (sx[a] - sx[c]) * (gy - sy[c])) / den
+                w2 = 1 - w0 - w1
+                inside = (w0 >= -1e-4) & (w1 >= -1e-4) & (w2 >= -1e-4)
+                if not inside.any():
+                    continue
+                zz = w0 * z[a] + w1 * z[b] + w2 * z[c]
+                win = inside & (zz < zbuf[y0:y1, x0:x1])
+                if not win.any():
+                    continue
+                u = (w0 * subuv[a, 0] + w1 * subuv[b, 0] + w2 * subuv[c, 0]) % 1.0
+                t = (w0 * subuv[a, 1] + w1 * subuv[b, 1] + w2 * subuv[c, 1]) % 1.0
+                texel = _bilinear(tex, u, t)
+                n = w0[..., None] * subn[a] + w1[..., None] * subn[b] + w2[..., None] * subn[c]
+                n /= np.maximum(np.linalg.norm(n, axis=-1, keepdims=True), 1e-9)
+                n = np.where((n[..., 2:3] > 0), -n, n)            # face the camera (two-sided)
+                diffuse = AMBIENT + KEY * np.clip(n @ key, 0, 1)
+                edge = (1 - np.clip(-n[..., 2], 0, 1)) ** 2
+                rimlight = RIM * edge * np.clip(n @ rim + 0.35, 0, 1)
+                lit = texel * diffuse[..., None] + 255 * rimlight[..., None] * RIM_COLOUR * 0.55
+                colour[y0:y1, x0:x1][win] = lit[win]
+                alpha[y0:y1, x0:x1][win] = 255
+                zbuf[y0:y1, x0:x1][win] = zz[win]
     rgba = np.dstack([np.clip(colour, 0, 255), alpha]).astype(np.uint8)
     return Image.fromarray(rgba, "RGBA").resize(size, Image.LANCZOS)
 
@@ -147,12 +229,12 @@ def portrait_box(model: Kmf, frame: int, inner: tuple[int, int], *, azimuth=PORT
     return float(across), float(top - height / 2), float(height)
 
 
-def panel_portrait(model: Kmf, cache, frame: int = PORTRAIT_FRAME) -> Image.Image:
+def panel_portrait(model: Kmf, cache, frame: int = PORTRAIT_FRAME, behind=None) -> Image.Image:
     """The inside of the -bg picture (64 - 2 FRAME by 128 - 2 FRAME), at 4x for the downscale."""
     inner = (BG_SIZE[0] - 2 * FRAME, BG_SIZE[1] - 2 * FRAME)
     big = (inner[0] * 8, inner[1] * 8)
     box = portrait_box(model, frame, inner)
-    fig = render_portrait(model, cache, frame, big, box)
+    fig = render_portrait(model, cache, frame, big, box, behind=behind)
     ground = _radial(big, BLUE_CENTRE, BLUE_EDGE, focus=(0.5, 0.3))
     glow = fig.split()[3].filter(ImageFilter.GaussianBlur(big[0] / 18))
     halo = Image.new("RGB", big, (60, 80, 170))
@@ -201,15 +283,27 @@ def _framed(frame: Image.Image, picture: Image.Image) -> Image.Image:
     return out
 
 
-def make_panel_pictures(model: Kmf, cache, bg_frame: Image.Image, icon_frame: Image.Image
-                        ) -> tuple[Image.Image, Image.Image]:
+def make_panel_pictures(model: Kmf, cache, bg_frame: Image.Image, icon_frame: Image.Image,
+                        behind=None) -> tuple[Image.Image, Image.Image]:
     """(molynx-bg, molynx): the portrait and the emblem in the game's frames."""
     if bg_frame.size != BG_SIZE or icon_frame.size != ICON_SIZE:
         raise ValueError(f"the frames are {bg_frame.size} and {icon_frame.size}, "
                          f"not {BG_SIZE} and {ICON_SIZE}")
-    bg = _framed(bg_frame, panel_portrait(model, cache))
+    bg = _framed(bg_frame, panel_portrait(model, cache, behind=behind))
     icon = _framed(icon_frame, mace_emblem(ICON_SIZE[0] - 2 * FRAME))
     return bg, icon
+
+
+MACE_PART = 1    # the character's parts: 0 body (its first CLUB_VERTICES are the mace's shaft), 1 mace
+
+
+def mace_flags(plan) -> list[np.ndarray]:
+    """Per sprite of `plan` (molynx_assets.MolynxPlan), a flag per vertex: the mace's (its shaft
+    in the body part and the whole mace part), for render_portrait's `behind`."""
+    from scripts.behemoth_rig import CLUB_VERTICES
+    return [np.full(len(sp.vertices), True) if sp.part == MACE_PART
+            else (np.asarray(sp.vertices) < CLUB_VERTICES) if sp.part == 0
+            else np.full(len(sp.vertices), False) for sp in plan.sprites]
 
 
 class PanelCache:

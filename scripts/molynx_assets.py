@@ -1067,7 +1067,8 @@ def export_molynx_assets(out_dir: Path, height_ratio: float = DESIGN_HEIGHT_RATI
             bile_icon = _cache_image(cache, bile.resource_name("icon1Resource"))
             mine = molynx_portrait.PanelCache(cache, {n: Image.open(p) for n, p in textures.items()})
             model = parse_kmf(meshes[molynx_portrait.PORTRAIT_CLIP].read_bytes())
-            bg, icon = molynx_portrait.make_panel_pictures(model, mine, bile_bg, bile_icon)
+            bg, icon = molynx_portrait.make_panel_pictures(model, mine, bile_bg, bile_icon,
+                                                           behind=molynx_portrait.mace_flags(plan))
         else:
             bg, icon, bile_bg, bile_icon = make_portraits(
                 Path(portrait_src), bile, cache, None if portrait_icon is None else Path(portrait_icon))
