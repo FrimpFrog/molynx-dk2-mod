@@ -302,7 +302,10 @@ def test_rule6_things(files):
 def test_rule6_molynx_record_is_the_base_bile_demon_record(files):
     base = [d for k, d in _things(_base()["Things.kld"]) if k == 200 and d[26] == 3 and d[27] == 3][0]
     mol = [d for k, d in _things(_f(files, STEM, "Things.kld")) if k == 200 and d[26] == 47][0]
-    assert mol[8:26] == base[8:26] and mol[27] == 3
+    # the base Keeper 1 Bile Demon's, but at level 5 (review round 2: his level-4 ability at once)
+    from scripts.dk2_testmap import MOLYNX_LEVEL
+    assert mol[14] == MOLYNX_LEVEL == 5 and base[14] == 2
+    assert mol[8:14] + mol[15:26] == base[8:14] + base[15:26] and mol[27] == 3
 
 
 @needs_maps

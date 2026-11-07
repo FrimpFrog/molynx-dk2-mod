@@ -1070,6 +1070,10 @@ FLAT_VARIANTS = {"Molynx Test": (False, "Molynx Test"),
                  "Molynx Test Portal": (True, "Molynx Test Portal"),
                  FLAT_BASE: (True, "Molynx Test")}   # the portal variant (review round 2)
 FLAT_PLAIN, FLAT_PORTAL = "Molynx Test", "Molynx Test Portal"
+# The flat maps' Molynx by the heart starts at level 5 (review round 2: his level-4 ability can be
+# tried at once); otherwise his thing is the base's Keeper 1 Bile Demon's (level 2). A creature
+# thing's level is the byte at 14.
+THING_LEVEL_AT, MOLYNX_START_LEVEL = 14, 5
 FLAT_WITH = ("Siege",)  # the copied map a flat-test-map folder also holds (the shipped-map round's)
 FLAT_SIX = (".kwd", "Map.kld", "Things.kld", "Players.kld", "Triggers.kld", "Variables.kld")
 LEVEL_SCRIPT_ROOT = 4536  # u16 at 56 + 4480 of a level file: its script's root trigger (0: none)
@@ -1438,7 +1442,14 @@ class _Flat:
                 problems.append(f"creature {cid} of player {owner} at {x},{y} is not on its keeper's floor")
             source_id = BILE_DEMON_ID if cid == MOLYNX_ID else cid
             like = d[:26] + bytes([source_id]) + d[27:]  # Molynx is a retargeted Bile Demon
-            if not any(b[8:] == like[8:] and b[27] == owner for b in base_creatures):
+            if cid == MOLYNX_ID:
+                if d[THING_LEVEL_AT] != MOLYNX_START_LEVEL:
+                    problems.append(f"Molynx at {x},{y} starts at level {d[THING_LEVEL_AT]}, "
+                                    f"expected {MOLYNX_START_LEVEL}")
+                like = like[:THING_LEVEL_AT] + b"\x00" + like[THING_LEVEL_AT + 1:]
+            level_free = lambda b: b[:THING_LEVEL_AT] + b"\x00" + b[THING_LEVEL_AT + 1:]  # noqa: E731
+            if not any((level_free(b) if cid == MOLYNX_ID else b)[8:] == like[8:] and b[27] == owner
+                       for b in base_creatures):
                 problems.append(f"creature {cid} of player {owner} at {x},{y} is not a copy of one of "
                                 f"{FLAT_BASE}'s creature {source_id} things of that player")
             if cid == MOLYNX_ID:

@@ -24,7 +24,7 @@ type-204 "room" thing at the centre tile (x, y, 0, 0, dir 0, 0, initialHealth 10
 owner); it has no objects. Siege's Keeper 1 Portal has no thing at all. Creatures are copies of
 Dead Walking's own records with x, y (and for Molynx the creature id) changed: its first Keeper 1 /
 Keeper 2 Imps (level 3, flags 9) and its Keeper 1 Bile Demon (level 2, flags 41, the record Test A
-turned into Molynx). Nothing else is kept: the neutral creatures, doors, traps, objects, hero gate,
+turned into Molynx; Molynx starts at MOLYNX_LEVEL, 5). Nothing else is kept: the neutral creatures, doors, traps, objects, hero gate,
 hero parties and action points of Dead Walking serve its own dungeon and script only.
 
 Players (0xB4). 205-byte records; Keeper 1 (record 2) gets startingGold 100000 (i32 at +0); its
@@ -304,11 +304,22 @@ def _moved(thing: Thing, x: int, y: int) -> Thing:
     return Thing(thing.type, struct.pack("<ii", x, y) + thing.data[8:])
 
 
-def _creature(thing: Thing, x: int, y: int, creature_id: int | None = None) -> Thing:
+def _creature(thing: Thing, x: int, y: int, creature_id: int | None = None,
+              level: int | None = None) -> Thing:
     data = bytearray(_moved(thing, x, y).data)
     if creature_id is not None:
-        data[26] = creature_id
+        data[THING_CREATURE_ID_AT] = creature_id
+    if level is not None:
+        data[THING_LEVEL_AT] = level
     return Thing(thing.type, bytes(data))
+
+
+# A creature thing (type 200): x, y, z (i32), gold held (u16), level (u8), flags (u8), initial health
+# (i32), objective, trigger, creature id (u8 at 26), owner (u8 at 27).
+THING_LEVEL_AT, THING_CREATURE_ID_AT = 14, 26
+# The Molynx by the heart starts at level 5 (second review round: his Stone Skin comes at level 4,
+# so it can be tried at once); the Bile Demon record he is copied from is level 2.
+MOLYNX_LEVEL = 5
 
 
 def _first_creature(things: list[Thing], creature_id: int, owner: int) -> Thing:
@@ -489,7 +500,7 @@ def testmap_files(stem: str, *, molynx_in_pool: bool, display_name: str = "Molyn
     imp2 = _first_creature(bthings, IMP_ID, KEEPER2)
     bile = _first_creature(bthings, BILE_DEMON_ID, KEEPER1)
     things = [_creature(imp1, x, y) for x, y in K1_IMPS_AT]
-    things.append(_creature(bile, *MOLYNX_AT, creature_id=MOLYNX_ID))
+    things.append(_creature(bile, *MOLYNX_AT, creature_id=MOLYNX_ID, level=MOLYNX_LEVEL))
     things += [_creature(imp2, x, y) for x, y in K2_IMPS_AT]
     things += _shifted(k1, k1.origin) + _shifted(portal, PORTAL_AT) + _shifted(k2, K2_HEART_AT)
 
@@ -703,6 +714,9 @@ def validate_testmap(files: dict[str, bytes], stem: str, *, molynx_in_pool: bool
                              if 0 <= x + dx < w and 0 <= y + dy < h)
                 if tile[0] not in FLOOR or not beside:
                     errors.append(f"rule 6: Molynx at {x},{y} is not on floor next to the heart")
+                if t.data[THING_LEVEL_AT] != MOLYNX_LEVEL:
+                    errors.append(f"rule 6: Molynx starts at level {t.data[THING_LEVEL_AT]}, "
+                                  f"not {MOLYNX_LEVEL}")
         elif t.raw not in allowed:
             errors.append(f"rule 6: unexpected thing of type {t.type}")
     want = Counter({(IMP_ID, KEEPER1): 6, (MOLYNX_ID, KEEPER1): 1, (IMP_ID, KEEPER2): 4})
