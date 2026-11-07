@@ -156,3 +156,13 @@ def test_the_check_finds_a_wrong_record_thing_and_pool_entry(built, tmp_path):
     problems = check_added(built, out)
     assert any("Creatures.kwd: record 49 differs" in p for p in problems)
     assert any("Molynx TestThings.kld: 0 things added, want 3" in p for p in problems)
+
+
+@needs_data
+def test_copies_of_unique_creatures_get_their_base_creatures_panel_picture(added):
+    for path in [added / "Data/editor/Creatures.kwd", *sorted((added / MAPS).glob("*Globals.kld"))]:
+        recs = _table(path)
+        for cid, base in ((48, 10), (49, 23), (50, 11)):
+            assert recs[cid - 1].get("cloneCreatureId") == base
+            assert recs[cid - 1].resource_name("portraitResource") == recs[base - 1].resource_name("portraitResource")
+            assert recs[cid - 1].resource_name("portraitResource").endswith("-bg")

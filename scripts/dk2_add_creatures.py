@@ -12,8 +12,9 @@ build_molynx_mod) to `out` and adds one creature type per `NewCreature` spec:
 - every creature table (`Data/editor/Creatures.kwd` and each map's `<map>Globals.kld`): a copy of
   that table's own record `clone_of` with creatureId and orderInEditor set to the new id, the
   portal and unique flags set as asked, and the name text set when the spec gives one. Records stay
-  in creatureId order; every other record and block is unchanged. New ids must follow the table's
-  highest id with no gap (the game sizes some per-type tables by the number of types and finds
+  in creatureId order; every other record and block is unchanged. A copy of a unique creature,
+  which has no panel picture of its own, gets the picture of the creature in its cloneCreatureId.
+  New ids must follow the table's highest id with no gap (the game sizes some per-type tables by the number of types and finds
   records by id, so the ids are kept dense: 1..N);
 - `Data/Text/Default/Text.str`: each new name is added at the end (the folder's own copy, or the
   game's when the folder has none);
@@ -48,7 +49,7 @@ from pathlib import Path
 
 from scripts.dk2kld_splice import Thing, read_things, write_things
 from scripts.dk2kwd_blocks import read_blocks, rebuilt_block, write_blocks
-from scripts.dk2kwd_creatures import Creature, creatures_block, read_creatures
+from scripts.dk2kwd_creatures import FIELDS, RESOURCE_SIZE, Creature, creatures_block, read_creatures
 
 CREATURES = 0xAA
 CREATURE_THING = 200
@@ -140,9 +141,24 @@ def _table(data: bytes, specs: list[NewCreature], name_ids: dict[int, int], wher
             c.set("nameStringId", name_ids[s.creature_id])
         if s.name is not None:
             c.set("name", s.name)
+        _portrait_from_clone(c, by_id)
         out.append(c)
     blocks[at] = creatures_block(out, blocks[at])
     return write_blocks(blocks)
+
+
+PORTRAIT = "portraitResource"
+
+
+def _portrait_from_clone(c: Creature, by_id: dict) -> None:
+    """A record with no panel picture of its own (the unique creatures': they show the picture of
+    the creature in their cloneCreatureId) gets that creature's whole portrait resource. Without it,
+    types beyond 46 show an empty slot in the creature panel (tested 2026-11-08)."""
+    base = by_id.get(c.get("cloneCreatureId"))
+    if c.resource_name(PORTRAIT) or base is None or not base.resource_name(PORTRAIT):
+        return
+    at = FIELDS[PORTRAIT].offset
+    c.raw[at:at + RESOURCE_SIZE] = base.raw[at:at + RESOURCE_SIZE]
 
 
 def _map_tiles(data: bytes) -> tuple[int, int, list[bytes]]:
@@ -362,6 +378,12 @@ def _check_table(rel, s, o, specs, text) -> list[str]:
             for f in ("name", "creatureId", "orderInEditor", "flags", "nameStringId"):
                 fld = c._field(f)
                 allowed |= set(range(fld.offset, fld.end))
+            at = FIELDS[PORTRAIT].offset
+            allowed |= set(range(at, at + RESOURCE_SIZE))
+            if not c.resource_name(PORTRAIT):
+                problems.append(f"{rel}: record {sp.creature_id} has no panel picture (portraitResource)")
+            elif donor.resource_name(PORTRAIT) and c.raw[at:at + RESOURCE_SIZE] != donor.raw[at:at + RESOURCE_SIZE]:
+                problems.append(f"{rel}: record {sp.creature_id} changed its donor's panel picture")
             if any(c.raw[k] != donor.raw[k] for k in range(len(c.raw)) if k not in allowed):
                 problems.append(f"{rel}: record {sp.creature_id} differs from {sp.clone_of} beyond id/order/flags/name")
             if c.get("orderInEditor") != sp.creature_id:
