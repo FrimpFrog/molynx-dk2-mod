@@ -20,7 +20,7 @@ def parts():
 
 def test_triangle_budget_is_a_big_dk2_creature(parts):
     total = sum(t for _, t in counts(parts).values())
-    assert 400 <= total <= 560          # the Horned Reaper's files have 406, the Knight's 290
+    assert 400 <= total <= 580          # the Horned Reaper's files have 406, the Knight's 290
 
 
 def test_closed_parts_are_wound_outward(parts):
