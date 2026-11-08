@@ -288,11 +288,12 @@ def build_trunk(parts):
 
 HEAD_RINGS = [  # centre, lateral, up, down (to the lip line)
     ((0, .952, -.035), .066, .056, .054),     # broad jaw muscles behind the eyes
-    ((0, .958, .055), .078, .072, .056),      # the brow: the deepest part of the head
-    ((0, .926, .165), .058, .054, .044),
-    ((0, .9, .25), .05, .052, .038),          # a broad nose with a raised, bulbous top
+    ((0, .958, .06), .078, .072, .056),       # the brow: the deepest part of the head
+    ((0, .92, .205), .058, .05, .04),
+    ((0, .882, .32), .042, .038, .03),        # the long snout of the first version, a little broader
 ]
-SNOUT_TIP = np.array([0, .9, .283])           # blunt: the nose ends in a flat, rounded front
+SNOUT_TIP = np.array([0, .872, .368])
+NOSTRILS = [(np.array([.019, .905, .332]), np.array([.35, .55, .76]))]   # left; mirrored for the right
 SKULL_BACK = np.array([0, .965, -.085])
 HEAD_AXIS_HINT = (0, 1, 0)
 
@@ -340,6 +341,29 @@ def build_head(parts):
     back = part.add(SKULL_BACK, (0.5, 0.0), "head", "skull", ring=-1, k=-1)
     for k in range(6):
         part.tri(rings[0][(k + 1) % 6], rings[0][k], back, inside=inner[0] + (inner[0] - SKULL_BACK))
+    # nostrils: two raised, flared tubes at the end of the snout, open at the front (a dark hole)
+    for s in (1, -1):
+        for base, d in NOSTRILS:
+            base = base * (s, 1, 1)
+            d = _unit(d * (s, 1, 1))
+            up = np.array([0, 1.0, 0])
+            side = _unit(np.cross(d, up))
+            up2 = np.cross(side, d)
+            sink = base - d * .014
+            rim = base + d * .016
+            ids = []
+            for k in range(4):
+                th = np.pi / 4 + k * np.pi / 2
+                off = np.cos(th) * side + np.sin(th) * up2
+                ids.append((part.add(sink + off * .018, (k / 4, 0), "head", "nostril", along=0.0),
+                            part.add(rim + off * .016, (k / 4, .6), "head", "nostril", along=0.55)))
+            hole = part.add(rim - d * .004, (.5, 1), "head", "nostril", along=1.0)
+            for k in range(4):
+                a0, a1 = ids[k]
+                b0, b1 = ids[(k + 1) % 4]
+                part.tri(a0, b0, a1, inside=base - d * .01)
+                part.tri(b0, b1, a1, inside=base - d * .01)
+                part.tri(a1, b1, hole, inside=base - d * .03)
     # horns: from the back of the skull, swept back, out and a little up
     for s in (1, -1):
         base = np.array([.04 * s, .99, -.02])
@@ -414,7 +438,7 @@ def build_jaw(parts, head_rings):
             c_, d_ = rings[i + 1][k], rings[i + 1][(k + 1) % 4]
             part.tri(a, b, c_, inside=mid)
             part.tri(b, d_, c_, inside=mid)
-    chin_p = np.array([0, .866, .262])
+    chin_p = np.array([0, .856, .342])
     chin = part.add(chin_p, (.5, 1.0), "jaw", "jaw", ring=4, k=-1)
     for k in range(4):
         part.tri(rings[3][k], rings[3][(k + 1) % 4], chin, inside=inner[3] - (chin_p - inner[3]))

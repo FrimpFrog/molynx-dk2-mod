@@ -33,6 +33,7 @@ ATLAS = {
         "horn": ((0, 98, 30, 128), False),
         "brow": ((32, 98, 52, 128), False),
         "fang": ((54, 98, 72, 128), False),
+        "nostril": ((74, 98, 100, 128), False),
     },
     "Dragon_Wing": {
         "membrane": ((0, 0, 128, 100), False),
@@ -224,7 +225,7 @@ def paint_claw(t):
     return col * _light(t["nrm"])[..., None]
 
 
-EYE_V = 0.36        # the eyes: on the brow ring (ring 1), on the upper side of the head
+EYE_V = 0.31        # the eyes: on the brow ring (ring 1), on the upper side of the head
 NOSTRIL_V = 0.95
 
 
@@ -256,11 +257,11 @@ def paint_skull(t):
     col = mix(col, C["mouth"] * 0.45, 0.7 * np.exp(-((u - 0.575) / 0.012) ** 2) * (v > 0.2))   # gum line
     # a heavy dark brow, low over the front of the eye
     v_eye = (v - EYE_V)
-    brow = np.exp(-(((u - (0.225 + 0.35 * v_eye)) / 0.045) ** 2) - ((v_eye / 0.12) ** 2))
+    brow = np.exp(-(((u - (0.225 + 0.35 * v_eye)) / 0.045) ** 2) - ((v_eye / 0.095) ** 2))
     col = mix(col, C["scale_dark"] * 0.55, 0.85 * brow)
     # the eye: a slanted slit of red-orange glow, its front corner lower, in a dark socket
-    du = (u - 0.305 - 0.4 * v_eye) / 0.042
-    dv = v_eye / 0.085
+    du = (u - 0.305 - 0.5 * v_eye) / 0.044
+    dv = v_eye / 0.066
     e = du ** 2 + dv ** 2
     eye = e < 1
     socket = (e >= 1) & (e < 2.4)
@@ -269,10 +270,7 @@ def paint_skull(t):
     glow = np.where((np.abs(dv) < 0.13)[..., None] & eye[..., None] & (np.abs(du) < 0.75)[..., None],
                     C["pupil"], glow)
     col = np.where(eye[..., None], glow / np.maximum(_light(nrm), 0.5)[..., None], col)   # eyes don't shade
-    # nostrils: wide flared slits on the front of the nose, each with a raised lighter rim
-    n = ((u - 0.17) / 0.075) ** 2 + ((v - NOSTRIL_V) / 0.03) ** 2
-    col = mix(col, C["scale_hi"] * 1.05, 0.6 * smooth(2.4, 1.3, n) * (n > 1.0))
-    col = mix(col, C["scale_dark"] * 0.15, smooth(1.1, 0.6, n))
+    # (the nostrils are geometry: paint_nostril)
     return col * _light(nrm)[..., None]
 
 
@@ -315,6 +313,14 @@ def paint_spike(t):
 
 def paint_brow(t):
     col = mix(C["scale_dark"], C["back"], t["along"])
+    return col * _light(t["nrm"])[..., None]
+
+
+def paint_nostril(t):
+    """The raised nostril tubes: scaled sides, a lighter flared rim, a black hole."""
+    along = t["along"]
+    col = mix(C["scale"], C["scale_hi"] * 1.1, smooth(0.2, 0.55, along))
+    col = mix(col, C["pupil"], smooth(0.65, 0.85, along))
     return col * _light(t["nrm"])[..., None]
 
 
@@ -368,6 +374,7 @@ PAINTERS = {
     ("Dragon_Head", "skull"): paint_skull, ("Dragon_Head", "jaw"): paint_jaw,
     ("Dragon_Head", "spike"): paint_spike, ("Dragon_Head", "horn"): paint_horn,
     ("Dragon_Head", "brow"): paint_brow, ("Dragon_Head", "fang"): paint_fang,
+    ("Dragon_Head", "nostril"): paint_nostril,
     ("Dragon_Wing", "membrane"): paint_membrane, ("Dragon_Wing", "arm"): paint_arm,
     ("Dragon_Wing", "toe"): paint_claw,
 }
