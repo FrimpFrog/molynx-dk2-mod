@@ -4,9 +4,10 @@ shoulders, the neck inside the head), a sculpted head under a layered shell of l
 projected skins like the game's, and small armour.
 
 His face is painted in his likeness on the front of the head (soles_texture). He is on
-the evil side: blackened plate armour (a breastplate and faulds painted on the torso, spiked three-lame
-pauldrons, a gorget, spiked gauntlets, knee cops, sabatons), dark mail sleeves, a dark red loincloth over
-black leather, and the Dark Angel's sword (the game's own triangles, still pointing at DarkAngelFrnt).
+the evil side, in knightly plate of his own design in dark grey, red, white and silver: a rounded
+breastplate with a white band and a red flame, faulds, four-lame pauldrons, vambraces, cuisses, knee cops
+and greaves, a red loincloth with a white border, and the Dark Angel's sword (the game's own triangles,
+still pointing at DarkAngelFrnt).
 
 Model space as lowpoly: Y up, Z forward, X to his LEFT; 1.0 tall to the top of his hair.
 
@@ -24,15 +25,15 @@ SK = Skeleton([
     ("chest", "spine", (0, .69, 0), (0, .8, -.006)),
     ("neck", "chest", (0, .8, -.006), (0, .85, 0)),
     ("head", "neck", (0, .85, 0), (0, 1.0, 0)),
-    ("shoulderL", "chest", (.03, .78, -.01), (.108, .772, -.012)),
-    ("armL", "shoulderL", (.108, .772, -.012), (.128, .628, -.02)),
-    ("forearmL", "armL", (.128, .628, -.02), (.146, .49, .0)),
-    ("handL", "forearmL", (.146, .49, .0), (.15, .42, .008)),
+    ("shoulderL", "chest", (.03, .78, -.01), (.122, .772, -.012)),
+    ("armL", "shoulderL", (.122, .772, -.012), (.142, .628, -.02)),
+    ("forearmL", "armL", (.142, .628, -.02), (.16, .49, .0)),
+    ("handL", "forearmL", (.16, .49, .0), (.164, .42, .008)),
     ("thighL", "root", (.062, .49, .0), (.07, .265, .012)),
     ("shinL", "thighL", (.07, .265, .012), (.074, .055, -.01)),
     ("footL", "shinL", (.074, .055, -.01), (.078, .008, .08)),
 ])
-HEAD, BODY, LIMBS = "Soles_Head", "Soles_Body", "Soles_Limbs"
+HEAD, BODY, LIMBS, HAIR_TEX = "Soles_Head", "Soles_Body", "Soles_Limbs", "Soles_Hair"
 DA_HEIGHT = .706
 
 
@@ -75,11 +76,10 @@ def tube(p, island, rings, weights, inside_pts, cap0=None, cap1=None):
 # ------------------------------------------------------------------------------------------- torso
 
 # rings: y, half width, front, back, centre z
-TORSO = [(.445, .09, .064, .068, .0), (.475, .096, .066, .07, .0), (.51, .094, .063, .066, .0),
-         (.56, .088, .062, .062, .004), (.62, .094, .066, .062, .008), (.68, .106, .074, .06, .01),
-         (.735, .114, .072, .058, .004), (.772, .108, .058, .05, -.004), (.8, .062, .042, .04, -.006),
-         (.822, .034, .031, .031, -.006), (.87, .03, .029, .029, -.002)]
-TORSO_N = 12
+TORSO = [(.445, .09, .064, .068, .0), (.5, .095, .064, .067, .0), (.56, .082, .062, .062, .004),
+         (.64, .104, .068, .062, .008), (.71, .128, .074, .06, .008), (.772, .112, .058, .05, -.004),
+         (.81, .04, .034, .034, -.006), (.87, .03, .029, .029, -.002)]
+TORSO_N = 8
 
 
 def torso_ring(y, hw, f, b, cz, n=TORSO_N):
@@ -104,9 +104,10 @@ def build_torso(parts):
 
 # ------------------------------------------------------------------------------------------- arms
 
-ARM = [((.096, .772, -.012), .047, .043), ((.116, .735, -.014), .044, .04), ((.124, .68, -.018), .036, .034),
-       ((.128, .628, -.02), .03, .029), ((.135, .58, -.014), .031, .029), ((.142, .53, -.006), .027, .024),
-       ((.146, .49, .0), .02, .018)]
+ARM_RINGS = (0, 2, 4, 6)
+ARM = [((.112, .772, -.012), .05, .046), ((.13, .735, -.014), .047, .043), ((.138, .68, -.018), .04, .038),
+       ((.142, .628, -.02), .033, .031), ((.149, .58, -.014), .034, .032), ((.156, .53, -.006), .029, .026),
+       ((.16, .49, .0), .021, .019)]
 
 
 def build_arms(parts):
@@ -114,26 +115,28 @@ def build_arms(parts):
     for s in (1, -1):
         nm = nm_for(s)
         bones = [nm("armL"), nm("forearmL"), nm("handL")]
-        cs = [np.array(c) * (s, 1, 1) for c, _, _ in ARM]
-        rings = [ring_pts(cs[i], cs[min(i + 1, 6)] - cs[max(i - 1, 0)], (0, 0, 1), rx, rz, 8)
-                 for i, (_, rx, rz) in enumerate(ARM)]
-        tube(p, "arm", rings, lambda i, q, b=bones: {b[0]: 1.0} if i <= 1 else SK.auto(q, b), cs)
+        use = [ARM[i] for i in ARM_RINGS]
+        cs = [np.array(c) * (s, 1, 1) for c, _, _ in use]
+        L = len(cs) - 1
+        rings = [ring_pts(cs[i], cs[min(i + 1, L)] - cs[max(i - 1, 0)], (0, 0, 1), rx, rz, 6)
+                 for i, (_, rx, rz) in enumerate(use)]
+        tube(p, "arm", rings, lambda i, q, b=bones: {b[0]: 1.0} if i == 0 else SK.auto(q, b), cs)
         w = cs[-1]
-        hand = [w + (0, -.004, .002), w + (.002 * s, -.03, .008), w + (.004 * s, -.058, .01)]
-        rh = [(.021, .014), (.024, .013), (.019, .011)]
-        rings = [ring_pts(hand[i], hand[min(i + 1, 2)] - hand[max(i - 1, 0)], (s, 0, 0), rh[i][1], rh[i][0], 6)
-                 for i in range(3)]
+        hand = [w + (0, -.004, .002), w + (.002 * s, -.03, .008), w + (.003 * s, -.054, .01)]
+        rh = [(.024, .022), (.027, .025), (.022, .02)]
+        rings = [ring_pts(hand[i], hand[min(i + 1, 2)] - hand[max(i - 1, 0)], (s, 0, 0), rh[i][1], rh[i][0], 5)
+                 for i in (0, 2)]
+        hand = [hand[0], hand[2]]
         tube(p, "hand", rings, lambda i, q, b=bones: {b[2]: 1.0}, hand, cap1=w + (.005 * s, -.074, .01))
-        th = [w + (-.01 * s, -.014, .014), w + (-.015 * s, -.036, .026)]
-        rings = [ring_pts(q, th[1] - th[0], (0, 0, 1), .0075, .0075, 4) for q in th]
-        tube(p, "hand", rings, lambda i, q, b=bones: {b[2]: 1.0}, th, cap1=w + (-.017 * s, -.048, .03))
+        cs = [np.array(c) * (s, 1, 1) for c, _, _ in ARM]
     parts.append(p)
     return p
 
 
 # ------------------------------------------------------------------------------------------- legs
 
-LEG = [((.06, .505, .004), .062, .06), ((.064, .43, .008), .058, .056), ((.067, .35, .012), .048, .046),
+LEG_RINGS = (0, 2, 3, 4, 6)
+LEG = [((.05, .47, .004), .05, .048), ((.06, .41, .008), .05, .048), ((.067, .35, .012), .048, .046),
        ((.07, .27, .014), .039, .038), ((.071, .2, .01), .044, .043), ((.072, .13, .0), .037, .037),
        ((.074, .062, -.008), .031, .031)]
 BOOT_TOP = .2
@@ -144,16 +147,17 @@ def build_legs(parts):
     for s in (1, -1):
         nm = nm_for(s)
         bones = [nm("thighL"), nm("shinL"), nm("footL")]
-        cs = [np.array(c) * (s, 1, 1) for c, _, _ in LEG]
-        rings = [ring_pts(cs[i], cs[min(i + 1, 6)] - cs[max(i - 1, 0)], (0, 0, 1), rx, rz, 8)
-                 for i, (_, rx, rz) in enumerate(LEG)]
+        use = [LEG[i] for i in LEG_RINGS]
+        cs = [np.array(c) * (s, 1, 1) for c, _, _ in use]
+        L = len(cs) - 1
+        rings = [ring_pts(cs[i], cs[min(i + 1, L)] - cs[max(i - 1, 0)], (0, 0, 1), rx, rz, 6)
+                 for i, (_, rx, rz) in enumerate(use)]
         tube(p, "leg", rings, lambda i, q, b=bones: {"root": .5, b[0]: .5} if i == 0 else SK.auto(q, b), cs)
         a = cs[-1]
-        foot = [a + (0, -.03, -.008), a + (.002 * s, -.044, .03), a + (.004 * s, -.052, .07)]
-        rf = [(.033, .03), (.03, .018), (.025, .011)]
-        rings = [ring_pts(foot[i], foot[min(i + 1, 2)] - foot[max(i - 1, 0)], (0, 1, .4), rf[i][0], rf[i][1], 6)
-                 for i in range(3)]
-        tube(p, "foot", rings, lambda i, q, b=bones: {b[2]: 1.0}, foot, cap1=a + (.005 * s, -.054, .1))
+        foot = [a + (0, -.02, -.012), a + (.003 * s, -.042, .05)]
+        rf = [(.036, .034), (.03, .016)]
+        rings = [ring_pts(foot[i], foot[1] - foot[0], (0, 1, .4), rf[i][0], rf[i][1], 6) for i in range(2)]
+        tube(p, "foot", rings, lambda i, q, b=bones: {b[2]: 1.0}, foot, cap1=a + (.003 * s, -.048, .085))
     parts.append(p)
     return p
 
@@ -190,8 +194,8 @@ def flap(p, island, top_y, bot_y, z0, z1, w0, w1, front=True, cols=3, rows=3):
 
 def build_loincloth(parts):
     p = Part("loincloth", LIMBS, SK)
-    flap(p, "cloth", .478, .3, .07, .088, .064, .07, front=True)
-    flap(p, "cloth", .478, .29, .072, .092, .07, .078, front=False)
+    flap(p, "cloth", .478, .3, .06, .072, .045, .06, front=True, rows=2, cols=2)
+    flap(p, "cloth", .478, .29, .066, .08, .06, .072, front=False, rows=2, cols=2)
     parts.append(p)
     return p
 
@@ -223,39 +227,31 @@ def spike(p, island, base, tip, r, w):
 
 
 def build_armour(parts):
-    """Dark plate: spiked pauldrons of three lames on both shoulders, a gorget, gauntlets, knee cops, the
-    belt."""
+    """Knightly plate in dark grey with silver edges: four stacked lames over each shoulder, vambraces on
+    the forearms, a knee cop on each knee, and the belt. (The breastplate, faulds, cuisses and greaves are
+    painted on the torso and legs.)"""
     p = Part("armour", LIMBS, SK)
     for s in (1, -1):
         nm = nm_for(s)
         w = {nm("shoulderL"): .35, nm("armL"): .65}
-        for i, (dy, r) in enumerate(((0, .062), (-.03, .056), (-.056, .048))):
-            c = np.array([s * (.11 + .01 * i), .795 + dy, -.012])
+        for i, (dy, r) in enumerate(((0, .068), (-.034, .058))):
+            c = np.array([s * (.125 + .006 * i), .8 + dy, -.012])
             e1 = np.array([0, 0, 1.0])
-            e2 = unit(np.array([s, -.45 - .3 * i, 0]))
+            e2 = unit(np.array([s, -.35 - .35 * i, 0]))
             nrm = unit(np.cross(e1, e2))
             if nrm[1] < 0:
                 e1 = -e1
-            plate(p, "pauldron", c, e1, e2, r * .95, r * .78, .022 - .004 * i, w, along0=i / 3)
-        top = np.array([s * .112, .82, -.012])
-        spike(p, "spike", top, top + (s * .03, .07, -.01), .011, w)
-        spike(p, "spike", top + (s * .03, -.012, .0), top + (s * .07, .04, -.01), .009, w)
-        # gauntlets: a flared steel cuff over the forearm and the back of the hand
+            plate(p, "pauldron", c, e1, e2, r * .95, r * .7, .03 - .005 * i, w, n=6, along0=i / 4)
+        # vambraces: plate over the forearm, stopping short of the fist
         a0 = np.array(ARM[4][0]) * (s, 1, 1)
-        a1 = np.array(ARM[6][0]) * (s, 1, 1) + (0, .004, 0)
-        rings = [ring_pts(a0 + (0, .012, 0), a1 - a0, (0, 0, 1), .041, .039, 8),
-                 ring_pts(a0, a1 - a0, (0, 0, 1), .036, .034, 8),
-                 ring_pts(a1, a1 - a0, (0, 0, 1), .027, .025, 8)]
-        tube(p, "bracer", rings, lambda i, q, b=nm("forearmL"): {b: 1.0}, [a0 + (0, .012, 0), a0, a1])
-        spike(p, "spike", a0 + (s * .02, -.01, -.02), a0 + (s * .055, .0, -.04), .007, {nm("forearmL"): 1.0})
+        a1 = np.array(ARM[6][0]) * (s, 1, 1) + (0, .018, 0)
+        rings = [ring_pts(a0 + (0, .012, 0), a1 - a0, (0, 0, 1), .041, .039, 6),
+                 ring_pts(a1, a1 - a0, (0, 0, 1), .029, .027, 6)]
+        tube(p, "bracer", rings, lambda i, q, b=nm("forearmL"): {b: 1.0}, [a0 + (0, .012, 0), a1])
         # knee cops
         k = np.array(LEG[3][0]) * (s, 1, 1)
-        plate(p, "pauldron", k + (0, .004, .034), np.array([1.0, 0, 0]), np.array([0, 1.0, 0]), .034, .038,
-              .016, {nm("thighL"): .3, nm("shinL"): .7}, n=6, along0=.66)
-    # the gorget: a steel collar round the base of the neck
-    rings = [torso_ring(.79, .072, .055, .05, -.006), torso_ring(.815, .046, .042, .04, -.006)]
-    tube(p, "gorget", rings, lambda i, q: {"chest": 1.0}, [np.array([0, .79, -.006]), np.array([0, .815, -.006])])
-    # the belt
+        plate(p, "pauldron", k + (0, .004, .034), np.array([1.0, 0, 0]), np.array([0, 1.0, 0]), .036, .04,
+              .016, {nm("thighL"): .3, nm("shinL"): .7}, n=6, along0=.75)
     rings = [torso_ring(y, .1, .072, .076, 0) for y in (.462, .5)]
     tube(p, "belt", rings, lambda i, q: {"root": 1.0}, [np.array([0, .462, 0]), np.array([0, .5, 0])])
     parts.append(p)
@@ -266,17 +262,23 @@ def build_armour(parts):
 
 # a long, layered shag: volume at the crown, over the ears, to the jaw and the nape, the ends flicking out
 # rows: y, side radius, front radius, back radius, half-angle of the opening at the face (deg)
-HAIR_ROWS = [(1.0, .026, .026, .03, 0), (.986, .052, .05, .064, 0), (.967, .065, .062, .081, 0),
-             (.947, .068, .067, .086, 30), (.922, .07, .066, .087, 52), (.895, .068, .06, .085, 60),
-             (.867, .066, .055, .081, 64), (.842, .064, .05, .076, 68), (.82, .066, .047, .072, 72)]
-HAIR_COLS = 16
+HAIR_ROWS = [(.993, .046, .046, .056, 0), (.967, .063, .062, .076, 0), (.945, .066, .067, .08, 0),
+             (.905, .071, .062, .08, 58), (.872, .074, .057, .079, 64), (.848, .077, .052, .079, 72)]
+HAIR_BACK_DROP = .013                 # the last row hangs lower behind (y .835 at the back)
+HAIR_COLS = 9
 
 
 def build_hair(parts):
-    p = Part("hair", HEAD, SK)
+    p = Part("hair", HAIR_TEX, SK)
     rng = np.random.default_rng(11)
     grid = []
     last = len(HAIR_ROWS) - 1
+    lock_of, k = [], 0
+    while len(lock_of) < HAIR_COLS:
+        lock_of += [k] * int(rng.integers(2, 4))
+        k += 1
+    lock_drop = rng.uniform(.006, .02, k + 1)
+    lock_flick = rng.uniform(.02, .07, k + 1)
     for j, (y, rs, rf, rb, op) in enumerate(HAIR_ROWS):
         row = []
         for k in range(HAIR_COLS):
@@ -286,9 +288,11 @@ def build_hair(parts):
             r = rf if ca > 0 else rb
             yy = y
             out = 1.0
-            if j >= last - 1:                         # ragged, flicked-out ends: alternate locks longer
-                yy -= (.014 if k % 2 else 0.0) * (1 if j == last else .4)
-                out += (.05 if k % 2 else .015) * (1 if j == last else .4)
+            if j >= last - 1:                         # ragged ends: locks of 2-3 columns, each its own length
+                lock = lock_of[k]
+                f_ = 1 if j == last else .4
+                yy -= (lock_drop[lock] + HAIR_BACK_DROP * max(0, -ca)) * f_
+                out += lock_flick[lock] * f_
             if j > 0:
                 out += .012 * rng.standard_normal()
             q = np.array([HC[0] + rs * sa * out, yy, HC[2] - .006 + r * ca * out])
@@ -317,23 +321,30 @@ def build_hair(parts):
                 p.tris += [(a, b, c), (b, d, c)]
             else:
                 p.tris += [(a, c, b), (b, c, d)]
-    # the fringe: a heavy sheet swept from the parting on his left across his forehead to his right,
-    # covering the top of his right brow
-    rows = [(.972, (.03, -.05), .072), (.955, (.042, -.058), .07), (.94, (.05, -.064), .066)]
+    # the fringe: one heavy mass falling from his parting (left of centre, at the crown's front) and swept
+    # diagonally across the forehead to his right, lying on the shell, thicker and lower at the swept end
+    rows = [(.985, .03, -.035), (.952, .045, -.062), (.928, .05, -.068)]
+    ends = [-.0, -.045, -.062, -.068]
     pts, uvs = [], []
-    for j, (y, (x0, x1), zf) in enumerate(rows):
-        for i, u in enumerate(np.linspace(0, 1, 5)):
+
+    def on_shell(x, y, lift):
+        rf = np.interp(-y, [-r[0] for r in HAIR_ROWS], [r[2] for r in HAIR_ROWS])
+        rs = np.interp(-y, [-r[0] for r in HAIR_ROWS], [r[1] for r in HAIR_ROWS])
+        zz = rf * np.sqrt(max(1 - (x / max(rs, 1e-3)) ** 2, .02))
+        return np.array([x, y, HC[2] - .006 + zz + lift])
+
+    for j, (y, x0, x1) in enumerate(rows):
+        for i, u in enumerate(np.linspace(0, 1, 3)):
             x = x0 + (x1 - x0) * u
-            drop = .014 * u ** 1.5 * (j / 2)              # the swept side hangs lower
-            if j == 2:                                    # a ragged edge: locks of different lengths
-                drop += (.008, -.004, .01, -.002, .012)[i] - .008 * (u < .2)
-            z = HC[2] + zf * np.sqrt(max(1 - (x / .075) ** 2, .05)) - .002
-            pts.append(np.array([x, y - drop, z]))
+            drop = .02 * u ** 1.3 * (j / 2)              # the swept side hangs lower
+            if j == 3:
+                drop += (.0, .005, .003)[i]
+            pts.append(on_shell(x, y - drop, .0035 + .0035 * (j / 2)))
             uvs.append((u, j / 2))
     tris = []
     for j in range(2):
-        for i in range(4):
-            a, b, c, d = j * 5 + i, j * 5 + i + 1, (j + 1) * 5 + i, (j + 1) * 5 + i + 1
+        for i in range(2):
+            a, b, c, d = j * 3 + i, j * 3 + i + 1, (j + 1) * 3 + i, (j + 1) * 3 + i + 1
             tris += [(a, b, c), (b, d, c)]
     for side, isl in ((1, "fringe"), (-1, "fringe_in")):
         ids = [p.add(q, uv, "head", isl) for q, uv in zip(pts, uvs)]
@@ -348,11 +359,10 @@ def build_hair(parts):
 HC = np.array([0, .9, .008])
 # rows: y, half width, front, back: the skull and, above the hairline and round the back, his hair
 HEAD_ROWS = [
-    (.838, .02, .03, .018), (.846, .036, .05, .044), (.862, .046, .058, .06), (.88, .053, .062, .066),
-    (.897, .055, .064, .066), (.912, .056, .064, .07), (.927, .058, .063, .074), (.944, .059, .061, .076),
-    (.96, .056, .055, .072), (.975, .048, .044, .062), (.988, .032, .028, .042)]
+    (.84, .022, .044, .02), (.862, .04, .058, .06), (.893, .057, .064, .066), (.925, .059, .063, .074),
+    (.958, .056, .055, .072), (.984, .036, .032, .046)]
 HEAD_TOP = (0, .996, -.01)
-HEAD_N = 14
+HEAD_N = 8
 HAIRLINE = .942
 EAR_Y = .893
 
@@ -372,16 +382,17 @@ def build_head(parts):
             if ca > .5:
                 q[2] += .005 * np.exp(-((y - .922) / .007) ** 2)
             if .3 < ca < .9:
-                q[0] += np.sign(sa) * .004 * np.exp(-((y - .893) / .01) ** 2)
+                q[0] += np.sign(sa) * .006 * np.exp(-((y - .893) / .01) ** 2)
+                q[0] -= np.sign(sa) * .003 * np.exp(-((y - .874) / .006) ** 2)     # the hollow under it
             r.append(q)
         rings.append(r)
     tube(p, "head", rings, lambda i, q: "head", [np.array([0, y, HC[2]]) for y, *_ in HEAD_ROWS],
          cap0=np.array([0, .834, .024]), cap1=np.array(HEAD_TOP))
     # the nose
     z0 = HC[2]
-    pts = dict(br=(0, .916, z0 + .066), tip=(0, .884, z0 + .084), wl=(.013, .877, z0 + .066),
-               wr=(-.013, .877, z0 + .066), base=(0, .873, z0 + .072), sl=(.011, .906, z0 + .064),
-               sr=(-.011, .906, z0 + .064))
+    pts = dict(br=(0, .916, z0 + .064), tip=(0, .884, z0 + .074), wl=(.015, .878, z0 + .062),
+               wr=(-.015, .878, z0 + .062), base=(0, .874, z0 + .068), sl=(.011, .906, z0 + .062),
+               sr=(-.011, .906, z0 + .062))
     ids = {k: p.add(np.array(q), (0, 0), "head", "head") for k, q in pts.items()}
     inner = np.array([0, .89, z0 + .05])
     for a, b, c in (("br", "sl", "tip"), ("br", "tip", "sr"), ("sl", "wl", "tip"), ("sr", "tip", "wr"),
@@ -424,7 +435,7 @@ def split_front_back(part, front_island, back_island, uv_front, uv_back, z_split
 
 # ------------------------------------------------------------------------------------------- the sword
 
-SWORD_DIR = (0, -.15, 1.0)
+SWORD_DIR = (.15, -.5, 1.0)
 
 
 def build_sword(parts, meshes_dir):
@@ -438,7 +449,7 @@ def build_sword(parts, meshes_dir):
     p = Part("sword", m.materials[sp.material].textures[0], SK)
     g, tip = q[:4].mean(0), q[4:7].mean(0)
     R = Rot.align_vectors([unit(SWORD_DIR)], [unit(tip - g)])[0].as_matrix()
-    fist = np.array(ARM[-1][0]) + (.004, -.034, .012)
+    fist = np.array(ARM[-1][0]) + (.002, -.03, .008)
     for v, vx in zip(q, sp.vertices):
         p.add(R @ (v - g) + fist, (vx.uv[0] / 32768, vx.uv[1] / 32768), "handL", "game")
     p.tris = [tuple(t) for t in sp.triangles[0]]
@@ -463,9 +474,10 @@ def build_soles(meshes_dir):
 # relaxed: weight on his right leg, hips tilted, the sword arm bent with the blade up and out, the free
 # hand loose at his side, the head turned a touch toward the blade
 STANCE = {
-    "root": (0, 6, 3), "spine": (2, -3, -2), "chest": (0, -4, -1), "neck": (0, 3, 1), "head": (2, 4, 2),
-    "armL": (-28, 10, 10), "forearmL": (-62, 0, 4), "handL": (12, 0, -6),
-    "armR": (4, 0, -9), "forearmR": (-16, 0, 0), "handR": (0, 0, 6),
-    "thighL": (-6, 0, 5), "shinL": (10, 0, 0), "footL": (-4, 0, -4),
-    "thighR": (2, 0, -2), "shinR": (2, 0, 0),
+    "root": (0, 12, 4), "spine": (2, -4, -2), "chest": (8, -10, 0), "neck": (-4, 3, 1), "head": (-2, 6, 2),
+    "armL": (-15, 25, 20), "forearmL": (-55, 0, 4), "handL": (10, 0, -6),
+    "armR": (10, 0, -18), "forearmR": (-35, 0, 0), "handR": (0, 0, 8),
+    "thighL": (-14, -10, 8), "shinL": (22, 0, 0), "footL": (-8, 10, 0),
+    "thighR": (8, 12, -6), "shinR": (10, 0, 0),
 }
+STANCE_DROP = .01
