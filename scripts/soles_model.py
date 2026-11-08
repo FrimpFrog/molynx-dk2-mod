@@ -1,12 +1,12 @@
 """Soles as a low-poly DK2 creature, built like the game's own humans (the Thief, the Rogue, the Guard): one
 body whose parts meet (the legs start inside the hips under a belt and loincloth, the arms inside the
-shoulders, the neck inside the head), a sculpted head whose hair is part of its shape, front and back
+shoulders, the neck inside the head), a sculpted head under a layered shell of long hair, front and back
 projected skins like the game's, and small armour.
 
-His face is painted in his likeness on the front of the head (soles_texture). He wears
-his red T-shirt with an original flame emblem, a studded leather baldric, a dark steel pauldron on his
-sword arm, leather bracers, a belt, a red loincloth in the Dark Angel's style over black leather trousers
-and boots, and holds the Dark Angel's sword (the game's own triangles, still pointing at DarkAngelFrnt).
+His face is painted in his likeness on the front of the head (soles_texture). He is on
+the evil side: blackened plate armour (a breastplate and faulds painted on the torso, spiked three-lame
+pauldrons, a gorget, spiked gauntlets, knee cops, sabatons), dark mail sleeves, a dark red loincloth over
+black leather, and the Dark Angel's sword (the game's own triangles, still pointing at DarkAngelFrnt).
 
 Model space as lowpoly: Y up, Z forward, X to his LEFT; 1.0 tall to the top of his hair.
 
@@ -198,33 +198,147 @@ def build_loincloth(parts):
 
 # ------------------------------------------------------------------------------------------- armour
 
+def plate(p, island, c, e1, e2, r1, r2, lift, w, n=8, inside_off=.05, along0=0.0):
+    """A low dome of plate: an ellipse (e1 * r1, e2 * r2) round c, its apex `lift` out along e1 x e2 (made
+    to face away from `inside`)."""
+    nrm = unit(np.cross(e1, e2))
+    ring = [c + np.cos(a) * e1 * r1 + np.sin(a) * e2 * r2 for a in np.linspace(0, 2 * np.pi, n + 1)[:-1]]
+    ids = [p.add(q - nrm * .004, (min(k, n - k) / (n / 2), along0), w, island, along=0.0)
+           for k, q in enumerate(ring)]
+    apex = p.add(c + nrm * lift, (.5, along0 + .3), w, island, along=1.0)
+    for k in range(n):
+        p.tri(ids[k], ids[(k + 1) % n], apex, inside=c - nrm * inside_off)
+    return nrm
+
+
+def spike(p, island, base, tip, r, w):
+    t = unit(np.asarray(tip) - base)
+    a = np.cross(t, [0, 0, 1.0]) if abs(t[2]) < .9 else np.cross(t, [1.0, 0, 0])
+    a, b = unit(a), unit(np.cross(t, a))
+    ids = [p.add(base + (np.cos(th) * a + np.sin(th) * b) * r, (k / 3, .8), w, island, along=0.0)
+           for k, th in enumerate(np.linspace(0, 2 * np.pi, 4)[:-1])]
+    tp = p.add(tip, (.5, 1), w, island, along=1.0)
+    for k in range(3):
+        p.tri(ids[k], ids[(k + 1) % 3], tp, inside=base - t * .01)
+
+
 def build_armour(parts):
+    """Dark plate: spiked pauldrons of three lames on both shoulders, a gorget, gauntlets, knee cops, the
+    belt."""
     p = Part("armour", LIMBS, SK)
-    # a dark steel pauldron on the sword arm: three overlapping plates down the shoulder
-    for i, (dy, r) in enumerate(((0, .054), (-.026, .05), (-.05, .044))):
-        c = np.array([.112 + .008 * i, .79 + dy, -.012])
-        e1 = np.array([0, 0, 1.0])
-        e2 = unit(np.array([1, -.5 - .3 * i, 0]))
-        nrm = unit(np.cross(e1, e2))
-        if nrm[1] < 0:
-            nrm = -nrm
-        ring = [c + np.cos(a) * e1 * r * .95 + np.sin(a) * e2 * r * .75 for a in np.linspace(0, 2 * np.pi, 9)[:-1]]
-        w = {"shoulderL": .3, "armL": .7}
-        ids = [p.add(q - nrm * .006, (min(k, 8 - k) / 4, (i + .02) / 3), w, "pauldron", along=0.0)
-               for k, q in enumerate(ring)]
-        apex = p.add(c + nrm * .018, (.5, (i + .98) / 3), w, "pauldron", along=1.0)
-        for k in range(8):
-            p.tri(ids[k], ids[(k + 1) % 8], apex, inside=c - nrm * .05)
-    # leather bracers on both forearms
     for s in (1, -1):
         nm = nm_for(s)
+        w = {nm("shoulderL"): .35, nm("armL"): .65}
+        for i, (dy, r) in enumerate(((0, .062), (-.03, .056), (-.056, .048))):
+            c = np.array([s * (.11 + .01 * i), .795 + dy, -.012])
+            e1 = np.array([0, 0, 1.0])
+            e2 = unit(np.array([s, -.45 - .3 * i, 0]))
+            nrm = unit(np.cross(e1, e2))
+            if nrm[1] < 0:
+                e1 = -e1
+            plate(p, "pauldron", c, e1, e2, r * .95, r * .78, .022 - .004 * i, w, along0=i / 3)
+        top = np.array([s * .112, .82, -.012])
+        spike(p, "spike", top, top + (s * .03, .07, -.01), .011, w)
+        spike(p, "spike", top + (s * .03, -.012, .0), top + (s * .07, .04, -.01), .009, w)
+        # gauntlets: a flared steel cuff over the forearm and the back of the hand
         a0 = np.array(ARM[4][0]) * (s, 1, 1)
-        a1 = np.array(ARM[6][0]) * (s, 1, 1) + (0, .008, 0)
-        rings = [ring_pts(a0, a1 - a0, (0, 0, 1), .036, .034, 8), ring_pts(a1, a1 - a0, (0, 0, 1), .027, .025, 8)]
-        tube(p, "bracer", rings, lambda i, q, b=nm("forearmL"): {b: 1.0}, [a0, a1])
-    # the belt round the hips, over the shirt's hem and the top of the loincloth
+        a1 = np.array(ARM[6][0]) * (s, 1, 1) + (0, .004, 0)
+        rings = [ring_pts(a0 + (0, .012, 0), a1 - a0, (0, 0, 1), .041, .039, 8),
+                 ring_pts(a0, a1 - a0, (0, 0, 1), .036, .034, 8),
+                 ring_pts(a1, a1 - a0, (0, 0, 1), .027, .025, 8)]
+        tube(p, "bracer", rings, lambda i, q, b=nm("forearmL"): {b: 1.0}, [a0 + (0, .012, 0), a0, a1])
+        spike(p, "spike", a0 + (s * .02, -.01, -.02), a0 + (s * .055, .0, -.04), .007, {nm("forearmL"): 1.0})
+        # knee cops
+        k = np.array(LEG[3][0]) * (s, 1, 1)
+        plate(p, "pauldron", k + (0, .004, .034), np.array([1.0, 0, 0]), np.array([0, 1.0, 0]), .034, .038,
+              .016, {nm("thighL"): .3, nm("shinL"): .7}, n=6, along0=.66)
+    # the gorget: a steel collar round the base of the neck
+    rings = [torso_ring(.79, .072, .055, .05, -.006), torso_ring(.815, .046, .042, .04, -.006)]
+    tube(p, "gorget", rings, lambda i, q: {"chest": 1.0}, [np.array([0, .79, -.006]), np.array([0, .815, -.006])])
+    # the belt
     rings = [torso_ring(y, .1, .072, .076, 0) for y in (.462, .5)]
     tube(p, "belt", rings, lambda i, q: {"root": 1.0}, [np.array([0, .462, 0]), np.array([0, .5, 0])])
+    parts.append(p)
+    return p
+
+
+# ------------------------------------------------------------------------------------------- hair
+
+# a long, layered shag: volume at the crown, over the ears, to the jaw and the nape, the ends flicking out
+# rows: y, side radius, front radius, back radius, half-angle of the opening at the face (deg)
+HAIR_ROWS = [(1.002, .03, .03, .034, 0), (.988, .058, .056, .072, 0), (.97, .074, .07, .09, 0),
+             (.95, .08, .076, .098, 30), (.925, .084, .074, .101, 52), (.895, .085, .07, .101, 60),
+             (.865, .083, .066, .098, 64), (.838, .081, .062, .094, 68), (.815, .085, .06, .092, 72)]
+HAIR_COLS = 16
+
+
+def build_hair(parts):
+    p = Part("hair", HEAD, SK)
+    rng = np.random.default_rng(11)
+    grid = []
+    last = len(HAIR_ROWS) - 1
+    for j, (y, rs, rf, rb, op) in enumerate(HAIR_ROWS):
+        row = []
+        for k in range(HAIR_COLS):
+            s_ = k / (HAIR_COLS - 1)
+            a = np.radians(op + s_ * (360 - 2 * op))
+            ca, sa = np.cos(a), np.sin(a)
+            r = rf if ca > 0 else rb
+            yy = y
+            out = 1.0
+            if j >= last - 1:                         # ragged, flicked-out ends: alternate locks longer
+                yy -= (.014 if k % 2 else 0.0) * (1 if j == last else .4)
+                out += (.1 if k % 2 else .03) * (1 if j == last else .4)
+            if j > 0:
+                out += .03 * rng.standard_normal()
+            q = np.array([HC[0] + rs * sa * out, yy, HC[2] - .006 + r * ca * out])
+            row.append(p.add(q, (s_, j / last), "head", "hair"))
+        grid.append(row)
+    centre = lambda j: np.array([HC[0], HAIR_ROWS[j][0], HC[2] - .006])
+    for j in range(last):
+        mid = (centre(j) + centre(j + 1)) / 2
+        for k in range(HAIR_COLS - 1):
+            a, b = grid[j][k], grid[j][k + 1]
+            c, d = grid[j + 1][k], grid[j + 1][k + 1]
+            p.tri(a, b, c, inside=mid)
+            p.tri(b, d, c, inside=mid)
+    top = p.add(np.array([HC[0], 1.014, HC[2] - .006]), (1, 0), "head", "hair")
+    for k in range(HAIR_COLS - 1):
+        p.tri(grid[0][k], grid[0][k + 1], top, inside=HC)
+    # the inside of the curtain round the face (seen past his cheeks): the lower rows again, facing in
+    inner = [[p.add(p.points[i], p.uv[i], "head", "hair_in") for i in grid[j]] for j in range(3, len(grid))]
+    for j in range(len(inner) - 1):
+        mid = (centre(j + 3) + centre(j + 4)) / 2
+        for k in range(HAIR_COLS - 1):
+            a, b = inner[j][k], inner[j][k + 1]
+            c, d = inner[j + 1][k], inner[j + 1][k + 1]
+            pa, pb, pc = (p.points[i] for i in (a, b, c))
+            if np.dot(np.cross(pb - pa, pc - pa), mid - (pa + pb + pc) / 3) > 0:
+                p.tris += [(a, b, c), (b, d, c)]
+            else:
+                p.tris += [(a, c, b), (b, c, d)]
+    # the fringe: a heavy sheet swept from the parting on his left across his forehead to his right,
+    # covering the top of his right brow
+    rows = [(.968, (.03, -.05), .072), (.948, (.042, -.06), .07), (.932, (.05, -.066), .064)]
+    pts, uvs = [], []
+    for j, (y, (x0, x1), zf) in enumerate(rows):
+        for i, u in enumerate(np.linspace(0, 1, 5)):
+            x = x0 + (x1 - x0) * u
+            drop = .022 * u ** 1.5 * (j / 2)              # the swept side hangs lower
+            if j == 2:                                    # a ragged edge: locks of different lengths
+                drop += (.008, -.004, .01, -.002, .012)[i] - .008 * (u < .2)
+            z = HC[2] + zf * np.sqrt(max(1 - (x / .085) ** 2, .05)) + .004
+            pts.append(np.array([x, y - drop, z]))
+            uvs.append((u, j / 2))
+    tris = []
+    for j in range(2):
+        for i in range(4):
+            a, b, c, d = j * 5 + i, j * 5 + i + 1, (j + 1) * 5 + i, (j + 1) * 5 + i + 1
+            tris += [(a, b, c), (b, d, c)]
+    for side, isl in ((1, "fringe"), (-1, "fringe_in")):
+        ids = [p.add(q, uv, "head", isl) for q, uv in zip(pts, uvs)]
+        for a, b, c in tris:
+            p.tri_facing(ids[a], ids[b], ids[c], np.array([0, .3, 1.0]) * side)
     parts.append(p)
     return p
 
@@ -259,10 +373,6 @@ def build_head(parts):
                 q[2] += .005 * np.exp(-((y - .922) / .007) ** 2)
             if .3 < ca < .9:
                 q[0] += np.sign(sa) * .004 * np.exp(-((y - .893) / .01) ** 2)
-            hair = (y > HAIRLINE) or (ca < .3 and y > .846)
-            if hair:                                       # wavy lumps in his hair
-                d = q - np.array([HC[0], y, HC[2]])
-                q = q + d / np.linalg.norm(d) * .005 * rng.standard_normal()
             r.append(q)
         rings.append(r)
     tube(p, "head", rings, lambda i, q: "head", [np.array([0, y, HC[2]]) for y, *_ in HEAD_ROWS],
@@ -345,6 +455,7 @@ def build_soles(meshes_dir):
     build_loincloth(parts)
     build_armour(parts)
     build_head(parts)
+    build_hair(parts)
     build_sword(parts, meshes_dir)
     return parts
 

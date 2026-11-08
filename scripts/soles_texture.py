@@ -21,18 +21,21 @@ from scripts.priestess_texture import RGB, band, gauss, ret, shade
 from scripts.soles_model import ARM, BODY, BOOT_TOP, HAIRLINE, HC, HEAD, LIMBS, split_front_back
 
 ATLAS = {
-    HEAD: {"front": ((0, 0, 84, 96), False), "back": ((86, 0, 128, 52), False)},
+    HEAD: {"front": ((0, 0, 84, 96), False), "back": ((86, 0, 128, 30), False),
+           "hair": ((86, 32, 128, 110), False), "hair_in": ((86, 112, 128, 128), False),
+           "fringe": ((0, 98, 42, 128), False), "fringe_in": ((44, 98, 84, 128), False)},
     BODY: {"front": ((0, 0, 64, 128), False), "back": ((64, 0, 128, 128), False)},
     LIMBS: {"arm": ((0, 0, 30, 96), False), "hand": ((0, 98, 30, 128), False),
             "leg": ((32, 0, 62, 128), False), "foot": ((64, 0, 92, 28), False),
             "cloth": ((64, 30, 96, 74), False), "cloth_in": ((64, 76, 96, 96), False),
             "belt": ((98, 0, 128, 18), False), "bracer": ((98, 20, 128, 50), False),
-            "pauldron": ((98, 52, 128, 84), False)},
+            "pauldron": ((98, 52, 128, 84), False), "spike": ((98, 86, 128, 100), False),
+            "gorget": ((98, 102, 128, 116), False)},
 }
 
 SKIN = RGB(206, 150, 124)
 RED = RGB(190, 32, 38)
-HAIR = RGB(70, 50, 38)
+HAIR = RGB(62, 42, 30)
 LEATHER_BLACK = RGB(40, 36, 40)
 LEATHER = RGB(118, 72, 38)
 STEEL = RGB(118, 122, 136)
@@ -63,18 +66,31 @@ def project_uvs(parts):
 # ------------------------------------------------------------------------------------------- head
 
 def hair_col(pos):
+    """Long layered hair: locks running down from the crown, strands within them, a sheen band, dark
+    under the layers."""
     x, y, z = pos[:, 0] - HC[0], pos[:, 1], pos[:, 2] - HC[2]
     ang = np.arctan2(x, -z)
-    curls = fbm(ang * 5 + 40, y * 60, 5)
-    wave = .5 + .5 * np.sin(ang * 22 + np.sin(y * 180 + ang * 3) * 1.6 + curls * 5)
-    h = .004 * curls + .0016 * wave
-    col = mix(HAIR * .38, HAIR * 1.15, .2 + .45 * curls + .3 * wave)
+    bend = .6 * np.sin(y * 40 + ang * 2)                       # the locks curve as they fall
+    locks = .5 + .5 * np.sin(ang * 13 + bend + fbm(ang * 3, y * 4, 5) * 3)
+    strands = .5 + .5 * np.sin(ang * 75 + bend * 3 + fbm(ang * 9, y * 20, 6) * 5)
+    layers = .5 + .5 * np.sin(y * 150 + ang * 1.5)             # the shag's layers
+    sheen = gauss(y - (.97 - .02 * np.abs(np.sin(ang))), .014)
+    col = mix(HAIR * .32, HAIR * 1.1, .25 + .4 * locks + .2 * strands)
+    col = mix(col, HAIR * .28, .45 * smooth(.35, .0, locks))
+    col = mix(col, HAIR * .45, .15 * smooth(.25, .0, layers))
+    col = mix(col, HAIR * 1.55, .35 * sheen * strands)
+    h = .003 * locks + .0006 * strands + .0015 * layers
     return col, h
 
 
 def hair_field(pos, t):
     col, h = hair_col(pos)
     return ret(col, h, spec=.3, gloss=12, soft=.4)
+
+
+def hair_in_field(pos, t):
+    col, h = hair_col(pos)
+    return ret(col * .5, h, spec=.05, gloss=8, soft=.4)
 
 
 # His likeness, painted (no photo pixels): proportions and features measured from his photo, then drawn
@@ -163,8 +179,7 @@ def face_field(pos, t):
     col = mix(col, SKIN * .75, .4 * gauss(np.hypot(x, y - (MOUTH_Y - .0085)), .004))   # under the lip
     # his hair over everything above the hairline and round the sides above the ears
     hl_y = hairline(x)
-    hair = np.maximum(smooth(hl_y - .002, hl_y + .003, y),
-                      smooth(.045, .051, ax) * smooth(.878, .89, y))           # down over his ears
+    hair = smooth(hl_y - .002, hl_y + .003, y)
     hcol, hh = hair_col(pos)
     col = mix(col, hcol, hair)
     h = h * (1 - hair) + hh * hair
@@ -222,40 +237,66 @@ def emblem_at(pos):
     return fill[v, u] * ok, outline[v, u] * ok, inner[v, u] * ok
 
 
+IRON = RGB(56, 56, 66)
+BLOOD = RGB(120, 16, 20)
+
+
 def torso_field(pos, t):
+    """A blackened breastplate with a central ridge, red-enamelled trim and an etched flame, faulds (lames)
+    over the stomach, a backplate with a spine ridge; the dark red tunic shows at the sides."""
     x, y, z = pos[:, 0], pos[:, 1], pos[:, 2]
     ax = np.abs(x)
+    n = len(x)
     front = smooth(-.01, .01, z)
-    folds = fbm(x * 26, y * 8, 41)
-    drape = (.5 + .5 * np.sin(y * 260 + ax * 90 + folds * 6)) * smooth(.62, .48, y)
-    h = .0035 * folds + .0009 * drape
-    col = mix(RED * .7, RED * 1.08, .3 + .5 * folds + .15 * drape)
-    col = mix(col, RED * .55, .5 * smooth(.09, .115, ax))
-    neckline = .816 - .016 * np.clip(1 - (ax / .04) ** 2, 0, 1) * front - .004 * (1 - front)
-    collar = band(y, neckline - .007, neckline, .0015)
-    col = mix(col, RED * .55, collar)
-    h += .0006 * collar
-    col = mix(col, SKIN * np.ones((len(x), 1)), smooth(neckline - .001, neckline + .001, y))
+    grain = fbm(x * 260, y * 260, 41)
+    pits = fbm(x * 600, y * 600, 43)
+    # the tunic under the plates (sides, under the arms)
+    folds = fbm(x * 30, y * 9, 44)
+    col = mix(BLOOD * .55, BLOOD * .95, folds) * np.ones((n, 1))
+    h = .003 * folds
+    spec = np.full(n, .12)
+    gloss = np.full(n, 10.0)
+    metal = np.zeros(n)
+
+    def put(mask, albedo, height, sp, gl, me):
+        nonlocal col, h, spec, gloss, metal
+        mk = np.clip(mask, 0, 1)
+        col = mix(col, albedo * np.ones((n, 1)), mk)
+        h, spec, gloss, metal = (h * (1 - mk) + height * mk, spec * (1 - mk) + sp * mk,
+                                 gloss * (1 - mk) + gl * mk, metal * (1 - mk) + me * mk)
+
+    plate_w = .084 + .012 * smooth(.6, .7, y)
+    breast = smooth(plate_w + .004, plate_w - .004, ax) * band(y, .6, .79, .004)
+    ridge = gauss(x, .006) * breast * front
+    edge = breast * smooth(plate_w - .012, plate_w - .002, ax)
+    # the breastplate: iron, a central ridge, red trim round its edge, rivets on the trim
+    ph = .006 + .004 * ridge - .0008 * pits
+    iron = IRON * (.75 + .4 * grain)[:, None]
+    iron = mix(iron, IRON * 1.6, .5 * ridge)
+    put(breast, iron, ph, .3, 26, .6)
+    rivets = gauss(np.hypot(ax - (plate_w - .007), np.mod(y + .006, .024) - .012), .0028) * breast
+    put(edge, BLOOD * 1.1, .0075, .5, 30, .3)
+    put(smooth(.3, .7, rivets), RGB(170, 150, 120), .009, 1.0, 50, .8)
+    # the etched flame on the chest: a dark groove filled with dull red
     fill, outline, inner = emblem_at(pos)
-    col = mix(col, RGB(20, 12, 14), outline * front)
-    col = mix(col, RGB(240, 236, 228) * (.9 + .1 * folds[:, None]), fill * front)
-    col = mix(col, RED * 1.1, inner * front)
-    line_y = .5 + (x + .08) / .17 * .28
-    strap = band(y - line_y, -.012, .012, .002) * band(x, -.11, .1, .01)
-    studs = gauss(np.hypot(np.mod(x + .006, .022) - .011, y - line_y), .003) * strap
-    h += strap * .004 + studs * .0025
-    col = mix(col, LEATHER * (.8 + .3 * fbm(x * 150, y * 150, 7)[:, None]), strap)
-    col = mix(col, LEATHER * .5, strap * gauss(np.abs(y - line_y) - .011, .0018))
-    col = mix(col, BRONZE * 1.1, smooth(.3, .7, studs))
-    chain_y = .818 - .085 * smooth(.042, 0, ax) ** .7
-    links = .5 + .5 * np.sin(np.hypot(x, y) * 1400)
-    chain = gauss(y - chain_y, .0015) * band(ax, 0, .042, .003) * front
-    pend = gauss(np.hypot(x, (y - .728) * .9), .0055) * front
-    h += .002 * chain * links + .004 * pend
-    metal = np.clip(chain * 1.5 + pend * 1.5 + studs, 0, 1)
-    col = mix(col, RGB(214, 216, 224) * (.55 + .45 * links[:, None]), np.clip(chain * 1.3, 0, 1))
-    col = mix(col, RGB(205, 205, 215), smooth(.4, .8, pend))
-    return ret(col, h, spec=.1 + .9 * metal + .25 * strap, gloss=10 + 40 * metal, metal=.7 * metal, soft=.6)
+    etch = np.clip(outline - fill * .0, 0, 1) * front * breast
+    col = mix(col, RGB(14, 10, 12), .8 * etch)
+    col = mix(col, BLOOD * 1.25, fill * front * breast)
+    h -= .0012 * etch
+    # faulds: four lames over the stomach, each overlapping the one below
+    fauld = smooth(plate_w + .002, plate_w - .006, ax) * band(y, .505, .6, .003)
+    lame = np.mod(.6 - y, .024) / .024
+    put(fauld, IRON * (.65 + .35 * (1 - lame)[:, None]) * (.85 + .3 * grain[:, None]),
+        .005 + .003 * (1 - lame), .3, 26, .6)
+    col = mix(col, BLOOD, fauld * gauss(lame - .9, .05))
+    # the backplate and its spine ridge
+    back = (1 - front) * band(y, .56, .79, .004) * smooth(.09, .08, ax)
+    put(back, IRON * (.7 + .4 * grain)[:, None] + IRON * .5 * gauss(x, .005)[:, None], .006 + .003 * gauss(x, .005),
+        .3, 26, .6)
+    # the neck above the gorget
+    neck = smooth(.8, .81, y)
+    col = mix(col, SKIN * np.ones((n, 1)), neck)
+    return ret(col, h, spec=spec, gloss=gloss, metal=metal, soft=.5 * neck)
 
 
 # ------------------------------------------------------------------------------------------- limbs
@@ -266,23 +307,26 @@ def _along(pos, path):
 
 
 def arm_field(pos, t):
+    """Dark mail sleeves: rows of rings, darker in the folds; the elbow a little worn."""
     f = _along(pos, ARM)
-    sleeve = smooth(.36, .31, f)
-    hem = band(f, .29, .33, .006)
-    folds = fbm(pos[:, 0] * 40, pos[:, 1] * 40, 51)
-    skin = SKIN * (0.92 + .14 * fbm(pos[:, 0] * 90, pos[:, 1] * 90, 3))[:, None]
-    col = mix(skin, mix(RED * .72, RED * 1.05, folds), sleeve)
-    col = mix(col, RED * .55, hem)
-    h = .003 * sleeve * folds + .0012 * hem + .0009 * gauss(f - .55, .05) * (1 - sleeve)
-    col = mix(col, SKIN * .8, .3 * gauss(f - .55, .04) * (1 - sleeve))
-    return ret(col, h, spec=.15, gloss=12, soft=.8 * (1 - sleeve))
+    x, y = pos[:, 0], pos[:, 1]
+    rings = (.5 + .5 * np.sin(y * 2200)) * (.5 + .5 * np.sin(t["u"] * 60 + (np.floor(y * 350) % 2) * np.pi))
+    folds = fbm(x * 40, y * 40, 51)
+    col = mix(IRON * .35, IRON * 1.2, .3 * folds + .55 * rings)
+    col = mix(col, BLOOD * .6, .3 * smooth(.2, .0, f))                   # the tunic's red at the shoulder
+    h = .0012 * rings + .002 * folds
+    return ret(col, h, spec=.6, gloss=24, metal=.55)
 
 
 def hand_field(pos, t):
+    """Black leather gauntlet fingers, iron plates over the knuckles."""
     y = pos[:, 1]
     k = .5 + .5 * np.sin(y * 900)
-    col = mix(SKIN, SKIN * .78, .5 * k * smooth(.45, .42, y))
-    return ret(col * np.ones((len(y), 1)), .0007 * k * smooth(.45, .42, y), spec=.15, gloss=12, soft=.9)
+    knuck = band(y, .45, .468, .002)
+    col = mix(LEATHER_BLACK * 1.2, LEATHER_BLACK * .6, .5 * k)
+    col = mix(col, IRON * 1.2, knuck)
+    return ret(col * np.ones((len(y), 1)), .0007 * k + .002 * knuck, spec=.2 + .2 * knuck, gloss=20,
+               metal=.4 * knuck)
 
 
 def leg_field(pos, t):
@@ -296,24 +340,25 @@ def leg_field(pos, t):
     cuff = band(y, BOOT_TOP - .03, BOOT_TOP, .002)
     straps = band(y, .155, .166, .0015) + band(y, .105, .116, .0015)
     ank = gauss(y - .075, .012) * (.5 + .5 * np.sin(y * 1500 + grain * 4))
-    bcol = mix(LEATHER, LEATHER * .55, .35 * grain + .45 * ank)
-    bcol = mix(bcol, LEATHER * 1.18, cuff)
+    bcol = mix(IRON * 1.05, IRON * .55, .35 * grain + .45 * ank)
+    bcol = mix(bcol, BLOOD * 1.1, cuff)
     bcol = mix(bcol, LEATHER_BLACK, straps)
     buckles = straps * gauss(x - np.sign(x) * .1, .008)
     bcol = mix(bcol, RGB(200, 202, 212), smooth(.3, .6, buckles))
     bh = .003 + .003 * cuff + .0018 * straps - .0006 * ank + .0003 * grain + .002 * buckles
     col = mix(trousers, bcol, boot)
     h = h * (1 - boot) + bh * boot
-    return ret(col, h, spec=.45 * (1 - boot) + .3 * boot + .8 * buckles, gloss=22 - 6 * boot,
-               metal=.15 * (1 - boot) + .6 * buckles)
+    return ret(col, h, spec=.45 * (1 - boot) + .3 * boot + .5 * buckles, gloss=22 + 6 * boot,
+               metal=.15 * (1 - boot) + .7 * boot)
 
 
 def foot_field(pos, t):
     y = pos[:, 1]
     sole = smooth(.012, .004, y)
     grain = fbm(pos[:, 0] * 200, pos[:, 2] * 200, 17)
-    col = mix(mix(LEATHER, LEATHER * .6, .4 * grain), LEATHER_BLACK * .6, sole)
-    return ret(col, .0012 * sole + .0004 * grain, spec=.3, gloss=16)
+    lames = .5 + .5 * np.sin(pos[:, 2] * 700)
+    col = mix(mix(IRON * 1.05, IRON * .6, .4 * grain + .3 * lames), LEATHER_BLACK * .6, sole)
+    return ret(col, .0012 * sole + .0004 * grain + .001 * lames, spec=.3, gloss=26, metal=.5 * (1 - sole))
 
 
 def cloth_field(pos, t):
@@ -323,9 +368,9 @@ def cloth_field(pos, t):
     folds = fbm(x * 40, y * 6, 61)
     border = np.maximum(smooth(.12, .06, np.minimum(u, 1 - u)), smooth(.86, .93, v))
     trim = gauss(np.minimum(u, 1 - u) - .09, .02) + gauss(v - .895, .02)
-    col = mix(RGB(176, 22, 32) * .8, RGB(176, 22, 32) * 1.1, folds)
+    col = mix(BLOOD * .7, BLOOD * 1.15, folds)
     col = mix(col, RGB(28, 18, 20), border)
-    col = mix(col, RGB(200, 170, 110), np.clip(trim, 0, 1) * .8)
+    col = mix(col, RGB(150, 140, 130), np.clip(trim, 0, 1) * .8)
     h = .004 * folds + .001 * np.clip(trim, 0, 1)
     inside = RGB(90, 12, 18) * (.7 + .3 * folds[:, None])
     col = np.where((face < 0)[:, None], inside, col)
@@ -346,16 +391,24 @@ def belt_field(pos, t):
 
 
 def bracer_field(pos, t):
-    v, u = t["v"], t["u"]
-    grain = fbm(pos[:, 0] * 200, pos[:, 1] * 200, 81)
-    lace = gauss(np.abs(np.mod(v * 5, 1) - .5), .2) * gauss(u - 1, .08)
-    studs = gauss(np.hypot(np.mod(u * 4, 1) - .5, np.mod(v * 3, 1) - .5), .12) * smooth(.9, .7, u)
-    rim = gauss(v, .08) + gauss(v - 1, .08)
-    col = mix(LEATHER * .9, LEATHER * .55, .4 * grain + .5 * rim)
-    col = mix(col, RGB(60, 40, 26), lace)
-    col = mix(col, BRONZE * 1.1, smooth(.4, .8, studs))
-    return ret(col, .0012 * grain + .003 * studs + .001 * rim, spec=.3 + .8 * studs, gloss=18 + 30 * studs,
-               metal=.6 * studs)
+    v = t["v"]
+    grain = fbm(pos[:, 0] * 260, pos[:, 1] * 260, 81)
+    rim = gauss(v, .1) + gauss(v - 1, .1)
+    col = mix(IRON * (.75 + .4 * grain)[:, None], BLOOD * 1.1, np.clip(rim, 0, 1))
+    return ret(col, .0008 * grain + .002 * rim, spec=.35, gloss=28, metal=.6 * (1 - np.clip(rim, 0, 1)) + .2)
+
+
+def spike_field(pos, t):
+    along = t.get("along", np.zeros(len(pos)))
+    col = mix(IRON * .7, RGB(190, 190, 200), smooth(.5, 1.0, along))
+    return ret(col, np.zeros(len(pos)), spec=1.2, gloss=50, metal=.8)
+
+
+def gorget_field(pos, t):
+    v = t["v"]
+    grain = fbm(pos[:, 0] * 260, pos[:, 1] * 260, 83)
+    col = mix(IRON * (.75 + .4 * grain)[:, None], BLOOD * 1.1, gauss(v - 1, .15))
+    return ret(col, .0008 * grain, spec=.35, gloss=28, metal=.6)
 
 
 def pauldron_field(pos, t):
@@ -363,10 +416,10 @@ def pauldron_field(pos, t):
     rim = smooth(.18, .04, along)
     rivet = gauss(along - .3, .06) * (np.cos(np.arctan2(pos[:, 2] + .012, pos[:, 1] - .78) * 5) > .9)
     h = .002 * rim + .002 * rivet + .0006 * fbm(pos[:, 0] * 300, pos[:, 2] * 300, 91)
-    col = mix(STEEL, BRONZE, rim)
-    col = mix(col, BRONZE * 1.1, rivet)
+    col = mix(IRON * 1.1, BLOOD * 1.15, rim)
+    col = mix(col, RGB(170, 150, 120), rivet)
     col = col * (.85 + .25 * fbm(pos[:, 0] * 120, pos[:, 1] * 120, 93))[:, None]
-    return ret(col, h, spec=1.0, gloss=40, metal=.75)
+    return ret(col, h, spec=.4, gloss=30, metal=.6)
 
 
 PAINTERS = {
@@ -377,6 +430,9 @@ PAINTERS = {
     (LIMBS, "cloth"): lambda t: shade(t, cloth_field), (LIMBS, "cloth_in"): lambda t: shade(t, cloth_field),
     (LIMBS, "belt"): lambda t: shade(t, belt_field), (LIMBS, "bracer"): lambda t: shade(t, bracer_field),
     (LIMBS, "pauldron"): lambda t: shade(t, pauldron_field),
+    (LIMBS, "spike"): lambda t: shade(t, spike_field), (LIMBS, "gorget"): lambda t: shade(t, gorget_field),
+    (HEAD, "hair"): lambda t: shade(t, hair_field), (HEAD, "hair_in"): lambda t: shade(t, hair_in_field),
+    (HEAD, "fringe"): lambda t: shade(t, hair_field), (HEAD, "fringe_in"): lambda t: shade(t, hair_in_field),
 }
 
 
