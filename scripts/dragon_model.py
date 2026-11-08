@@ -290,9 +290,9 @@ HEAD_RINGS = [  # centre, lateral, up, down (to the lip line)
     ((0, .952, -.035), .066, .056, .054),     # broad jaw muscles behind the eyes
     ((0, .958, .055), .078, .072, .056),      # the brow: the deepest part of the head
     ((0, .926, .165), .058, .054, .044),
-    ((0, .896, .255), .044, .044, .036),      # a deep, blunt snout
+    ((0, .9, .25), .05, .052, .038),          # a broad nose with a raised, bulbous top
 ]
-SNOUT_TIP = np.array([0, .884, .302])
+SNOUT_TIP = np.array([0, .9, .283])           # blunt: the nose ends in a flat, rounded front
 SKULL_BACK = np.array([0, .965, -.085])
 HEAD_AXIS_HINT = (0, 1, 0)
 
@@ -414,7 +414,7 @@ def build_jaw(parts, head_rings):
             c_, d_ = rings[i + 1][k], rings[i + 1][(k + 1) % 4]
             part.tri(a, b, c_, inside=mid)
             part.tri(b, d_, c_, inside=mid)
-    chin_p = np.array([0, .862, .285])
+    chin_p = np.array([0, .866, .262])
     chin = part.add(chin_p, (.5, 1.0), "jaw", "jaw", ring=4, k=-1)
     for k in range(4):
         part.tri(rings[3][k], rings[3][(k + 1) % 4], chin, inside=inner[3] - (chin_p - inner[3]))

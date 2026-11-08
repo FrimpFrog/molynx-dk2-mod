@@ -225,7 +225,7 @@ def paint_claw(t):
 
 
 EYE_V = 0.36        # the eyes: on the brow ring (ring 1), on the upper side of the head
-NOSTRIL_V = 0.93
+NOSTRIL_V = 0.95
 
 
 def paint_skull(t):
@@ -246,7 +246,7 @@ def paint_skull(t):
     wr = smooth(0.5, 0.75, v) * smooth(0.62, 0.3, u) * np.exp(-((f - 0.5) / 0.14) ** 2)
     col = mix(col, C["scale_dark"] * 0.7, 0.55 * wr)
     # mouth: the palate (u > 2/3) is dark red, with a row of big jagged teeth along the lip line
-    mouth = smooth(0.66, 0.70, u)
+    mouth = smooth(0.66, 0.70, u) * smooth(0.9, 0.84, v)     # the underside of the nose tip stays scaled
     col = mix(col, mix(C["mouth"] * 0.8, C["mouth_hi"], smooth(1.0, 0.75, u)), mouth)
     k = (s / 0.024)
     tooth_w = np.abs((k - np.floor(k)) - 0.5) * 2               # 0 at a tooth's centre
@@ -269,9 +269,10 @@ def paint_skull(t):
     glow = np.where((np.abs(dv) < 0.13)[..., None] & eye[..., None] & (np.abs(du) < 0.75)[..., None],
                     C["pupil"], glow)
     col = np.where(eye[..., None], glow / np.maximum(_light(nrm), 0.5)[..., None], col)   # eyes don't shade
-    # nostrils: flared, near the snout tip
-    n = ((u - 0.2) / 0.05) ** 2 + ((v - NOSTRIL_V) / 0.025) ** 2
-    col = mix(col, C["scale_dark"] * 0.3, smooth(1.6, 0.8, n))
+    # nostrils: wide flared slits on the front of the nose, each with a raised lighter rim
+    n = ((u - 0.17) / 0.075) ** 2 + ((v - NOSTRIL_V) / 0.03) ** 2
+    col = mix(col, C["scale_hi"] * 1.05, 0.6 * smooth(2.4, 1.3, n) * (n > 1.0))
+    col = mix(col, C["scale_dark"] * 0.15, smooth(1.1, 0.6, n))
     return col * _light(nrm)[..., None]
 
 
@@ -291,7 +292,8 @@ def paint_jaw(t):
     tw = np.abs((s / 0.024 - np.floor(s / 0.024)) - 0.5) * 2
     tooth = (u > 0.36) & (u < 0.5) & ((u - 0.36) / 0.14 > tw * 0.95) & (v > 0.22) & (v < 0.95)
     col = np.where(tooth[..., None], C["tooth"], col)
-    col = mix(col, mix(C["mouth"], C["mouth_hi"], smooth(0.0, 0.3, u)), inside)
+    # the mouth inside is red, but the front of the chin (under the overhanging nose) is lip: scaled
+    col = mix(col, mix(C["mouth"], C["mouth_hi"], smooth(0.0, 0.3, u)), inside * smooth(0.74, 0.6, v))
     return col * _light(nrm)[..., None]
 
 
