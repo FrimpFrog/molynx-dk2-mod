@@ -166,6 +166,7 @@ CAST_ARMOUR_OFFSET = (0, -1433, 1638)       # the Monk's (his Cast Armour)
 # the floor, hurting every enemy within two tiles) and Stone Skin from level 4 (the game's Cast
 # Armour creature spell, CreatureSpells entry 15, the Monk's and the Fairy's at level 8; the game
 # casts it on his allies). Both play his magic clip and leave at its impact frame.
+SOUND_CATEGORY = "CREATURE_MOLYNX"
 PERSONALITY = {
     "attractions[0].present": 1, "attractions[0].roomId": ROOM_GUARD, "attractions[0].roomSize": 0,
     "attractions[1].present": 1, "attractions[1].roomId": ROOM_TRAINING,
@@ -179,6 +180,9 @@ PERSONALITY = {
     "spells[1].creatureSpellId": SPELL_CAST_ARMOUR, "spells[1].levelAvailable": 4,
     "spells[1].playAnimation": 1, "spells[1].shotDelay": GROUND_SLAM_DELAY,
     "spells[1].shotOffset": CAST_ARMOUR_OFFSET,
+    # his own sounds: the game loads Data/Sound/Sfx/Global/<category>BANK.map and SFX.map by this
+    # name (molynx_soundbank), so the folder's creature_molynx bank plays in place of the Bile Demon's
+    "soundGategory": SOUND_CATEGORY,
 }
 # Stage 3: his texts, by text_ids key ({n}: a value the game fills in, as in the Bile Demon's own
 # description "Bile Demon.  {26}.  Fighting Style: {27}."). The tooltip stays the game's shared one

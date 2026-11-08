@@ -10,7 +10,7 @@ import hashlib
 import numpy as np
 import pytest
 
-REVIEW = {"falling", "torture", "drinking", "eating", "sleeping", "manufacturing", "ground_slam"}
+REVIEW = {"falling", "torture", "drinking", "eating", "sleeping", "manufacturing", "ground_slam", "praying"}
 from PIL import Image
 
 import scripts.molynx_assets as assets
@@ -205,6 +205,26 @@ def test_review_round_clips(built):
     # sleeping is a closed breathing loop
     first, last = new["sleeping"]["frames"][0][0], new["sleeping"]["frames"][-1][0]
     assert np.allclose(first, last)
+
+
+@needs_data
+def test_praying_raises_his_free_fist_over_his_head_and_hangs_it_when_bowed():
+    """Third review round: the free arm no longer sticks out flat in front with a twisted forearm.
+    Bowed (first frame) his free hand is below his head; upright (middle of the clip) it is above
+    the top of his head, out to his free side, and not behind his face."""
+    from scripts.behemoth_rig import behemoth_rig
+    from scripts.donor_tracks import donor_tracks
+    rig = behemoth_rig(BEHEMOTH_DIR)
+    frames, seconds = design.pray_frames(rig, {"giant": donor_tracks(assets.MESHES_DIR, assets.texture_cache(), "giant")})
+    assert len(frames) == 121 and abs(seconds - 121 / 30) < 1e-9 and np.allclose(frames[0], frames[-1])
+    bones = list(rig.bones)
+    hand = rig.weights[:, bones.index("foreP")] > 0.5
+    head = rig.weights[:, bones.index("head")] > 0.5
+    bowed, up = frames[0], frames[75]
+    assert bowed[hand, 1].mean() < bowed[head, 1].min()
+    assert up[hand, 1].mean() > up[head, 1].max()
+    assert up[hand, 0].mean() > rig.joints["armP"][0]                 # out to his free side
+    assert up[hand, 2].mean() > up[head, 2].mean() - 0.2               # not behind his face
 
 
 @needs_data

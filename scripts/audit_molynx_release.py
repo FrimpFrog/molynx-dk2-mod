@@ -1,4 +1,4 @@
-"""Independent audit of the Molynx release folder (build_molynx_release): `audit_release(mod_dir,
+r"""Independent audit of the Molynx release folder (build_molynx_release): `audit_release(mod_dir,
 map_folders) -> AuditReport`.
 
 It re-reads the folder from disk. For the creature tables it runs audit_molynx_mod's own rules on
@@ -16,6 +16,13 @@ resource.toml. The release's own rules, written out here and not taken from the 
        else the player's largest), per player with creature availability exactly one ENABLE entry,
        none for other players. A map whose source has neither pool nor availability ships none.
   (r3) no record or entry for a creature above 47 anywhere (the slots after him stay empty).
+  (k)  his sound bank: record 47's soundGategory CREATURE_MOLYNX (rule b) names
+       Data/Sound/Sfx/Global/creature_molynxBANK.map, which must name the banks Global\Molynx and
+       Global\MiscCreatures; creature_molynxSFX.map is the game's creature_bile_demonSFX.map byte
+       for byte; MolynxHD.sdt and MolynxHW.sdt hold the same samples as the game's BileHD/HW.sdt
+       (count, order, names, blanks), every other one MPEG-2 Layer II at 22050 Hz mono that decodes
+       to the PCM length its header states (to within one 1152-sample frame) and not the Bile
+       Demon's own data.
 
 LICENCE: GPL-3.0.
 """
@@ -127,7 +134,61 @@ def _check_variables(src: bytes, mod: bytes | None) -> tuple[bool, str]:
                   f"{pool_players} and ENABLE for {av_players}")
 
 
-def audit_release(mod_dir: Path, map_folders: list[Path]) -> AuditReport:
+SOUNDS = "Data/Sound/Sfx/Global"
+
+
+def _sdt(data: bytes):
+    (n,) = struct.unpack_from("<I", data, 0)
+    out = []
+    for off in struct.unpack_from(f"<{n}I", data, 4):
+        hs, size, name, fmt, _z1, pcm, _z2 = struct.unpack_from("<II16sIIII", data, off)
+        out.append((name.split(b"\0")[0], fmt, pcm, data[off + hs:off + hs + size]))
+    return out
+
+
+def _check_sounds(mod_dir: Path, game_sounds: Path) -> tuple[bool, str]:
+    import subprocess
+    import tempfile
+    d, g = mod_dir / SOUNDS, Path(game_sounds)
+    problems = []
+    bank = (d / "creature_molynxBANK.map").read_bytes()
+    names, at = [], 0x1c + 11 * struct.unpack_from("<I", bank, 0x18)[0]
+    while at < len(bank):
+        (n,) = struct.unpack_from("<I", bank, at)
+        names.append(bank[at + 4:at + 3 + n].decode("latin-1"))
+        at += 4 + n
+    if names != ["Global\\Molynx", "Global\\MiscCreatures"]:
+        problems.append(f"BANK.map names {names}")
+    if (d / "creature_molynxSFX.map").read_bytes() != (g / "creature_bile_demonSFX.map").read_bytes():
+        problems.append("SFX.map is not the Bile Demon's")
+    checked = 0
+    for kind in ("HD", "HW"):
+        mine, bile = _sdt((d / f"Molynx{kind}.sdt").read_bytes()), _sdt((g / f"Bile{kind}.sdt").read_bytes())
+        if [(n, f) for n, f, _p, _d in mine] != [(n, f) for n, f, _p, _d in bile]:
+            problems.append(f"Molynx{kind}.sdt does not list the Bile Demon's samples in order")
+            continue
+        for (name, fmt, pcm, data), (_n, _f, _p, bdata) in zip(mine, bile):
+            if not bdata:
+                if data:
+                    problems.append(f"{kind} {name!r}: a blank with data")
+                continue
+            if data == bdata or data[:2] != b"\xff\xf5" or data[2] & 0x0c != 0 or data[3] >> 6 != 3:
+                problems.append(f"{kind} {name!r}: not his own MPEG-2 Layer II 22050 Hz mono sample")
+                continue
+            with tempfile.TemporaryDirectory() as tmp:     # ffmpeg does not probe MPEG audio on a pipe
+                (Path(tmp) / "s.mp2").write_bytes(data)
+                raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", str(Path(tmp) / "s.mp2"), "-f",
+                                      "s16le", "-"], capture_output=True).stdout
+            if not 0 <= len(raw) - pcm < 1152 * 2:
+                problems.append(f"{kind} {name!r}: decodes to {len(raw)} bytes, header says {pcm}")
+            checked += 1
+    if problems:
+        return False, "; ".join(problems)
+    return True, (f"creature_molynx bank (Global\\Molynx + MiscCreatures), the Bile Demon's events, "
+                  f"{checked} of his own samples in MolynxHD/HW.sdt decoded and of the stated length")
+
+
+def audit_release(mod_dir: Path, map_folders: list[Path], game_sounds: Path | None = None) -> AuditReport:
     mod_dir = Path(mod_dir)
     lines, files = _Lines(), _Files(mod_dir)
     found = _sources(map_folders)
@@ -162,6 +223,12 @@ def audit_release(mod_dir: Path, map_folders: list[Path]) -> AuditReport:
     stage = stages.pop() if len(stages) == 1 else None
     lines.add(stage == 3, "b", "folder", f"every map is at stage {stage}" if stage == 3 else f"stages {stages | {stage}}")
     _audit_editor_creatures(mod_dir, lines, files)
+    if game_sounds is not None:
+        try:
+            ok, message = _check_sounds(mod_dir, game_sounds)
+        except (OSError, ValueError, struct.error) as err:
+            ok, message = False, f"could not be checked: {err}"
+        lines.add(ok, "k", "folder", message)
     ok, message = _check_resource_toml(mod_dir)
     lines.add(ok, "h", "folder", message)
     ok, message = _check_ground_slam(mod_dir, [globals_[k][:-len("Globals.kld")] for k in globals_], stage, files)
@@ -171,7 +238,10 @@ def audit_release(mod_dir: Path, map_folders: list[Path]) -> AuditReport:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    report = audit_release(Path(argv[0]), [Path(a) for a in argv[1:]])
+    sounds = None
+    if argv and argv[0].startswith("--game-sounds="):
+        sounds, argv = Path(argv[0].split("=", 1)[1]), argv[1:]
+    report = audit_release(Path(argv[0]), [Path(a) for a in argv[1:]], sounds)
     for line in report.lines:
         print(line)
     print("AUDIT", "PASS" if report.ok else "FAIL")

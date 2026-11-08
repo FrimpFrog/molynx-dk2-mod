@@ -107,7 +107,8 @@ SLEEP_BREATH = 48        # frames of the breathing loop that ends behemoth_anims
 REVIEW_SOURCES = {"falling": "Giant fallback", "eating": "Knight eat", "drinking": "Knight eat (no chicken)",
                   "torture": "Giant torture", "sleeping": "Lying breathing (end of Giant die), on the Bile Demon's bed",
                   "manufacturing": "His own mace smash, cut at bench height, twice",
-                  "ground_slam": "His own mace swing, slowed in the wind-up, held on the floor (Ground Slam)"}
+                  "ground_slam": "His own mace swing, slowed in the wind-up, held on the floor (Ground Slam)",
+                  "praying": "Giant pray, his free arm posed by hand (pray_arm)"}
 BENCH_HEIGHT = 0.40      # the mace head's lowest point at the strike, as a fraction of his rest height
 
 
@@ -215,6 +216,56 @@ def settle_head(frames: list, rig, amount: float) -> list:
     return out
 
 
+# Praying, third review round (2026-11-08: "the non mace arm is still wonky"). Retargeted from the
+# Giant's pray, his free arm (armP / foreP) stayed at one pose relative to his chest the whole clip:
+# held straight out in front (shoulder about 95 degrees) with the forearm twisted 67 degrees about
+# its own length, so when he straightened up it stuck out like a plank instead of rising with the
+# Giant's arms. The arm is now posed by hand, following how far he is bowed: bowed, it hangs to the
+# floor a little ahead of him, elbow soft; as he straightens it rises into a raised fist above his
+# head (shoulder PRAY_RAISE forward-up, then turned PRAY_SPREAD about the forward axis, which with
+# the arm up takes it out to the side; the elbow flexed PRAY_ELBOW, the fist level with his face and
+# a head above it), and lowers again as he bows. No twist about the arm.
+PRAY_RAISE, PRAY_SPREAD, PRAY_ELBOW = 125.0, -20.0, 15.0
+PRAY_HANG_AHEAD, PRAY_HANG_SPREAD, PRAY_HANG_ELBOW = 15.0, 10.0, 25.0
+PRAY_BOWED, PRAY_UPRIGHT = 45.0, 5.0     # chest pitch (degrees) at which the arm is down / fully up
+
+
+def pray_arm(f, n, r):
+    """behemoth_anims.kneel, then his free arm posed by hand (see PRAY_RAISE)."""
+    from scipy.spatial.transform import Rotation as Rot, Slerp
+    from scripts.behemoth_anims import kneel
+    r = kneel(f, n, r)
+    pitch = float(np.degrees(r["torso"][0]))
+    u = float(np.clip((PRAY_BOWED - pitch) / (PRAY_BOWED - PRAY_UPRIGHT), 0, 1))
+    u = u * u * (3 - 2 * u)
+    hang = Rot.from_euler("ZX", [PRAY_HANG_SPREAD, -(pitch + PRAY_HANG_AHEAD)], degrees=True)
+    raised = Rot.from_euler("ZX", [PRAY_SPREAD, -PRAY_RAISE], degrees=True)
+    arm = Slerp([0, 1], Rot.concatenate([hang, raised]))([u])[0]
+    elbow = (1 - u) * PRAY_HANG_ELBOW + u * PRAY_ELBOW
+    r = dict(r)
+    r["armP"] = arm.as_rotvec()
+    r["foreP"] = np.radians([-elbow, 0.0, 0.0])
+    return r
+
+
+def pray_frames(rig, tracks) -> tuple[list, float]:
+    """(frames, seconds) of praying: behemoth_anims' Giant pray retarget with pray_arm."""
+    import warnings
+    from scripts.behemoth_anims import CLUB_ARM, CLUB_LOCKED, DK2_FPS, KNEEL_CAPS, MIRROR
+    from scripts.golem_anims import _loop_close, _resample
+    from scripts.humanoid_retarget import retarget
+    T = tracks["giant"]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        frames = np.asarray(retarget(rig, T["pray"][0] * MIRROR, T["idle1"][0][0] * MIRROR,
+                                     amp={**CLUB_ARM, **CLUB_LOCKED}, tilt_body=False, caps=KNEEL_CAPS,
+                                     extra=pray_arm))
+    seconds = len(T["pray"][0]) / DK2_FPS
+    if len(frames) / seconds < 24 or len(frames) / seconds > 36:
+        frames = _resample(frames, int(seconds * 30))
+    return [np.asarray(x) for x in _loop_close(frames)], seconds
+
+
 def review_clips(meshes_dir, cache, unit_dir, lib: dict) -> dict:
     """{clip: library entry} of the review round (see REVIEW_CLIPS), made like build_all's clips."""
     from scripts.behemoth_anims import DK2_FPS
@@ -235,6 +286,11 @@ def review_clips(meshes_dir, cache, unit_dir, lib: dict) -> dict:
         out[name] = {"frames": [np.asarray(f) for f in frames], "wrap": bool(opt["loop"]),
                      "fps": round(len(frames) / seconds, 3), "kind": "dk2", "source": REVIEW_SOURCES[name]}
     out["drinking"] = {**out["eating"], "source": REVIEW_SOURCES["drinking"]}
+    if "giant" not in tracks:
+        tracks["giant"] = donor_tracks(meshes_dir, cache, "giant")
+    pray, psecs = pray_frames(rig, tracks)
+    out["praying"] = {"frames": pray, "wrap": True, "fps": round(len(pray) / psecs, 3), "kind": "dk2",
+                      "source": REVIEW_SOURCES["praying"]}
     old = lib["sleeping"]
     breath = settle_head([np.asarray(f) for f in old["frames"][-SLEEP_BREATH:]], rig, SLEEP_HEAD_SETTLE)
     out["sleeping"] = {**old, "frames": breath + [breath[0]], "wrap": True, "source": REVIEW_SOURCES["sleeping"]}

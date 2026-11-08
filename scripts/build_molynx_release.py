@@ -12,6 +12,9 @@ resource folder like build_molynx_mod's, holding:
   Data/editor/Creatures.kwd, CreatureSpells.kwd, Shots.kwd, Effects.kwd, EffectElements.kwd,
   Data/Meshes, Data/EngineTextures, Data/Text/Default/Text.str
                                         exactly what build_molynx_mod ships at stage 3
+  Data/Sound/Sfx/Global/creature_molynxBANK.map, creature_molynxSFX.map, MolynxHD.sdt, MolynxHW.sdt
+                                        his own sound bank (molynx_soundbank), loaded by his
+                                        record's sound category CREATURE_MOLYNX
 
 Nothing else of a map is shipped: its level file, Map, Things, Players and Triggers are not changed,
 so Flame keeps loading them from the next folder in alt-resources (Quuz_LevelFixes, then the game).
@@ -55,6 +58,7 @@ from scripts.dk2kld_splice import (BILE_DEMON_ID, IS_MULTIPLAYER_LEVEL, IS_SKIRM
 from scripts.dk2kwd_blocks import HEADER_SIZE, Block, read_blocks, rebuilt_block, write_blocks
 from scripts.molynx_ground_slam import apply_ground_slam
 from scripts.molynx_record import CREATURE_ID
+from scripts.molynx_soundbank import sound_files
 
 STAGE = 3
 MPD_NAME = re.compile(r"mpd\d+", re.IGNORECASE)
@@ -196,8 +200,12 @@ def _resource_toml(name: str, maps: dict[str, dict[str, Path]]) -> bytes:
     return ("\r\n".join(lines) + "\r\n").encode("ascii")
 
 
-def release_files(map_folders: list[Path], assets_dir: Path, name: str = "Molynx") -> dict[str, bytes]:
-    """Every file of the release folder (relative path -> bytes), built in memory."""
+def release_files(map_folders: list[Path], assets_dir: Path, name: str = "Molynx",
+                  sounds: tuple[Path, Path] | None = None) -> dict[str, bytes]:
+    """Every file of the release folder (relative path -> bytes), built in memory. `sounds` is
+    (the game's Data/Sound/Sfx/Global, the folder of Molynx's WAVs): his own sound bank
+    (molynx_soundbank), which his record's sound category names; without it the folder has no
+    sound files and he is silent."""
     _check_name(name)
     maps = find_maps(map_folders)
     if not maps:
@@ -224,15 +232,18 @@ def release_files(map_folders: list[Path], assets_dir: Path, name: str = "Molynx
     files.update(_panel_files(assets))
     files[TEXT_PATH] = text_file
     files.update(_ground_slam_files(assets))
+    if sounds is not None:
+        files.update(sound_files(*sounds))
     return files
 
 
-def build_release(out_dir: Path, map_folders: list[Path], assets_dir: Path, name: str = "Molynx") -> Path:
+def build_release(out_dir: Path, map_folders: list[Path], assets_dir: Path, name: str = "Molynx",
+                  sounds: tuple[Path, Path] | None = None) -> Path:
     """Write `out_dir/<name>/` (never over an existing folder) and return its path."""
     target = Path(out_dir) / name
     if target.exists() or target.is_symlink():
         raise FileExistsError(f"{target} already exists; it is never overwritten or deleted")
-    files = release_files(map_folders, assets_dir, name)
+    files = release_files(map_folders, assets_dir, name, sounds)
     target.mkdir(parents=True)
     for relative, data in files.items():
         path = target / relative
@@ -247,10 +258,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True, help="folder that will hold the mod folder")
     parser.add_argument("--assets", type=Path, required=True, help="molynx_assets export folder")
     parser.add_argument("--name", default="Molynx")
+    parser.add_argument("--game-sounds", type=Path, required=True,
+                        help="the game's Data/Sound/Sfx/Global (the Bile Demon's bank files)")
+    parser.add_argument("--wavs", type=Path, required=True, help="Molynx's WAVs (molynx_sounds)")
     parser.add_argument("map_folders", type=Path, nargs="+",
                         help="map folders in load order (Quuz_LevelFixes maps first, then the game's)")
     args = parser.parse_args(argv)
-    print(build_release(args.out, args.map_folders, args.assets, args.name))
+    print(build_release(args.out, args.map_folders, args.assets, args.name, (args.game_sounds, args.wavs)))
     return 0
 
 

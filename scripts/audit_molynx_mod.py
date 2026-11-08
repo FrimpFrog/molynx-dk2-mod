@@ -179,6 +179,8 @@ STAGE3 = {
     "spells[0].playAnimation": 1, "spells[0].shotDelay": 4642, "spells[0].shotOffset": (0, -2300, 205),
     "spells[1].creatureSpellId": 15, "spells[1].levelAvailable": 4,
     "spells[1].playAnimation": 1, "spells[1].shotDelay": 4642, "spells[1].shotOffset": (0, -1433, 1638),
+    # his own sound bank: Data/Sound/Sfx/Global/creature_molynxBANK.map (rule k)
+    "soundGategory": "CREATURE_MOLYNX",
 }
 # Stage 3: his texts, in the folder's Data/Text/Default/Text.str at the IDs record 47 names (the
 # game's own entries before them unchanged); the tooltip stays the game's shared one, 2408.
