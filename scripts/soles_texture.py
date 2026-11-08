@@ -22,8 +22,8 @@ from scripts.soles_model import ARM, BODY, BOOT_TOP, HAIR_TEX, HAIRLINE, HC, HEA
 
 ATLAS = {
     HEAD: {"front": ((0, 0, 128, 104), False), "back": ((0, 106, 128, 128), False)},
-    HAIR_TEX: {"hair": ((0, 0, 128, 96), False), "hair_in": ((0, 98, 62, 128), False),
-               "fringe": ((64, 98, 96, 128), False), "fringe_in": ((98, 98, 128, 128), False)},
+    HAIR_TEX: {"hair": ((0, 0, 128, 40), False), "lock": ((0, 42, 128, 104), False),
+               "lock_in": ((0, 106, 128, 128), False)},
     BODY: {"front": ((0, 0, 64, 128), False), "back": ((64, 0, 128, 128), False)},
     LIMBS: {"arm": ((0, 0, 30, 96), False), "hand": ((0, 98, 30, 128), False),
             "leg": ((32, 0, 62, 128), False), "foot": ((64, 0, 92, 28), False),
@@ -112,8 +112,33 @@ def hair_col(pos):
 
 
 def hair_field(pos, t):
-    col, h = hair_col(pos)
-    return ret(col, h, spec=.35, gloss=14, soft=.5)
+    """The cap: strands combed out from the parting (on his left), the same browns as the locks."""
+    x, y, z = pos[:, 0] - HC[0] - .02, pos[:, 1], pos[:, 2] - HC[2]
+    ang = np.arctan2(x, -z)
+    strands = .5 + .5 * np.sin(ang * 26 + fbm(ang * 4, y * 30, 7) * 3)
+    col = mix(HAIR * .45, HAIR * 1.2, .3 + .5 * strands)
+    col = mix(col, RGB(150, 104, 70), .3 * gauss(y - .975, .012) * strands)
+    col = mix(col, HAIR * .3, .6 * gauss(x, .003) * smooth(.95, .99, y) * smooth(-.02, .02, -z + .04))   # the parting
+    return ret(col, .002 * strands, spec=.3, gloss=14, soft=.5)
+
+
+def lock_field(pos, t):
+    """A hanging lock, painted like a DK2 hair card: dark at its edges, a bright ridge down the middle,
+    strands running along it, a sheen near the top, darker toward the tip."""
+    u, v = t["u"], t["v"]
+    seed = t.get("lock", np.zeros(len(u)))
+    ridge = np.sin(np.pi * np.clip(u, 0, 1)) ** 1.2
+    strands = .5 + .5 * np.sin(u * 40 + seed * 3 + np.sin(v * 6 + seed) * 2)
+    col = mix(HAIR * .35, HAIR * 1.25, .2 + .6 * ridge + .2 * strands)
+    col = mix(col, RGB(150, 104, 70), .4 * ridge * gauss(v - .2, .15))
+    col = mix(col, HAIR * .4, .4 * smooth(.6, 1.0, v) * (1 - ridge))
+    return ret(col, .003 * ridge + .0006 * strands, spec=.3, gloss=14, soft=.5)
+
+
+def lock_in_field(pos, t):
+    m = lock_field(pos, t)
+    m["albedo"] = m["albedo"] * .35
+    return m
 
 
 def hair_in_field(pos, t):
@@ -270,6 +295,28 @@ def _emblem():
 
 
 EMBLEM = _emblem()
+
+
+def _crest():
+    """The Molynx crest: his face from his portrait in a round medallion (the user's own creature's art)."""
+    from pathlib import Path
+    src = Path(__file__).resolve().parent.parent / "data" / "molynx_design" / "portrait_icon_A2.png"
+    im = Image.open(src).convert("RGB").crop((60, 60, 420, 420)).resize((128, 128), Image.LANCZOS)
+    return np.asarray(im, np.float32)
+
+
+CREST = _crest()
+CREST_C, CREST_R = (0.0, .69), .026            # on the breastplate, model units
+
+
+def crest_at(pos):
+    """-> (colour, inside the medallion 0..1, on its gold rim 0..1)."""
+    dx, dy = pos[:, 0] - CREST_C[0], pos[:, 1] - CREST_C[1]
+    r = np.hypot(dx, dy) / CREST_R
+    H, W = CREST.shape[:2]
+    u = np.clip(((dx / CREST_R) * .5 + .5) * W, 0, W - 1).astype(int)
+    v = np.clip(((-dy / CREST_R) * .5 + .5) * H, 0, H - 1).astype(int)
+    return CREST[v, u], smooth(.86, .8, r), band(r, .8, 1.0, .03)
 EMBLEM_BOX = (-.022, .62, .022, .73)
 
 
@@ -290,10 +337,20 @@ WHITE = RGB(232, 228, 220)
 BLOOD = RGB(150, 20, 26)
 
 
+GOLD = RGB(214, 168, 72)
+
+
+def scroll(x, y, f=1.0):
+    """Engraved scrollwork: interlaced curls (0..1, 1 = a groove)."""
+    a = np.sin(x * 420 * f + np.sin(y * 300 * f) * 2.2)
+    b = np.sin(y * 420 * f + np.sin(x * 300 * f) * 2.2)
+    return smooth(.82, .97, np.abs(a * b))
+
+
 def torso_field(pos, t):
-    """A rounded dark grey breastplate edged in silver, a white band down its centre carrying a red flame,
-    three faulds over the stomach, a backplate with shoulder-blade plates and rivets; the red arming coat
-    shows at the sides and under the arms."""
+    """A dark grey breastplate rimmed in silver with gold engraved borders, a white and red heraldic
+    panel down the centre, the Molynx crest in a gold medallion with a ruby above it, three faulds with
+    gold edges; the backplate with engraved shoulder plates and rivets; a red arming coat at the sides."""
     x, y, z = pos[:, 0], pos[:, 1], pos[:, 2]
     ax = np.abs(x)
     n = len(x)
@@ -313,40 +370,53 @@ def torso_field(pos, t):
         h, spec, gloss, metal = (h * (1 - mk) + height * mk, spec * (1 - mk) + sp * mk,
                                  gloss * (1 - mk) + gl * mk, metal * (1 - mk) + me * mk)
 
-    plate_w = .09 + .02 * smooth(.6, .7, y)
+    plate_w = .092 + .025 * smooth(.6, .7, y)
     breast = smooth(plate_w + .004, plate_w - .004, ax) * band(y, .585, .79, .004) * front
-    curve = gauss(np.hypot(ax - .035, (y - .69) * .8), .03)            # the plate's swell
-    edge = breast * np.maximum(smooth(plate_w - .01, plate_w - .002, ax), smooth(.595, .587, y) * 0
-                               + smooth(.597, .587, y))
-    plate_col = IRON * (.8 + .25 * grain + .35 * curve)[:, None]
-    put(breast, plate_col, .006 + .004 * curve, .45, 30, .55)
-    # the white band down the centre with a silver edge, and the red flame on it
-    bandm = band(x, -.022, .022, .002) * breast
-    put(bandm, WHITE * (.85 + .15 * grain[:, None]), .0068, .25, 20, .0)
-    col = mix(col, SILVER, gauss(np.abs(x) - .022, .0018) * breast)
-    fill, outline, inner = emblem_at(pos)
-    col = mix(col, RGB(30, 26, 30), outline * bandm)
-    col = mix(col, BLOOD * 1.15, fill * bandm)
-    col = mix(col, RGB(236, 120, 40), inner * bandm)
-    # the breastplate's silver rim and its dark under-edge
-    put(edge, SILVER * (.85 + .2 * grain[:, None]), .0075, .8, 40, .7)
+    curve = gauss(np.hypot(ax - .04, (y - .69) * .8), .032)
+    put(breast, IRON * (.8 + .25 * grain + .4 * curve)[:, None], .006 + .004 * curve, .45, 30, .55)
+    # a gold engraved border inside the silver rim
+    inset = breast * band(plate_w - ax, .006, .016, .002)
+    eng = scroll(x, y)
+    put(inset, mix(GOLD, GOLD * .45, eng), .0072 - .0008 * eng, .7, 34, .7)
+    rim = breast * smooth(plate_w - .006, plate_w - .002, ax)
+    put(rim, SILVER, .0078, .8, 40, .7)
+    # the heraldic panel: white with a red chevron and gold edging
+    panel = band(x, -.026, .026, .0015) * band(y, .6, .77, .002) * breast
+    chev = band(y - (.64 + .9 * ax), -.008, .008, .0015) * panel
+    put(panel, WHITE * (.88 + .12 * grain[:, None]), .0068, .3, 20, .0)
+    col = mix(col, BLOOD * 1.15, chev)
+    col = mix(col, GOLD, (gauss(np.abs(x) - .026, .0015) + gauss(y - .77, .0015) + gauss(y - .6, .0015))
+              * band(x, -.028, .028, .001) * band(y, .598, .772, .001) * front)
+    # the Molynx crest in a gold medallion, a ruby above it
+    crest, inside, ring = crest_at(pos)
+    col = mix(col, crest * 1.05, inside * front)
+    put(ring * front, mix(GOLD * 1.1, GOLD * .5, scroll(x, y, 2)), .0082, .9, 40, .8)
+    h += .001 * inside * front
+    ruby = gauss(np.hypot(x, y - .735), .0045) * front
+    put(smooth(.3, .6, ruby), RGB(200, 20, 40), .0085 + .002 * ruby, 1.4, 70, .1)
+    # rivets along the rim
+    riv = gauss(np.hypot(ax - (plate_w - .004), np.mod(y + .006, .022) - .011), .0022) * breast
+    col = mix(col, GOLD * 1.15, smooth(.3, .7, riv))
+    # under the breastplate's lower edge
     col = mix(col, RGB(28, 22, 26), gauss(y - .582, .003) * smooth(plate_w + .004, plate_w - .004, ax) * front)
-    # faulds: three lames over the stomach, silver-edged, each overlapping the one below
-    fauld = smooth(.094, .086, ax) * band(y, .508, .585, .003)
+    # faulds: three lames with gold edges and engraving
+    fauld = smooth(.096, .088, ax) * band(y, .508, .585, .003)
     lame = np.mod(.585 - y, .026) / .026
     put(fauld, IRON * (.7 + .35 * (1 - lame)[:, None]) * (.9 + .2 * grain[:, None]), .005 + .003 * (1 - lame),
         .4, 28, .5)
-    col = mix(col, SILVER, fauld * gauss(lame - .06, .05))
+    col = mix(col, GOLD, fauld * gauss(lame - .07, .05))
+    col = mix(col, GOLD * .5, fauld * .5 * scroll(x * 1.5, y) * band(lame, .2, .7, .05))
     col = mix(col, RGB(28, 22, 26), fauld * gauss(lame - .97, .03))
-    # the backplate: shoulder-blade plates with silver edges and rivets, a spine ridge
+    # the backplate
     back = (1 - front) * band(y, .56, .79, .004) * smooth(.1, .09, ax)
     blade = gauss(np.hypot(ax - .045, (y - .72) * .8), .03)
     put(back, IRON * (.75 + .25 * grain + .3 * blade + .3 * gauss(x, .005))[:, None], .006 + .003 * blade,
         .4, 28, .5)
-    col = mix(col, SILVER, gauss(np.hypot(ax - .045, (y - .72) * .8) - .028, .002) * back)
+    bl = gauss(np.hypot(ax - .045, (y - .72) * .8) - .028, .0022) * back
+    col = mix(col, GOLD, bl)
+    col = mix(col, GOLD * .55, .6 * back * scroll(x, y) * smooth(.028, .02, np.hypot(ax - .045, (y - .72) * .8)))
     rivets = gauss(np.hypot(np.mod(x + .01, .02) - .01, y - .575), .0025) * back
     col = mix(col, SILVER * 1.1, smooth(.3, .7, rivets))
-    # painted shadow: under the breastplate's top edge at the arms, under the arms
     col = col * (1 - .35 * smooth(.1, .125, ax) * smooth(.7, .76, y))[:, None]
     neck = smooth(.8, .81, y)
     col = mix(col, SKIN * np.ones((n, 1)), neck)
@@ -361,16 +431,21 @@ def _along(pos, path):
 
 
 def arm_field(pos, t):
-    """Quilted red arming sleeves under the plate: soft diamond quilting (big enough to read at 128px)."""
-    x, y = pos[:, 0], pos[:, 1]
+    """Bare arms: painted muscle (deltoid, biceps, the elbow, the forearm), a gold arm ring."""
+    f = _along(pos, ARM)
+    x, y, z = pos[:, 0], pos[:, 1], pos[:, 2]
     u = t["u"]
-    q1 = .5 + .5 * np.cos((u * 3 + y * 70) * 2 * np.pi)
-    q2 = .5 + .5 * np.cos((u * 3 - y * 70) * 2 * np.pi)
-    quilt = np.minimum(q1, q2)
-    folds = fbm(x * 40, y * 30, 51)
-    col = mix(BLOOD * .55, BLOOD * 1.0, .35 + .4 * quilt + .25 * folds)
-    h = .0015 * quilt + .002 * folds
-    return ret(col, h, spec=.12, gloss=10, soft=.4)
+    col = SKIN * (.95 + .08 * fbm(x * 200, y * 200, 3))[:, None]
+    delt = gauss(f - .12, .08)
+    bic = gauss(f - .3, .1) * gauss(u - .15, .25)
+    elbow = gauss(f - .5, .04)
+    fore = gauss(f - .62, .1) * gauss(u - .3, .3)
+    h = .002 * delt + .002 * bic + .0015 * fore - .0008 * elbow
+    col = col * (1 + .12 * (delt + bic + fore) - .2 * elbow - .25 * smooth(.6, 1, u) * smooth(.15, .4, f))[:, None]
+    ring = band(f, .38, .42, .006)
+    col = mix(col, mix(GOLD, GOLD * .5, scroll(x, y, 3)), ring)
+    h += .002 * ring
+    return ret(col, h, spec=.08 + .7 * ring, gloss=12 + 30 * ring, metal=.7 * ring, soft=.8 * (1 - ring))
 
 
 def hand_field(pos, t):
@@ -403,7 +478,8 @@ def leg_field(pos, t):
     col = mix(col, pc, plate)
     h = h * (1 - plate) + (.004 + .002 * ridge) * plate
     rim = (gauss(y - .29, .003) + gauss(y - .46, .003)) * front + gauss(y - .225, .003) + gauss(y - .06, .003)
-    col = mix(col, SILVER, np.clip(rim, 0, 1) * .9)
+    col = mix(col, GOLD, np.clip(rim, 0, 1) * .9)
+    col = mix(col, GOLD * .55, .55 * plate * scroll(x * 1.5, y, 1.5) * gauss(u, .22))
     h += .0015 * np.clip(rim, 0, 1)
     # painted shadow under the loincloth and the knee cops
     col = col * (1 - .35 * smooth(.43, .47, y) - .25 * gauss(y - .25, .012))[:, None]
@@ -418,7 +494,7 @@ def foot_field(pos, t):
     grain = fbm(pos[:, 0] * 160, z * 160, 17)
     lames = np.mod(z * 45, 1)
     col = mix(IRON * (.75 + .25 * grain[:, None]), IRON * .5, gauss(lames - .95, .06))
-    col = mix(col, SILVER, gauss(lames - .05, .05) * .6)
+    col = mix(col, GOLD, gauss(lames - .05, .05) * .7)
     col = mix(col, LEATHER_BLACK * .6, sole)
     return ret(col, .0012 * sole + .0015 * (1 - lames) * (1 - sole), spec=.4 * (1 - sole), gloss=26,
                metal=.5 * (1 - sole))
@@ -432,8 +508,10 @@ def cloth_field(pos, t):
     border = np.maximum(smooth(.12, .06, np.minimum(u, 1 - u)), smooth(.86, .93, v))
     trim = gauss(np.minimum(u, 1 - u) - .09, .02) + gauss(v - .895, .02)
     col = mix(BLOOD * .7, BLOOD * 1.15, folds)
-    col = mix(col, WHITE * .9, border)
-    col = mix(col, SILVER * .8, np.clip(trim, 0, 1) * .8)
+    col = mix(col, WHITE * .92, border)
+    col = mix(col, GOLD, np.clip(trim, 0, 1) * .9)
+    emb = scroll(x * 1.2, y * 1.2, 1.5) * smooth(.6, .75, v) * smooth(.86, .82, v)
+    col = mix(col, GOLD * .8, .7 * emb)
     h = .004 * folds + .001 * np.clip(trim, 0, 1)
     inside = BLOOD * .45 * (.7 + .3 * folds[:, None])
     col = np.where((face < 0)[:, None], inside, col)
@@ -449,7 +527,7 @@ def belt_field(pos, t):
     edge = gauss(y - .464, .002) + gauss(y - .498, .002)
     col = mix(LEATHER * .7, LEATHER * .45, .4 * grain + .5 * edge)
     me = buckle * (1 - hole)
-    col = mix(col, RGB(200, 202, 212), me)
+    col = mix(col, GOLD * 1.05, me)
     return ret(col, .001 * grain + .004 * me - .002 * edge, spec=.25 + .9 * me, gloss=16 + 30 * me, metal=.7 * me)
 
 
@@ -459,7 +537,8 @@ def bracer_field(pos, t):
     grain = fbm(pos[:, 0] * 160, pos[:, 1] * 160, 81)
     rim = np.clip(gauss(v, .12) + gauss(v - 1, .12), 0, 1)
     ridge = gauss(u, .1)
-    col = mix(IRON * (.8 + .25 * grain + .35 * ridge)[:, None], SILVER, rim)
+    col = mix(IRON * (.8 + .25 * grain + .35 * ridge)[:, None], GOLD, rim)
+    col = mix(col, GOLD * .55, .5 * scroll(pos[:, 0] * 2, pos[:, 1], 1.5) * (1 - rim) * gauss(u, .3))
     return ret(col, .001 * grain + .002 * rim + .002 * ridge, spec=.4 + .4 * rim, gloss=30, metal=.55 + .2 * rim)
 
 
@@ -482,7 +561,8 @@ def pauldron_field(pos, t):
     rivet = gauss(along - .3, .06) * (np.cos(np.arctan2(pos[:, 2] + .012, pos[:, 1] - .78) * 5) > .9)
     h = .002 * rim + .002 * rivet + .0006 * fbm(pos[:, 0] * 300, pos[:, 2] * 300, 91)
     col = mix(IRON * 1.05, SILVER, rim)
-    col = mix(col, SILVER * 1.1, rivet)
+    col = mix(col, GOLD * .7, .5 * scroll(pos[:, 0], pos[:, 2] * 1.3 + pos[:, 1], 1.4) * (1 - rim))
+    col = mix(col, GOLD * 1.1, rivet)
     col = col * (.85 + .25 * fbm(pos[:, 0] * 120, pos[:, 1] * 120, 93))[:, None]
     return ret(col, h, spec=.45, gloss=30, metal=.55)
 
@@ -496,9 +576,8 @@ PAINTERS = {
     (LIMBS, "belt"): lambda t: shade(t, belt_field), (LIMBS, "bracer"): lambda t: shade(t, bracer_field),
     (LIMBS, "pauldron"): lambda t: shade(t, pauldron_field),
     (LIMBS, "spike"): lambda t: shade(t, spike_field), (LIMBS, "gorget"): lambda t: shade(t, gorget_field),
-    (HAIR_TEX, "hair"): lambda t: shade(t, hair_field), (HAIR_TEX, "hair_in"): lambda t: shade(t, hair_in_field),
-    (HAIR_TEX, "fringe"): lambda t: shade(t, hair_field),
-    (HAIR_TEX, "fringe_in"): lambda t: shade(t, hair_in_field),
+    (HAIR_TEX, "hair"): lambda t: shade(t, hair_field), (HAIR_TEX, "lock"): lambda t: shade(t, lock_field),
+    (HAIR_TEX, "lock_in"): lambda t: shade(t, lock_in_field),
 }
 
 

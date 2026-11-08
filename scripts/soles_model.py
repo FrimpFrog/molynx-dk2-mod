@@ -4,9 +4,9 @@ shoulders, the neck inside the head), a sculpted head under a layered shell of l
 projected skins like the game's, and small armour.
 
 His face is painted in his likeness on the front of the head (soles_texture). He is on
-the evil side, in knightly plate of his own design in dark grey, red, white and silver: a rounded
-breastplate with a white band and a red flame, faulds, four-lame pauldrons, vambraces, cuisses, knee cops
-and greaves, a red loincloth with a white border, and the Dark Angel's sword (the game's own triangles,
+the evil side, in knightly plate of his own design in dark grey, red, white, silver and gold, bare-armed:
+an engraved breastplate carrying the Molynx crest, faulds, layered pauldrons, vambraces, cuisses, knee cops
+and greaves, a red skirt with a white and gold hem, and the Dark Angel's sword (the game's own triangles,
 still pointing at DarkAngelFrnt).
 
 Model space as lowpoly: Y up, Z forward, X to his LEFT; 1.0 tall to the top of his hair.
@@ -105,8 +105,8 @@ def build_torso(parts):
 # ------------------------------------------------------------------------------------------- arms
 
 ARM_RINGS = (0, 2, 4, 6)
-ARM = [((.112, .772, -.012), .05, .046), ((.13, .735, -.014), .047, .043), ((.138, .68, -.018), .04, .038),
-       ((.142, .628, -.02), .033, .031), ((.149, .58, -.014), .034, .032), ((.156, .53, -.006), .029, .026),
+ARM = [((.112, .772, -.012), .05, .046), ((.13, .735, -.014), .046, .042), ((.138, .68, -.018), .042, .04),
+       ((.142, .628, -.02), .031, .029), ((.149, .58, -.014), .035, .033), ((.156, .53, -.006), .029, .026),
        ((.16, .49, .0), .021, .019)]
 
 
@@ -193,9 +193,10 @@ def flap(p, island, top_y, bot_y, z0, z1, w0, w1, front=True, cols=3, rows=3):
 
 
 def build_loincloth(parts):
+    """A red skirt all round the hips, from under the belt to the knee, flaring, split at the sides."""
     p = Part("loincloth", LIMBS, SK)
-    flap(p, "cloth", .478, .3, .06, .072, .045, .06, front=True, rows=2, cols=2)
-    flap(p, "cloth", .478, .29, .066, .08, .06, .072, front=False, rows=2, cols=2)
+    flap(p, "cloth", .48, .29, .066, .086, .085, .1, front=True, rows=2, cols=3)
+    flap(p, "cloth", .48, .28, .07, .09, .09, .104, front=False, rows=2, cols=3)
     parts.append(p)
     return p
 
@@ -268,88 +269,88 @@ HAIR_BACK_DROP = .013                 # the last row hangs lower behind (y .835 
 HAIR_COLS = 9
 
 
+# a cap over the skull, then separate locks hanging from it round the sides and back (each a gently
+# curved strip, so the silhouette breaks up into locks), and a fringe of two locks from the parting
+CAP_ROWS = [(.997, .03, .03, .036), (.982, .052, .05, .062), (.962, .064, .062, .076), (.94, .066, .066, .08)]
+CAP_COLS = 10
+# locks: angle round the head (deg, 0 = his face, + = his left), top y, length, width, outward flick
+LOCKS = [(60, .975, .122, .05, .012), (90, .98, .13, .056, .02), (120, .98, .136, .058, .016),
+         (150, .98, .136, .06, .012), (180, .98, .14, .062, .01), (-150, .98, .134, .06, .016),
+         (-120, .98, .138, .058, .012), (-90, .98, .128, .056, .022), (-60, .975, .12, .05, .014)]
+
+
+def head_radius(y, a):
+    """The hair's surface radius at height y, angle a (from the cap rows / the skull)."""
+    ys = [r[0] for r in CAP_ROWS] + [.9, .86]
+    rs = [r[1] for r in CAP_ROWS] + [.064, .062]
+    rf = [r[2] for r in CAP_ROWS] + [.062, .058]
+    rb = [r[3] for r in CAP_ROWS] + [.076, .07]
+    side = np.interp(-y, [-v for v in ys], rs)
+    fb = np.interp(-y, [-v for v in ys], rf if np.cos(a) > 0 else rb)
+    return side, fb
+
+
 def build_hair(parts):
     p = Part("hair", HAIR_TEX, SK)
-    rng = np.random.default_rng(11)
+    # the cap
     grid = []
-    last = len(HAIR_ROWS) - 1
-    lock_of, k = [], 0
-    while len(lock_of) < HAIR_COLS:
-        lock_of += [k] * int(rng.integers(2, 4))
-        k += 1
-    lock_drop = rng.uniform(.006, .02, k + 1)
-    lock_flick = rng.uniform(.02, .07, k + 1)
-    for j, (y, rs, rf, rb, op) in enumerate(HAIR_ROWS):
+    for j, (y, rs, rf, rb) in enumerate(CAP_ROWS):
         row = []
-        for k in range(HAIR_COLS):
-            s_ = k / (HAIR_COLS - 1)
-            a = np.radians(op + s_ * (360 - 2 * op))
-            ca, sa = np.cos(a), np.sin(a)
-            r = rf if ca > 0 else rb
-            yy = y
-            out = 1.0
-            if j >= last - 1:                         # ragged ends: locks of 2-3 columns, each its own length
-                lock = lock_of[k]
-                f_ = 1 if j == last else .4
-                yy -= (lock_drop[lock] + HAIR_BACK_DROP * max(0, -ca)) * f_
-                out += lock_flick[lock] * f_
-            if j > 0:
-                out += .012 * rng.standard_normal()
-            q = np.array([HC[0] + rs * sa * out, yy, HC[2] - .006 + r * ca * out])
-            row.append(p.add(q, (s_, j / last), "head", "hair"))
+        for k in range(CAP_COLS):
+            a = 2 * np.pi * k / CAP_COLS
+            r = rf if np.cos(a) > 0 else rb
+            q = np.array([HC[0] + rs * np.sin(a), y, HC[2] - .006 + r * np.cos(a)])
+            row.append(p.add(q, (k / CAP_COLS, j / (len(CAP_ROWS) - 1)), "head", "hair"))
         grid.append(row)
-    centre = lambda j: np.array([HC[0], HAIR_ROWS[j][0], HC[2] - .006])
-    for j in range(last):
-        mid = (centre(j) + centre(j + 1)) / 2
-        for k in range(HAIR_COLS - 1):
-            a, b = grid[j][k], grid[j][k + 1]
-            c, d = grid[j + 1][k], grid[j + 1][k + 1]
+    for j in range(len(grid) - 1):
+        mid = np.array([HC[0], (CAP_ROWS[j][0] + CAP_ROWS[j + 1][0]) / 2, HC[2] - .006])
+        for k in range(CAP_COLS):
+            a, b = grid[j][k], grid[j][(k + 1) % CAP_COLS]
+            c, d = grid[j + 1][k], grid[j + 1][(k + 1) % CAP_COLS]
             p.tri(a, b, c, inside=mid)
             p.tri(b, d, c, inside=mid)
-    top = p.add(np.array([HC[0], 1.004, HC[2] - .006]), (.5, 0), "head", "hair")
-    for k in range(HAIR_COLS - 1):
-        p.tri(grid[0][k], grid[0][k + 1], top, inside=HC)
-    # the inside of the curtain round the face (seen past his cheeks): the lower rows again, facing in
-    inner = [[p.add(p.points[i], p.uv[i], "head", "hair_in") for i in grid[j]] for j in range(3, len(grid))]
-    for j in range(len(inner) - 1):
-        mid = (centre(j + 3) + centre(j + 4)) / 2
-        for k in range(HAIR_COLS - 1):
-            a, b = inner[j][k], inner[j][k + 1]
-            c, d = inner[j + 1][k], inner[j + 1][k + 1]
-            pa, pb, pc = (p.points[i] for i in (a, b, c))
-            if np.dot(np.cross(pb - pa, pc - pa), mid - (pa + pb + pc) / 3) > 0:
-                p.tris += [(a, b, c), (b, d, c)]
-            else:
-                p.tris += [(a, c, b), (b, c, d)]
-    # the fringe: one heavy mass falling from his parting (left of centre, at the crown's front) and swept
-    # diagonally across the forehead to his right, lying on the shell, thicker and lower at the swept end
-    rows = [(.985, .03, -.035), (.952, .045, -.062), (.928, .05, -.068)]
-    ends = [-.0, -.045, -.062, -.068]
-    pts, uvs = [], []
-
-    def on_shell(x, y, lift):
-        rf = np.interp(-y, [-r[0] for r in HAIR_ROWS], [r[2] for r in HAIR_ROWS])
-        rs = np.interp(-y, [-r[0] for r in HAIR_ROWS], [r[1] for r in HAIR_ROWS])
-        zz = rf * np.sqrt(max(1 - (x / max(rs, 1e-3)) ** 2, .02))
-        return np.array([x, y, HC[2] - .006 + zz + lift])
-
-    for j, (y, x0, x1) in enumerate(rows):
-        for i, u in enumerate(np.linspace(0, 1, 3)):
-            x = x0 + (x1 - x0) * u
-            drop = .02 * u ** 1.3 * (j / 2)              # the swept side hangs lower
-            if j == 3:
-                drop += (.0, .005, .003)[i]
-            pts.append(on_shell(x, y - drop, .0035 + .0035 * (j / 2)))
-            uvs.append((u, j / 2))
-    tris = []
-    for j in range(2):
-        for i in range(2):
-            a, b, c, d = j * 3 + i, j * 3 + i + 1, (j + 1) * 3 + i, (j + 1) * 3 + i + 1
-            tris += [(a, b, c), (b, d, c)]
-    for side, isl in ((1, "fringe"), (-1, "fringe_in")):
-        ids = [p.add(q, uv, "head", isl) for q, uv in zip(pts, uvs)]
-        for a, b, c in tris:
-            p.tri_facing(ids[a], ids[b], ids[c], np.array([0, .3, 1.0]) * side)
+    top = p.add(np.array([HC[0], 1.003, HC[2] - .008]), (.5, 0), "head", "hair")
+    for k in range(CAP_COLS):
+        p.tri(grid[0][k], grid[0][(k + 1) % CAP_COLS], top, inside=HC)
+    # the locks: 3 rows x 2 columns, curved round the head, flicking out at the end
+    for i, (deg, y0, length, width, flick) in enumerate(LOCKS):
+        a = np.radians(deg)
+        out = np.array([np.sin(a), 0, np.cos(a)])
+        tang = np.array([np.cos(a), 0, -np.sin(a)])
+        pts, uvs = [], []
+        for j, v in enumerate((0, .5, 1)):
+            y = y0 - length * v
+            side, fb = head_radius(y, a)
+            r = 1 / np.sqrt((np.sin(a) / side) ** 2 + (np.cos(a) / fb) ** 2) + .003 + .004 * v + flick * v ** 2
+            c = np.array([HC[0], y, HC[2] - .006]) + out * r
+            w = width * (1 - .25 * v)
+            for u in (-.5, 0, .5):
+                q = c + tang * w * u + out * (.004 * (1 - abs(u) * 2))       # a rounded lock
+                pts.append(q)
+                uvs.append((u + .5, v))
+        isl = "lock"
+        tris = [(0, 1, 3), (1, 4, 3), (1, 2, 4), (2, 5, 4), (3, 4, 6), (4, 7, 6), (4, 5, 7), (5, 8, 7)]
+        both = abs(deg) < 100                                       # beside the face: seen from inside too
+        for side_, il in ((1, isl), (-1, "lock_in")) if both else ((1, isl),):
+            ids = [p.add(q, uv, "head", il, lock=float(i)) for q, uv in zip(pts, uvs)]
+            for t in tris:
+                pa = pts[t[0]]
+                p.tri_facing(ids[t[0]], ids[t[1]], ids[t[2]], (out + np.array([0, .2, 0])) * side_)
+    # the fringe: two locks from the parting on his left, swept across the forehead to his right
+    for (x0, y0, x1, y1, w0) in ((.03, .995, -.025, .935, .05), (.0, .99, -.058, .932, .046)):
+        pts, uvs = [], []
+        for j, v in enumerate((0, .5, 1)):
+            x, y = x0 + (x1 - x0) * v, y0 + (y1 - y0) * v
+            side, fb = head_radius(y, 0.0)
+            z = HC[2] - .006 + fb * np.sqrt(max(1 - (x / side) ** 2, .05)) + .006
+            for u in (-.5, 0, .5):
+                pts.append(np.array([x + .012 * u * (1 - v), y + w0 * u * .55, z + .002 * (1 - abs(u) * 2)]))
+                uvs.append((u + .5, v))
+        tris = [(0, 1, 3), (1, 4, 3), (1, 2, 4), (2, 5, 4), (3, 4, 6), (4, 7, 6), (4, 5, 7), (5, 8, 7)]
+        for side_, il in ((1, "lock"), (-1, "lock_in")):
+            ids = [p.add(q, uv, "head", il, lock=9.0) for q, uv in zip(pts, uvs)]
+            for t in tris:
+                p.tri_facing(ids[t[0]], ids[t[1]], ids[t[2]], np.array([0, .3, 1.0]) * side_)
     parts.append(p)
     return p
 
