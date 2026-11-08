@@ -263,7 +263,7 @@ def atlas_uv(part, atlas, size=128):
     return out
 
 
-def bake(parts, atlas, painters, size=128, ss=4, occlusion=None, bleed=24):
+def bake(parts, atlas, painters, size=128, ss=4, occlusion=None, bleed=24, apply_ao=True):
     """-> {texture: PIL RGB}: every texel traced to its surface point and painted by
     painters[(texture, island)](samples) with samples u, v, pos, nrm, ao and each vertex tag interpolated."""
     from scripts.dragon_texture import _bleed
@@ -311,7 +311,7 @@ def bake(parts, atlas, painters, size=128, ss=4, occlusion=None, bleed=24):
             if not where:
                 continue
             t = {k: np.concatenate(v) for k, v in S.items() if v}
-            rgb = painter(t) * (0.5 + 0.5 * t["ao"])[..., None]
+            rgb = painter(t) * ((0.5 + 0.5 * t["ao"])[..., None] if apply_ao else 1.0)
             ys = np.concatenate([w[0] for w in where])
             xs = np.concatenate([w[1] for w in where])
             col[ys, xs] = rgb

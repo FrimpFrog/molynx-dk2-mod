@@ -33,14 +33,15 @@ SKELETON = Skeleton([
 ])
 SK = SKELETON
 
-BODY, HEAD, CAPE = "Priestess_Body", "Priestess_Head", "Priestess_Cape"
+BODY, LIMBS, HEAD, CAPE = "Priestess_Body", "Priestess_Limbs", "Priestess_Head", "Priestess_Cape"
 
 # torso rings: centre, (front-back half depth, half width)
-TORSO = [((0, .41, .004), (.034, .04)), ((0, .46, 0), (.062, .1)), ((0, .52, .0), (.052, .082)),
-         ((0, .585, .0), (.042, .06)), ((0, .645, .006), (.052, .076)), ((0, .7, .006), (.058, .088)),
-         ((0, .762, -.006), (.042, .1)), ((0, .835, -.004), (.024, .027))]
+TORSO = [((0, .41, .004), (.034, .04)), ((0, .455, 0), (.062, .1)), ((0, .5, .0), (.058, .092)),
+         ((0, .548, .0), (.047, .072)), ((0, .595, .0), (.043, .062)), ((0, .632, .004), (.047, .07)),
+         ((0, .672, .008), (.054, .082)), ((0, .712, .006), (.056, .088)), ((0, .762, -.006), (.042, .1)),
+         ((0, .8, -.006), (.026, .03)), ((0, .845, -.004), (.024, .027))]
 TORSO_BONES = ["root", "spine", "chest", "neck"]
-TORSO_BUST = {4: 1.55, 5: 1.45}        # chest rings pushed forward at the front corners
+TORSO_BUST = {6: 1.5, 7: 1.32}         # chest rings pushed forward at the front corners
 
 
 def build_torso(parts):
@@ -52,31 +53,31 @@ def build_torso(parts):
         c = np.cos(th)
         if i in TORSO_BUST and abs(np.sin(th)) > .5 and c > .5:
             return (TORSO_BUST[i], 1.0)
-        if i == 6:                                   # shoulders: square across, thin front to back
+        if i == 8:                                   # shoulders: square across, thin front to back
             return (0.9, 1.0) if abs(np.sin(th)) > 0.7 else (1.0, 1.0)
         return (1.0, 1.0) if c > -0.2 else (0.92, 1.0)
 
-    loft(p, "torso", path, radii, 8, (0, 0, 1.0), lambda i, q: SK.auto(q, TORSO_BONES), shape=shape,
-         u_offset=np.pi / 8,
+    loft(p, "torso", path, radii, 10, (0, 0, 1.0), lambda i, q: SK.auto(q, TORSO_BONES), shape=shape,
+         u_offset=np.pi / 10,
          start_point=np.array([0, .392, .0]))
     # (the bust is shaped into the chest rings: TORSO_BUST)
     parts.append(p)
     return p
 
 
-ARM_PATH = [(.098, .768, -.008), (.128, .605, -.02), (.148, .47, .0)]
-ARM_RADII = [(.034, .034), (.026, .025), (.021, .019)]
-LEG_PATH = [(.056, .46, .002), (.064, .245, .014), (.068, .055, -.008)]
-LEG_RADII = [(.064, .058), (.038, .035), (.028, .025)]   # thick thigh boots, as in her sprites
+ARM_PATH = [(.098, .768, -.008), (.114, .69, -.016), (.128, .605, -.02), (.139, .535, -.01), (.148, .47, .0)]
+ARM_RADII = [(.034, .034), (.03, .029), (.025, .023), (.024, .022), (.018, .017)]
+LEG_PATH = [(.056, .46, .002), (.06, .36, .008), (.064, .245, .016), (.066, .16, .0), (.068, .055, -.008)]
+LEG_RADII = [(.064, .058), (.05, .046), (.038, .035), (.04, .034), (.026, .024)]   # thick thigh boots
 
 
 def build_limbs(parts):
-    p = Part("limbs", BODY, SK)
+    p = Part("limbs", LIMBS, SK)
     for s in (1, -1):
         m = np.array([s, 1, 1.0])
         nm = (lambda b: b) if s > 0 else (lambda b: b[:-1] + "R")
         arm = [nm(b) for b in ("armL", "forearmL", "handL")]
-        loft(p, "arm", np.array(ARM_PATH) * m, ARM_RADII, 6, (0, 0, 1.0),
+        loft(p, "arm", np.array(ARM_PATH) * m, ARM_RADII, 7, (0, 0, 1.0),
              lambda i, q, arm=arm: {arm[0]: 1.0} if i == 0 else SK.auto(q, arm))
         # the hand: a flat mitten, then the thumb
         w = np.array(ARM_PATH[-1]) * m
@@ -85,7 +86,7 @@ def build_limbs(parts):
              lambda i, q, a=arm: {a[2]: 1.0}, end_point=w + (.006 * s, -.078, .012))
         cone(p, "hand", w + (-.008 * s, -.025, .014), w + (-.012 * s, -.05, .03), .007, (0, 0, 1), arm[2])
         leg = [nm(b) for b in ("thighL", "shinL", "footL")]
-        loft(p, "leg", np.array(LEG_PATH) * m, LEG_RADII, 6, (0, 0, 1.0),
+        loft(p, "leg", np.array(LEG_PATH) * m, LEG_RADII, 8, (0, 0, 1.0),
              lambda i, q, leg=leg: {leg[0]: 1.0} if i == 0 else SK.auto(q, leg))
         # the boot's foot: ankle -> ball -> a pointed toe, with a small heel
         a = np.array(LEG_PATH[-1]) * m
@@ -100,7 +101,10 @@ def build_limbs(parts):
 # head: sections (height in head units, half width, front, back), the face a front projection
 HC = np.array([0, .9, .006])
 HRX, HRY, HRZ = .044, .066, .054
-HEAD_SECTIONS = [(.7, .85, .72, -.85), (.05, 1.0, .97, -1.0), (-.6, .72, .92, -.6), (-1.0, .25, .78, -.25)]
+HEAD_SECTIONS = [(.75, .8, .7, -.85), (.35, .97, .92, -1.0), (-.05, 1.0, .98, -1.0), (-.45, .88, .96, -.8),
+                 (-.75, .64, .88, -.5), (-1.0, .28, .78, -.25)]
+HEAD_RING = [(0, 1), (.55, .9), (.9, .55), (1, 0), (.7, -.65), (-.7, -.65), (-1, 0), (-.9, .55), (-.55, .9)]
+HEAD_BACK = (3, 4, 5, 6)
 
 
 def face_uv(p):
@@ -111,20 +115,20 @@ def build_head(parts):
     """The face is projected from the front; the back of the head (under her hair) has its own small
     island, so it never paints over the face."""
     p = Part("head", HEAD, SK)
-    BACK = (2, 3, 4, 5)                      # ring corners that also get a scalp copy
+    BACK = HEAD_BACK                          # ring corners that also get a scalp copy
     face, scalp = [], []
     for j, (h, w, f, b) in enumerate(HEAD_SECTIONS):
-        pts = [(0, f), (.75 * w, .8 * f), (w, .05), (.7 * w, .6 * b), (-.7 * w, .6 * b), (-w, .05),
-               (-.75 * w, .8 * f)]
+        pts = [(x * w, z * (f if z > 0 else -b)) for x, z in HEAD_RING]
         fr, sr = [], {}
         for k, (x, z) in enumerate(pts):
             q = HC + np.array([x * HRX, h * HRY, z * HRZ])
             fr.append(p.add(q, face_uv(q), "head", "face"))
             if k in BACK:
-                sr[k] = p.add(q, ((k - 2) / 3, j / (len(HEAD_SECTIONS) - 1)), "head", "scalp")
+                sr[k] = p.add(q, ((k - BACK[0]) / 3, j / (len(HEAD_SECTIONS) - 1)), "head", "scalp")
         face.append(fr)
         scalp.append(sr)
-    n = 7
+    n = len(HEAD_RING)
+    BACKQ = BACK[:-1]
 
     def vid(j, k, back):
         return scalp[j][k] if back else face[j][k]
@@ -133,7 +137,7 @@ def build_head(parts):
         mid = HC + (0, (HEAD_SECTIONS[i][0] + HEAD_SECTIONS[i + 1][0]) / 2 * HRY, 0)
         for k in range(n):
             k2 = (k + 1) % n
-            back = k in (2, 3, 4)
+            back = k in BACKQ
             a, b = vid(i, k, back), vid(i, k2, back)
             c, d = vid(i + 1, k, back), vid(i + 1, k2, back)
             p.tri(a, b, c, inside=mid)
@@ -142,14 +146,14 @@ def build_head(parts):
     tf = p.add(top, face_uv(top), "head", "face")
     ts = p.add(top, (.5, 0), "head", "scalp")
     for k in range(n):
-        back = k in (2, 3, 4)
+        back = k in BACKQ
         p.tri(vid(0, k, back), vid(0, (k + 1) % n, back), ts if back else tf, inside=HC)
     chin = HC + (0, -HRY * 1.02, .03)
     cf = p.add(chin, face_uv(chin), "head", "face")
     cs = p.add(chin, (.5, 1), "head", "scalp")
     last = len(face) - 1
     for k in range(n):
-        back = k in (2, 3, 4)
+        back = k in BACKQ
         p.tri(vid(last, (k + 1) % n, back), vid(last, k, back), cs if back else cf, inside=HC - (0, HRY * .7, 0))
     # the nose
     tip = HC + (0, -.012, HRZ * .98 + .012)
@@ -168,7 +172,7 @@ def build_head(parts):
 HAIR = [  # height, front radius, side radius, back radius, open (a full bob, as in her sprites)
     (.988, .024, .03, .03, 0), (.964, .06, .066, .07, 0), (.925, .062, .072, .076, 42),
     (.865, .06, .078, .082, 52), (.795, .064, .088, .086, 58)]
-HAIR_COLS = 6
+HAIR_COLS = 8
 
 
 def build_hair(parts):
@@ -238,8 +242,10 @@ def build_pauldrons(parts):
 
 
 # the cape: rows from the shoulders down to the calves, columns across the back, flaring out
-CAPE_ROWS = [(.772, .1, -.048), (.6, .14, -.09), (.4, .18, -.115), (.2, .2, -.13)]   # y, half width, z
-CAPE_COLS = 4
+CAPE_ROWS = [(.772, .1, -.048), (.66, .125, -.075), (.52, .15, -.098), (.36, .175, -.115),
+             (.2, .2, -.13)]   # y, half width, z
+CAPE_COLS = 6
+CAPE_PLEAT = .014      # depth of the folds, growing toward the hem
 
 
 def build_cape(parts):
@@ -250,7 +256,8 @@ def build_cape(parts):
             s = k / CAPE_COLS
             x = (s - .5) * 2 * hw
             bulge = .035 * (1 - (2 * s - 1) ** 2) * (j > 0)          # round over her back
-            q = np.array([x, y, z - bulge + .03 * (2 * s - 1) ** 2 * (j > 0)])
+            pleat = CAPE_PLEAT * (j / (len(CAPE_ROWS) - 1)) * (1 if k % 2 else -1) * (0 < k < CAPE_COLS)
+            q = np.array([x, y, z - bulge + .03 * (2 * s - 1) ** 2 * (j > 0) - pleat])
             pts.append(q)
             uvs.append((s, j / (len(CAPE_ROWS) - 1)))
             if j == 0:
@@ -258,7 +265,9 @@ def build_cape(parts):
             elif j == 1:
                 ws.append({"capeA": .7, "chest": .3})
             elif j == 2:
-                ws.append({"capeA": .5, "capeB": .5})
+                ws.append({"capeA": .8, "capeB": .2})
+            elif j == 3:
+                ws.append({"capeA": .35, "capeB": .65})
             else:
                 ws.append({"capeB": 1.0})
     tris = []
@@ -283,7 +292,7 @@ def build_sceptre(parts):
     r = .037
     # a faceted ball: the poles and two rings of 8 (rotated half a step)
     rings = []
-    for j, (lat, off) in enumerate(((np.radians(35), 0), (np.radians(-35), np.pi / 8))):
+    for j, (lat, off) in enumerate(((np.radians(40), 0), (np.radians(-40), np.pi / 8))):
         ring = []
         for k in range(8):
             a = 2 * np.pi * k / 8 + off
