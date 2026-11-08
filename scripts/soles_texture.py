@@ -66,26 +66,25 @@ def project_uvs(parts):
 # ------------------------------------------------------------------------------------------- head
 
 def hair_col(pos):
-    """Long layered hair: locks running down from the crown, strands within them, a sheen band, dark
-    under the layers."""
+    """Hair painted the DK2 way: a few soft locks with a smooth highlight on each, deep shadow between
+    them and under the layers, fine strands only as a faint grain."""
     x, y, z = pos[:, 0] - HC[0], pos[:, 1], pos[:, 2] - HC[2]
     ang = np.arctan2(x, -z)
-    bend = .6 * np.sin(y * 40 + ang * 2)                       # the locks curve as they fall
-    locks = .5 + .5 * np.sin(ang * 13 + bend + fbm(ang * 3, y * 4, 5) * 3)
-    strands = .5 + .5 * np.sin(ang * 75 + bend * 3 + fbm(ang * 9, y * 20, 6) * 5)
-    layers = .5 + .5 * np.sin(y * 150 + ang * 1.5)             # the shag's layers
-    sheen = gauss(y - (.97 - .02 * np.abs(np.sin(ang))), .014)
-    col = mix(HAIR * .32, HAIR * 1.1, .25 + .4 * locks + .2 * strands)
-    col = mix(col, HAIR * .28, .45 * smooth(.35, .0, locks))
-    col = mix(col, HAIR * .45, .15 * smooth(.25, .0, layers))
-    col = mix(col, HAIR * 1.55, .35 * sheen * strands)
-    h = .003 * locks + .0006 * strands + .0015 * layers
+    bend = .5 * np.sin(y * 35 + ang * 2)
+    lock = .5 + .5 * np.sin(ang * 7 + bend + fbm(ang * 2, y * 3, 5) * 2)          # ~7 big locks round the head
+    hl = smooth(.55, .95, lock) * gauss(y - (.965 - .03 * (1 - np.cos(ang)) / 2), .03)
+    grain = fbm(ang * 40, y * 30, 6)
+    col = mix(HAIR * .55, HAIR * 1.0, smooth(.05, .8, lock))
+    col = mix(col, HAIR * 1.55, .45 * hl)
+    col = mix(col, HAIR * .3, .35 * smooth(.9, .82, y) * smooth(.3, .0, lock))     # dark ends
+    col = col * (.92 + .12 * grain)[:, None]
+    h = .004 * smooth(.0, 1.0, lock) + .0003 * grain
     return col, h
 
 
 def hair_field(pos, t):
     col, h = hair_col(pos)
-    return ret(col, h, spec=.3, gloss=12, soft=.4)
+    return ret(col, h, spec=.35, gloss=14, soft=.5)
 
 
 def hair_in_field(pos, t):

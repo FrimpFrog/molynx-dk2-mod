@@ -266,9 +266,9 @@ def build_armour(parts):
 
 # a long, layered shag: volume at the crown, over the ears, to the jaw and the nape, the ends flicking out
 # rows: y, side radius, front radius, back radius, half-angle of the opening at the face (deg)
-HAIR_ROWS = [(1.002, .03, .03, .034, 0), (.988, .058, .056, .072, 0), (.97, .074, .07, .09, 0),
-             (.95, .08, .076, .098, 30), (.925, .084, .074, .101, 52), (.895, .085, .07, .101, 60),
-             (.865, .083, .066, .098, 64), (.838, .081, .062, .094, 68), (.815, .085, .06, .092, 72)]
+HAIR_ROWS = [(1.0, .026, .026, .03, 0), (.986, .052, .05, .064, 0), (.967, .065, .062, .081, 0),
+             (.947, .068, .067, .086, 30), (.922, .07, .066, .087, 52), (.895, .068, .06, .085, 60),
+             (.867, .066, .055, .081, 64), (.842, .064, .05, .076, 68), (.82, .066, .047, .072, 72)]
 HAIR_COLS = 16
 
 
@@ -288,9 +288,9 @@ def build_hair(parts):
             out = 1.0
             if j >= last - 1:                         # ragged, flicked-out ends: alternate locks longer
                 yy -= (.014 if k % 2 else 0.0) * (1 if j == last else .4)
-                out += (.1 if k % 2 else .03) * (1 if j == last else .4)
+                out += (.05 if k % 2 else .015) * (1 if j == last else .4)
             if j > 0:
-                out += .03 * rng.standard_normal()
+                out += .012 * rng.standard_normal()
             q = np.array([HC[0] + rs * sa * out, yy, HC[2] - .006 + r * ca * out])
             row.append(p.add(q, (s_, j / last), "head", "hair"))
         grid.append(row)
@@ -302,7 +302,7 @@ def build_hair(parts):
             c, d = grid[j + 1][k], grid[j + 1][k + 1]
             p.tri(a, b, c, inside=mid)
             p.tri(b, d, c, inside=mid)
-    top = p.add(np.array([HC[0], 1.014, HC[2] - .006]), (1, 0), "head", "hair")
+    top = p.add(np.array([HC[0], 1.004, HC[2] - .006]), (.5, 0), "head", "hair")
     for k in range(HAIR_COLS - 1):
         p.tri(grid[0][k], grid[0][k + 1], top, inside=HC)
     # the inside of the curtain round the face (seen past his cheeks): the lower rows again, facing in
@@ -319,15 +319,15 @@ def build_hair(parts):
                 p.tris += [(a, c, b), (b, c, d)]
     # the fringe: a heavy sheet swept from the parting on his left across his forehead to his right,
     # covering the top of his right brow
-    rows = [(.968, (.03, -.05), .072), (.948, (.042, -.06), .07), (.932, (.05, -.066), .064)]
+    rows = [(.972, (.03, -.05), .072), (.955, (.042, -.058), .07), (.94, (.05, -.064), .066)]
     pts, uvs = [], []
     for j, (y, (x0, x1), zf) in enumerate(rows):
         for i, u in enumerate(np.linspace(0, 1, 5)):
             x = x0 + (x1 - x0) * u
-            drop = .022 * u ** 1.5 * (j / 2)              # the swept side hangs lower
+            drop = .014 * u ** 1.5 * (j / 2)              # the swept side hangs lower
             if j == 2:                                    # a ragged edge: locks of different lengths
                 drop += (.008, -.004, .01, -.002, .012)[i] - .008 * (u < .2)
-            z = HC[2] + zf * np.sqrt(max(1 - (x / .085) ** 2, .05)) + .004
+            z = HC[2] + zf * np.sqrt(max(1 - (x / .075) ** 2, .05)) - .002
             pts.append(np.array([x, y - drop, z]))
             uvs.append((u, j / 2))
     tris = []
