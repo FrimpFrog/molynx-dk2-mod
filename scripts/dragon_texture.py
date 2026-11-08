@@ -138,7 +138,7 @@ C = {k: np.array(v, float) for k, v in {
     "belly_hi": (222, 170, 102), "belly": (182, 122, 64), "belly_groove": (86, 48, 20),
     "claw": (226, 212, 168), "claw_tip": (250, 244, 220), "claw_base": (120, 104, 60),
     "mouth": (128, 24, 18), "mouth_hi": (186, 62, 44), "tooth": (244, 236, 204),
-    "eye": (255, 168, 40), "eye_rim": (40, 26, 6), "pupil": (20, 10, 0),
+    "eye": (230, 60, 10), "eye_core": (255, 214, 70), "eye_rim": (40, 26, 6), "pupil": (20, 10, 0),
     "membrane": (108, 92, 44), "membrane_hi": (146, 126, 62), "vein": (56, 44, 18),
     "horn": (214, 196, 144), "horn_base": (96, 84, 40),
     "spike": (110, 98, 40), "spike_tip": (226, 204, 150),
@@ -224,7 +224,7 @@ def paint_claw(t):
     return col * _light(t["nrm"])[..., None]
 
 
-EYE_V = 0.33        # the eyes: on the brow ring (ring 1), on the upper side of the head
+EYE_V = 0.36        # the eyes: on the brow ring (ring 1), on the upper side of the head
 NOSTRIL_V = 0.93
 
 
@@ -240,29 +240,38 @@ def paint_skull(t):
     # lighter, yellower cheeks and lips
     col = mix(col, C["belly_hi"] * 0.85, 0.35 * smooth(0.4, 0.62, u) * smooth(0.0, 0.2, v))
     col *= (0.9 + 0.18 * fbm(u * 12, v * 30, 13))[..., None]
-    # mouth: the palate (u > 2/3) is red, with a row of teeth along the lip line
+    # wrinkles across the snout, deepening toward the nose
+    k = s / 0.026
+    f = k - np.floor(k)
+    wr = smooth(0.5, 0.75, v) * smooth(0.62, 0.3, u) * np.exp(-((f - 0.5) / 0.14) ** 2)
+    col = mix(col, C["scale_dark"] * 0.7, 0.55 * wr)
+    # mouth: the palate (u > 2/3) is dark red, with a row of big jagged teeth along the lip line
     mouth = smooth(0.66, 0.70, u)
-    col = mix(col, mix(C["mouth"], C["mouth_hi"], smooth(1.0, 0.75, u)), mouth)
-    k = (s / 0.02)
+    col = mix(col, mix(C["mouth"] * 0.8, C["mouth_hi"], smooth(1.0, 0.75, u)), mouth)
+    k = (s / 0.024)
     tooth_w = np.abs((k - np.floor(k)) - 0.5) * 2               # 0 at a tooth's centre
-    tooth = (u > 0.6) & (u < 0.69) & ((0.69 - u) / 0.09 > tooth_w * 0.9) & (v > 0.25) & (v < 0.97)
-    col = np.where(tooth[..., None], C["tooth"] * (0.85 + 0.15 * (1 - tooth_w))[..., None], col)
-    col = mix(col, C["scale_dark"] * 0.6, 0.6 * np.exp(-((u - 0.6) / 0.012) ** 2) * (v > 0.2))   # lip line
-    # eyes: an almond with a slit pupil, under the brow
-    # a heavy brow over the eye
-    brow = np.exp(-(((u - 0.24) / 0.05) ** 2) - (((v - EYE_V) / 0.09) ** 2))
-    col = mix(col, C["scale_dark"] * 0.8, 0.75 * brow)
-    du, dv = (u - 0.31) / 0.05, (v - EYE_V) / 0.055
-    e = du ** 2 + (dv * 1.0) ** 2
+    tl = 0.12 * (0.75 + 0.25 * _hash2(np.floor(k).astype(np.int64), np.zeros_like(k, np.int64), 31))
+    tooth = (u > 0.69 - tl) & (u < 0.70) & ((0.70 - u) / tl > tooth_w * 0.95) & (v > 0.22) & (v < 0.95)
+    col = np.where(tooth[..., None], C["tooth"] * (0.8 + 0.2 * (1 - tooth_w))[..., None], col)
+    col = mix(col, C["mouth"] * 0.45, 0.7 * np.exp(-((u - 0.575) / 0.012) ** 2) * (v > 0.2))   # gum line
+    # a heavy dark brow, low over the front of the eye
+    v_eye = (v - EYE_V)
+    brow = np.exp(-(((u - (0.225 + 0.35 * v_eye)) / 0.045) ** 2) - ((v_eye / 0.12) ** 2))
+    col = mix(col, C["scale_dark"] * 0.55, 0.85 * brow)
+    # the eye: a slanted slit of red-orange glow, its front corner lower, in a dark socket
+    du = (u - 0.305 - 0.4 * v_eye) / 0.042
+    dv = v_eye / 0.085
+    e = du ** 2 + dv ** 2
     eye = e < 1
-    ring = (e >= 1) & (e < 1.7)
-    glow = mix(C["eye"], C["eye"] * 0.7, np.clip(e, 0, 1))
-    glow = np.where((np.abs(dv) < 0.22)[..., None] & eye[..., None], C["pupil"], glow)
-    col = np.where(ring[..., None], C["eye_rim"], col)
+    socket = (e >= 1) & (e < 2.4)
+    col = mix(col, C["eye_rim"], np.where(socket, 0.85 * smooth(2.4, 1.0, e), 0.0))
+    glow = mix(C["eye_core"], C["eye"], smooth(0.05, 0.9, e))
+    glow = np.where((np.abs(dv) < 0.13)[..., None] & eye[..., None] & (np.abs(du) < 0.75)[..., None],
+                    C["pupil"], glow)
     col = np.where(eye[..., None], glow / np.maximum(_light(nrm), 0.5)[..., None], col)   # eyes don't shade
-    # nostrils near the snout tip
-    n = ((u - 0.2) / 0.04) ** 2 + ((v - NOSTRIL_V) / 0.02) ** 2 < 1
-    col = np.where(n[..., None], C["scale_dark"] * 0.4, col)
+    # nostrils: flared, near the snout tip
+    n = ((u - 0.2) / 0.05) ** 2 + ((v - NOSTRIL_V) / 0.025) ** 2
+    col = mix(col, C["scale_dark"] * 0.3, smooth(1.6, 0.8, n))
     return col * _light(nrm)[..., None]
 
 
@@ -279,8 +288,8 @@ def paint_jaw(t):
     side = mix(C["scale"], C["scale_hi"], 0.3 + 0.4 * rnd)
     side = mix(side, C["scale_dark"], 0.45 * rim)
     col = mix(side, throat, smooth(0.62, 0.78, u))
-    tw = np.abs((s / 0.02 - np.floor(s / 0.02)) - 0.5) * 2
-    tooth = (u > 0.40) & (u < 0.5) & ((u - 0.40) / 0.1 > tw * 0.9) & (v > 0.25) & (v < 0.95)
+    tw = np.abs((s / 0.024 - np.floor(s / 0.024)) - 0.5) * 2
+    tooth = (u > 0.36) & (u < 0.5) & ((u - 0.36) / 0.14 > tw * 0.95) & (v > 0.22) & (v < 0.95)
     col = np.where(tooth[..., None], C["tooth"], col)
     col = mix(col, mix(C["mouth"], C["mouth_hi"], smooth(0.0, 0.3, u)), inside)
     return col * _light(nrm)[..., None]

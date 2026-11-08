@@ -287,12 +287,12 @@ def build_trunk(parts):
 
 
 HEAD_RINGS = [  # centre, lateral, up, down (to the lip line)
-    ((0, .955, -.035), .056, .052, .044),
-    ((0, .955, .065), .074, .064, .052),
-    ((0, .917, .205), .056, .046, .036),
-    ((0, .876, .32), .036, .031, .026),
+    ((0, .952, -.035), .066, .056, .054),     # broad jaw muscles behind the eyes
+    ((0, .958, .055), .078, .072, .056),      # the brow: the deepest part of the head
+    ((0, .926, .165), .058, .054, .044),
+    ((0, .896, .255), .044, .044, .036),      # a deep, blunt snout
 ]
-SNOUT_TIP = np.array([0, .86, .38])
+SNOUT_TIP = np.array([0, .884, .302])
 SKULL_BACK = np.array([0, .965, -.085])
 HEAD_AXIS_HINT = (0, 1, 0)
 
@@ -342,15 +342,23 @@ def build_head(parts):
         part.tri(rings[0][(k + 1) % 6], rings[0][k], back, inside=inner[0] + (inner[0] - SKULL_BACK))
     # horns: from the back of the skull, swept back, out and a little up
     for s in (1, -1):
-        base = np.array([.038 * s, .985, -.02])
-        tip_ = base + np.array([.075 * s, .03, -.07])
-        cone(part, "horn", base, tip_, .017, (0, 1, 0.3), "head", sides=3)
-    # brow ridges over the eyes (small fins) give the DK1 dragon's frown
+        base = np.array([.04 * s, .99, -.02])
+        tip_ = base + np.array([.085 * s, .05, -.095])
+        cone(part, "horn", base, tip_, .02, (0, 1, 0.3), "head", sides=3)
+    # heavy brow ridges overhanging the eyes, low at the front: the DK1 dragon's scowl (its portrait)
     for s in (1, -1):
-        a = np.array([.056 * s, .995, .03])
-        b = np.array([.046 * s, .99, .11])
-        t = np.array([.07 * s, 1.015, .0])
+        a = np.array([.06 * s, 1.012, .0])
+        b = np.array([.052 * s, .99, .115])
+        t = np.array([.092 * s, 1.035, -.03])
         fin(part, "brow", a, b, t, (s, 0.6, 0), "head", "head")
+    # cheek frills: two spikes on each side fanning back from behind the jaw (the portrait's ear fins)
+    for s in (1, -1):
+        for base, d in (((.062 * s, .935, -.035), (.075 * s, -.012, -.085)),
+                        ((.06 * s, .965, -.06), (.085 * s, .03, -.075))):
+            base = np.array(base)
+            d = np.array(d)
+            fin(part, "spike", base + (0, -.012, .012), base + (0, .012, -.012), base + d, (s, .2, 0),
+                "head", "head")
     # the crown: three spikes fanning back from the back of the skull (DK1 sprite 6802)
     for base, d in (((0, .99, -.055), (0, .045, -.085)), ((.032, .985, -.04), (.05, .04, -.07)),
                     ((-.032, .985, -.04), (-.05, .04, -.07))):
@@ -364,10 +372,11 @@ def build_head(parts):
             "head", "head")
     # upper fangs (double-sided)
     for s in (1, -1):
-        for z, l in ((.25, .032), (.13, .022)):
-            c = np.array([.042 * s if z < .2 else .052 * s, .0, z])
-            c[1] = np.interp(z, [.06, .20, .315], [lips[1][0][1], lips[2][0][1], lips[3][0][1]]) - .002
-            c[0] = s * np.interp(z, [.06, .20, .315], [abs(lips[1][0][0]), abs(lips[2][0][0]), abs(lips[3][0][0])]) * .93
+        zs = [HEAD_RINGS[i][0][2] for i in (1, 2, 3)]
+        for z, l in ((.225, .05), (.16, .036), (.095, .03)):
+            c = np.array([0, .0, z])
+            c[1] = np.interp(z, zs, [lips[1][0][1], lips[2][0][1], lips[3][0][1]]) - .002
+            c[0] = s * np.interp(z, zs, [abs(lips[1][0][0]), abs(lips[2][0][0]), abs(lips[3][0][0])]) * .93
             fin(part, "fang", c + (0, 0, -.009), c + (0, 0, .009), c + (0, -l, .004), (s, 0, 0), "head", "head")
     parts.append(part)
     return part, rings
@@ -377,7 +386,7 @@ def build_jaw(parts, head_rings):
     part = Part("jaw", "Dragon_Head")
     hp = None
     rings = []
-    depths = [.026, .04, .03, .02]
+    depths = [.034, .048, .04, .03]
     for i in range(4):
         # the lips of the upper ring (closed mouth: they meet), the tongue groove, the keel
         ring_ids = head_rings[i]
@@ -405,7 +414,7 @@ def build_jaw(parts, head_rings):
             c_, d_ = rings[i + 1][k], rings[i + 1][(k + 1) % 4]
             part.tri(a, b, c_, inside=mid)
             part.tri(b, d_, c_, inside=mid)
-    chin_p = np.array([0, .85, .35])
+    chin_p = np.array([0, .862, .285])
     chin = part.add(chin_p, (.5, 1.0), "jaw", "jaw", ring=4, k=-1)
     for k in range(4):
         part.tri(rings[3][k], rings[3][(k + 1) % 4], chin, inside=inner[3] - (chin_p - inner[3]))
@@ -415,9 +424,10 @@ def build_jaw(parts, head_rings):
         part.tri(rings[0][(k + 1) % 4], rings[0][k], back, inside=inner[0] + (inner[0] - back_p))
     # lower fangs
     for s in (1, -1):
-        p = _ring_point(part, None, rings[2][1 if s > 0 else 3])
-        c = np.asarray(p) + (-.004 * s, 0, .01)
-        fin(part, "fang", c + (0, 0, -.007), c + (0, 0, .007), c + (0, .022, .0), (s, 0, 0), "jaw", "jaw")
+        for r, dz, l in ((2, .01, .036), (1, .03, .026)):
+            p = _ring_point(part, None, rings[r][1 if s > 0 else 3])
+            c = np.asarray(p) + (-.004 * s, 0, dz)
+            fin(part, "fang", c + (0, 0, -.008), c + (0, 0, .008), c + (0, l, .0), (s, 0, 0), "jaw", "jaw")
     parts.append(part)
     return part
 
