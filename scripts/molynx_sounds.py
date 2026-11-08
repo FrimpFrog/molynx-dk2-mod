@@ -492,6 +492,224 @@ def recipes(s: Sources) -> dict[str, np.ndarray]:
     return out
 
 
+# ---------------------------------------------------------------- third version (2026-11-08)
+# The user's review of the second version: hello, sulk, pray_1/2, sleep, charge, the melee and hit
+# grunts and the drags are good; the rest sounded "8-bit". What the good ones share: the made voice
+# stays low (under about 80 Hz) with a closed or dark mouth, or a real recording carries the sound
+# and the made voice only sits under it. What the bad ones had: the made voice exposed and high
+# (90-130 Hz, open "a"), and pure tones (sine thuds, gulps and bar clanks). So the rest are remade
+# with real non-verbal recordings carrying them, the made voice only low and dark underneath, and
+# every made impact or liquid built from shaped noise instead of tones. The good ones are untouched.
+
+def crunch_dark(dur, bites, seed=0):
+    """Teeth on rock: bunches of mid-range cracks, softer and darker than `crunch`."""
+    rng = np.random.default_rng(RNG_SEED + 1200 + seed)
+    n = int(dur * RATE)
+    out = np.zeros(n)
+    for k in range(bites):
+        at = int((k + 0.15 + 0.5 * rng.random()) / bites * n * 0.9)
+        for _ in range(rng.integers(4, 8)):
+            g = int(rng.integers(300, 900))
+            pos = min(n - g, at + int(rng.integers(0, 1500)))
+            lo = rng.uniform(300, 800)
+            grain = filt(rng.standard_normal(g), "bandpass", (lo, lo * 4)) * np.exp(-np.arange(g) / (g / 4))
+            out[pos:pos + g] += grain * rng.uniform(0.3, 1)
+    return out
+
+
+def thump(dur=0.6, low=110, seed=0, crack=0.5):
+    """A heavy body on stone: a burst of low-passed noise (no tone) with a short bright crack."""
+    rng = np.random.default_rng(RNG_SEED + 700 + seed)
+    n = int(dur * RATE)
+    t = np.arange(n) / RATE
+    body = filt(rng.standard_normal(n), "lowpass", low, 4) * np.exp(-t * 9) * 3.0
+    mid = filt(rng.standard_normal(n), "bandpass", (150, 900)) * np.exp(-t * 22)
+    hi = filt(rng.standard_normal(n), "bandpass", (900, 4000)) * np.exp(-t * 60) * crack
+    return body + mid + hi
+
+
+def rubble(dur, density=40, decay=0.5, seed=0):
+    """Falling stones: soft-edged knocks of different sizes (longer, darker grains than gravel)."""
+    rng = np.random.default_rng(RNG_SEED + 800 + seed)
+    n = int(dur * RATE)
+    out = np.zeros(n)
+    t = 0.0
+    while True:
+        t += rng.exponential(1 / density)
+        if t >= dur:
+            break
+        g = int(rng.integers(300, 1600))
+        i = int(t * RATE)
+        if i + g >= n:
+            continue
+        lo = rng.uniform(150, 600)
+        grain = filt(rng.standard_normal(g), "bandpass", (lo, lo * 5)) * np.hanning(g) ** 0.5 * np.exp(-np.arange(g) / (g / 3))
+        out[i:i + g] += grain * rng.uniform(0.3, 1) * np.exp(-t / decay)
+    return out
+
+
+def bubbles(dur, rate=10, seed=0):
+    """Water churned by roaring: short dark noise blips with falling resonance (no tones)."""
+    rng = np.random.default_rng(RNG_SEED + 900 + seed)
+    n = int(dur * RATE)
+    out = np.zeros(n)
+    for _k in range(int(dur * rate)):
+        g = int(rng.integers(500, 1400))
+        i = int(rng.integers(0, max(1, n - g)))
+        f = rng.uniform(250, 700)
+        b, a = signal.iirpeak(f, 6, fs=RATE)
+        blip = signal.lfilter(b, a, rng.standard_normal(g) * np.exp(-np.arange(g) / (g / 5)))
+        out[i:i + g] += blip * rng.uniform(0.3, 1)
+    return out
+
+
+def swallow(seed=0):
+    """A gulp from a big throat: a dark noise thump that drops in pitch (a swept band, no tone)."""
+    rng = np.random.default_rng(RNG_SEED + 950 + seed)
+    n = int(0.3 * RATE)
+    t = np.arange(n) / RATE
+    x = rng.standard_normal(n) * np.exp(-t * 14)
+    out = np.zeros(n)
+    blk = 256
+    for i in range(0, n, blk):               # a resonance sweeping 380 -> 140 Hz
+        f = 140 + 240 * np.exp(-t[i] * 12)
+        b, a = signal.iirpeak(f, 5, fs=RATE)
+        out[i:i + blk] = signal.lfilter(b, a, x[max(0, i - 600):i + blk])[-len(x[i:i + blk]):]
+    return out
+
+
+def low_voice(dur, f0, vowels, amp, seed, rough=0.45, sub=0.6, breath=0.3):
+    """The made voice kept low and dark, to sit under a recording."""
+    return filt(voice(dur, f0, vowels, amp, rough=rough, sub=sub, breath=breath, seed=seed), "lowpass", 1100, 4)
+
+
+def wobble(x, rate=5.0, depth=0.012):
+    """A dazed pitch wobble, by reading the sound at a gently varying speed."""
+    n = len(x)
+    pos = np.cumsum(1 + depth * np.sin(2 * np.pi * rate * np.arange(n) / RATE))
+    pos = pos[pos < n - 1]
+    return np.interp(pos, np.arange(n), x)
+
+
+def remake(s: "Sources") -> dict[str, np.ndarray]:
+    S = lambda n, a=0.0, b=None, st=0: pitch(cut(s(n), a, b), st)
+    L = lambda n, a, b, st, hz=2200: filt(S(n, a, b, st), "lowpass", hz)
+    out = {}
+    # angry: a snort, then a short snarl carried by the Daemon's roar, his growl under it
+    out["angry"] = finish(mix(
+        (filt(S("bull_select1", 0.0, 0.3, -3), "bandpass", (150, 3000)), 0, -3),
+        (L("daemon_attack6", 0.0, 0.62, -6), 0.15, 0),
+        (low_voice(0.6, [(0, 62), (0.4, 72), (1, 58)], [(0, "o"), (1, "u")], [(0, 0), (0.15, 1), (1, 0)], 1001), 0.17, -5)), 0.14, 0.08)
+    # happy: a slow, rumbling chuckle "hm-hm-hm", made like hello (a low closed-mouth voice opening
+    # a little, f0 60-72 Hz, some breath), with the Pig two octaves down as texture underneath
+    chuck = lambda k, d=0.3: voice(d, [(0, 72 - 3 * k), (0.4, 76 - 3 * k), (1, 60 - 2 * k)], [(0, "m"), (0.4, "o"), (1, "m")],
+                                   [(0, 0), (0.12, 1), (0.6, 0.7), (1, 0)], rough=0.35, sub=0.5, breath=0.3, seed=1010 + k)
+    out["happy_1"] = finish(mix(*[(chuck(k), 0.05 + 0.36 * k, -1.5 * k) for k in range(4)],
+                                (L("pig_ack2", 0.0, 1.17, -12, 1200), 0.0, -12)), 0.11, 0.15)
+    out["happy_2"] = finish(mix(*[(chuck(k + 4), 0.05 + 0.33 * k, -2 * k) for k in range(2)],
+                                (L("pig_ack1", 0.0, 0.77, -12, 1200), 0.0, -12)), 0.11, 0.12)
+    # unhappy: a long groan made like sulk (low, breathy, sinking), the Bull an octave down beneath
+    out["unhappy_1"] = finish(mix(
+        (voice(1.15, [(0, 70), (0.3, 72), (1, 46)], [(0, "o"), (0.5, "u"), (1, "m")], [(0, 0), (0.15, 0.9), (0.7, 0.8), (1, 0)],
+               rough=0.3, sub=0.4, breath=0.5, seed=1020), 0, 0),
+        (L("bull_ack4", 0.0, 1.2, -12, 1000), 0.05, -12)), 0.08, 0.2)
+    out["unhappy_2"] = finish(mix(
+        (voice(0.75, [(0, 66), (1, 48)], [(0, "u"), (1, "m")], [(0, 0), (0.2, 0.9), (1, 0)],
+               rough=0.3, sub=0.4, breath=0.5, seed=1021), 0, 0),
+        (L("bull_ack2", 0.0, 0.8, -12, 1000), 0.0, -12)), 0.075, 0.15)
+    # casino: the chuckle and a stone fist on the table / a disgusted groan and a slam
+    out["gamble_win"] = finish(mix(*[(chuck(k + 6), 0.36 * k, -k) for k in range(2)], (thump(0.45, 120, 1), 0.66, -4)), 0.12, 0.1)
+    out["gamble_lose"] = finish(mix(
+        (low_voice(0.7, [(0, 70), (1, 50)], [(0, "o"), (1, "u")], [(0, 0), (0.1, 1), (1, 0)], 1022, rough=0.4, sub=0.5, breath=0.45), 0, 0),
+        (thump(0.6, 100, 2, 0.7), 0.5, -2), (rubble(0.5, 30, seed=2), 0.53, -10)), 0.12, 0.15)
+    # battle roars: like the charge (which works): the Bull's bellow leads, his voice under it
+    out["charge_roar_1"] = finish(mix((L("bull_attack1", 0.0, 1.6, -5, 2500), 0, 0),
+                                      (L("daemon_attack3", 0.0, 0.98, -7), 0.15, -6),
+                                      (low_voice(1.3, [(0, 60), (0.4, 78), (1, 62)], [(0, "o"), (1, "o")], [(0, 0), (0.15, 1), (1, 0)], 1030), 0.05, -5)), 0.11, 0.2)
+    out["charge_roar_2"] = finish(mix((L("bull_attack3", 0.0, 1.3, -5, 2500), 0, 0),
+                                      (L("daemon_attack7", 0.0, 0.85, -6), 0.1, -7),
+                                      (low_voice(1.1, [(0, 58), (0.5, 74), (1, 60)], [(0, "u"), (1, "o")], [(0, 0), (0.2, 1), (1, 0)], 1031), 0.05, -5)), 0.11, 0.2)
+    # ground slam: the roar builds (Bull and Daemon), the mace lands at 1.13 s, the floor booms
+    roar = mix((L("bull_attack1", 0.0, 1.2, -5, 2500), 0, 0), (L("daemon_attack13", 0.0, 0.78, -6), 0.45, -4),
+               (low_voice(SLAM_IMPACT, [(0, 56), (0.8, 80), (1, 84)], [(0, "o"), (1, "o")], [(0, 0), (0.3, 0.8), (1, 1)], 1040), 0, -5))
+    roar = roar[:int((SLAM_IMPACT + 0.06) * RATE)]
+    roar = fade(roar, 0.01, 0.06)
+    out["ground_slam_roar"] = finish(mix((roar, 0, 0), (thump(1.1, 90, 3, 0.8), SLAM_IMPACT, 4),
+                                         (L("ground_attack1", 0.0, 1.0, -4, 3500), SLAM_IMPACT, -3),
+                                         (L("catapult_die1", 0.0, 1.2, -4, 4000), SLAM_IMPACT, -6),
+                                         (rubble(0.9, 50, 0.5, 3), SLAM_IMPACT + 0.05, -6)), 0.12, 0.25)
+    # training: a swing grunt (the melee that works) and a dull knock on the dummy
+    out["train"] = finish(mix((L("behemoth_attack1b", 0.14, 0.64, -6, 1800), 0, 0),
+                              (low_voice(0.35, [(0, 70), (1, 58)], [(0, "u"), (1, "u")], [(0, 0), (0.1, 1), (1, 0)], 1050), 0.0, -4),
+                              (thump(0.3, 160, 4, 0.3), 0.18, -6)), 0.15, 0.06)
+    # stunned: a dazed moan, wobbling
+    out["stunned"] = finish(wobble(mix((low_voice(0.95, [(0, 60), (0.5, 64), (1, 50)], [(0, "o"), (0.5, "u"), (1, "o")],
+                                                  [(0, 0), (0.15, 1), (1, 0)], 1060, rough=0.3, breath=0.35), 0, 0),
+                                       (L("behemoth_die4", 0.5, 0.86, -9, 1200), 0.1, -8)), 4.0, 0.025), 0.08, 0.2)
+    # fleeing: heavy alarmed huffs as he lumbers off (the Behemoth's attack breaths)
+    out["fleeing_1"] = finish(mix(*[(L("behemoth_attack1" + c, a, a + 0.3, -3, 2000), 0.25 * k, -k)
+                                    for k, (c, a) in enumerate((("e", 0.26), ("g", 0.2), ("f", 0.2)))]), 0.12, 0.08)
+    out["fleeing_2"] = finish(mix(*[(L("behemoth_attack1" + c, a, a + 0.28, -3, 2000), 0.22 * k, -k)
+                                    for k, (c, a) in enumerate((("h", 0.24), ("c", 0.26)))]), 0.12, 0.06)
+    # picked up / held: annoyed grumbles in the style of hello (which works)
+    grum = lambda d, k: low_voice(d, [(0, 64 + 2 * k), (0.5, 74), (1, 62)], [(0, "m"), (0.5, "o"), (1, "m")],
+                                  [(0, 0), (0.15, 1), (1, 0)], 1070 + k, rough=0.35, sub=0.5, breath=0.2)
+    out["picked_up_1"] = finish(mix((grum(0.5, 0), 0, 0), (L("bull_select2", 0.0, 0.5, -7, 1200), 0.02, -10)), 0.12)
+    out["picked_up_2"] = finish(mix((grum(0.75, 1), 0, 0), (L("bull_ack1", 0.0, 0.7, -7, 1200), 0.02, -9)), 0.12)
+    out["picked_up_3"] = finish(grum(0.4, 2), 0.11)
+    out["in_hand"] = finish(mix(*[(grum(0.45, 3 + k), 0.36 * k, -k) for k in range(3)],
+                                (L("bull_ack4", 0.0, 1.4, -8, 1200), 0.0, -9)), 0.12, 0.15)
+    # slapped: stone cracks, a sharp angry bark (the Daemon), his growl under it
+    out["slapped"] = finish(mix((filt(S("catapult_hit1", 0.0, 0.18, 0), "highpass", 300), 0, -3),
+                                (L("daemon_attack2", 0.0, 0.62, -5), 0.04, 0),
+                                (low_voice(0.45, [(0, 70), (1, 58)], [(0, "o"), (1, "u")], [(0, 0), (0.1, 1), (1, 0)], 1080), 0.04, -6)), 0.14, 0.08)
+    # dropped / landing: his weight on the floor (noise thumps, real stone impacts), an "oof"
+    drops = [("golem_die1", 0.78, 1.10), ("golem_die3", 0.78, 1.0), ("machine_die1", 0.0, 0.5), ("golem_die2", 0.4, 0.62)]
+    for k, (src, a, b) in enumerate(drops, 1):
+        out[f"dropped_{k}"] = finish(mix((thump(0.75, 100 + 10 * k, 10 + k), 0, 0),
+                                         (L(src, a, b, -3, 3500), 0.0, -4), (rubble(0.6, 30, 0.35, 10 + k), 0.03, -10),
+                                         (low_voice(0.3, [(0, 66), (1, 54)], [(0, "u"), (1, "u")], [(0, 0), (0.1, 1), (1, 0)], 1090 + k), 0.05, -7)), 0.14, 0.15)
+    out["fall"] = finish(mix((L("behemoth_attack1h", 0.2, 0.55, -2, 2000), 0, 0),
+                             (filt(np.random.default_rng(1110).standard_normal(int(0.45 * RATE)), "bandpass", (300, 1500))
+                              * np.linspace(0, 1, int(0.45 * RATE)), 0.05, -16)), 0.11, 0.06)
+    out["land_1"] = finish(mix((thump(0.35, 120, 20, 0.6), 0, 0), (rubble(0.3, 30, 0.2, 20), 0, -10)), 0.17, 0.06)
+    out["land_2"] = finish(mix((thump(0.5, 110, 21, 0.8), 0, 0), (L("golem_die3", 0.78, 1.0, -2, 3500), 0, -4),
+                               (rubble(0.45, 45, 0.3, 21), 0.02, -8)), 0.2, 0.08)
+    # eating: rock crunching, the Pig's chewing grunts far down, a swallow
+    out["eat_1"] = finish(mix((crunch_dark(1.0, 3, 1), 0, -2), (L("pig_select3", 0.0, 0.51, -12, 1500), 0.25, 0),
+                              (L("pig_ack3", 0.0, 0.97, -12, 1500), 0.4, -3)), 0.09, 0.1)
+    out["eat_2"] = finish(mix((crunch_dark(1.3, 4, 2), 0, -2), (L("pig_ack3", 0.0, 0.97, -12, 1500), 0.2, 0),
+                              (swallow(2), 1.1, 0)), 0.08, 0.1)
+    # drinking: three slow gulps and a satisfied breath out (the breath as in sulk, which works)
+    out["drink"] = finish(mix(*[(swallow(k), 0.4 * k, -k) for k in range(3)],
+                              (low_voice(0.6, [(0, 62), (1, 52)], [(0, "m"), (1, "m")], [(0, 0), (0.2, 0.8), (1, 0)], 1100, rough=0.2, breath=0.6), 1.2, -3)), 0.07, 0.15)
+    # imprisoned: furious snarls; a stone fist on the cell door
+    out["imprisoned_1"] = finish(mix((L("daemon_attack5", 0.0, 0.87, -6), 0, 0), (thump(0.4, 140, 30, 0.6), 0.3, -6),
+                                     (low_voice(0.8, [(0, 60), (1, 54)], [(0, "o"), (1, "u")], [(0, 0), (0.15, 1), (1, 0)], 1110), 0.0, -6)), 0.12, 0.12)
+    out["imprisoned_2"] = finish(mix((thump(0.35, 140, 31, 0.6), 0, -3), (thump(0.35, 140, 32, 0.6), 0.18, -5),
+                                     (L("daemon_attack9", 0.0, 0.71, -6), 0.1, 0)), 0.12, 0.1)
+    out["imprisoned_3"] = finish(mix((L("bull_ack1", 0.0, 1.0, -8, 1500), 0, 0),
+                                     (low_voice(0.85, [(0, 56), (1, 48)], [(0, "u"), (1, "m")], [(0, 0), (0.2, 1), (1, 0)], 1112), 0, -6)), 0.11, 0.15)
+    # torture: a pained roar (the Bull's death bellow), stone groaning under strain
+    out["torture"] = finish(mix((L("bull_die2", 0.1, 1.5, -5, 2200), 0, 0), (L("daemon_die1", 0.0, 1.0, -6), 0.2, -8),
+                                (low_voice(1.2, [(0, 60), (1, 50)], [(0, "o"), (1, "u")], [(0, 0), (0.15, 1), (1, 0)], 1120), 0.05, -6),
+                                (grind(1.0, 170, 60, 600), 0.1, -12)), 0.1, 0.2)
+    # water torture: roaring into churning water
+    churn = lambda x, seed: x * (0.6 + 0.4 * np.sin(2 * np.pi * np.cumsum(7 + 5 * np.abs(
+        _lp_noise(np.random.default_rng(seed), len(x), 3))) / RATE))
+    out["torture_water_1"] = finish(mix((churn(L("daemon_die1", 0.0, 1.2, -6, 1600), 1), 0, 0), (bubbles(1.4, 14, 1), 0, -3),
+                                        (low_voice(1.2, [(0, 62), (1, 50)], [(0, "o"), (1, "u")], [(0, 0), (0.1, 1), (1, 0)], 1140), 0.05, -7)), 0.11, 0.25)
+    out["torture_water_2"] = finish(mix((churn(L("behemoth_die3", 0.5, 1.6, -6, 1600), 2), 0, 0), (bubbles(2.4, 12, 2), 0, -3),
+                                        (churn(L("daemon_die4", 0.0, 1.0, -6, 1600), 3), 1.3, -3)), 0.12, 0.3)
+    # dying: a last roar (Behemoth / Daemon death cries) while he cracks apart into rubble
+    for k, (roar_src, a, b, bull) in enumerate((("behemoth_die1", 0.4, 1.4, "bull_die3"), ("daemon_die1", 0.0, 1.2, "bull_die2")), 1):
+        out[f"die_{k}"] = finish(mix((L(roar_src, a, b, -6, 2200), 0, 0), (L(bull, 0.0, 1.0, -7, 1800), 0.05, -7),
+                                     (low_voice(1.0, [(0, 64), (1, 42)], [(0, "o"), (1, "u")], [(0, 0), (0.1, 1), (1, 0)], 1130 + k), 0.0, -6),
+                                     (L("golem_die" + str(k), 0.0, 1.2, -2, 4000), 0.5, -4),
+                                     (thump(0.9, 90, 40 + k, 0.7), 0.75, 0), (rubble(1.1, 45, 0.6, 40 + k), 0.8, -5)), 0.1, 0.3)
+    return out
+
+
 # Bile Demon sample (BileHD.sdt, in file order, blanks left out) -> the Molynx file in its place
 ROLES = {
     "bd_charge": "charge", "bd_fleeing": "fleeing_1", "bd_hello": "hello", "bd_hit16": "hit_1",
@@ -512,8 +730,15 @@ ROLES = {
 }
 
 
+# the second version's sounds the user kept (review of 2026-11-08); the rest come from remake()
+KEPT = {"hello", "sulk", "pray_1", "pray_2", "sleep", "charge", "melee_1", "melee_2", "melee_3", "melee_4",
+        "hit_1", "hit_2", "dragged_1", "dragged_2", "dragged_3"}
+
+
 def build_sounds(source_dirs, out_dir: Path) -> dict[str, float]:
-    made = recipes(Sources(source_dirs))
+    src = Sources(source_dirs)
+    made = {k: v for k, v in recipes(src).items() if k in KEPT}
+    made.update(remake(src))
     missing = sorted(set(ROLES.values()) - set(made))
     if missing:
         raise ValueError(f"roles without a sound: {missing}")
