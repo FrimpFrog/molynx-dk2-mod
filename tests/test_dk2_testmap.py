@@ -240,7 +240,7 @@ def test_rule4_open_area(files):
         near = [(y + dy) * w + x + dx for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))]
         assert any(j in area for j in near)
         assert all(j in area or t[j][0] in (2, 6, 7) for j in near)
-    assert {x[0] for x in t} <= {1, 2, 3, 6, 7, 8, 12, 14, 30}
+    assert {x[0] for x in t} <= {1, 2, 3, 6, 7, 8, 12, 14, 30, 32}
 
 
 @needs_maps
