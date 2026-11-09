@@ -1,0 +1,90 @@
+MOLYNX TEST - Dungeon Keeper 2 (Flame)
+======================================
+
+Molynx is a brand-new 47th creature: a big red rock golem with horns and a mace.
+He is only on two new test maps, MolynxTest1 and MolynxTest2. Your other maps are not changed.
+
+You need: Dungeon Keeper 2 with Flame already installed (you start the game with DKII-DX.exe).
+
+
+INSTALL (about 2 minutes)
+-------------------------
+
+1. BACK UP 3 FILES. In your Dungeon Keeper 2 folder, copy these somewhere safe:
+      PATCH.dll
+      flame\DKII.dll
+      flame\Flame.dll
+
+2. COPY. Open the folder "Copy into your Dungeon Keeper 2 folder" in this zip.
+   Copy everything inside it (PATCH.dll and the folders Data and flame) into your
+   Dungeon Keeper 2 folder. When Windows asks, choose "Replace the files".
+
+   (The PATCH.dll and flame files are a Flame build with a small fix that lets the
+   game have more than 46 creatures. Without it the game freezes when the map starts.)
+
+3. TURN MOLYNX ON. Open  flame\config.toml  with Notepad.
+   Find the line that starts with  alt-resources  and put  Molynx;  right after the
+   first quote mark. For example:
+
+      alt-resources = "Quuz_AudioFix;LevelFixes;Quuz_UniqueBatTex"
+
+   becomes
+
+      alt-resources = "Molynx;Quuz_AudioFix;LevelFixes;Quuz_UniqueBatTex"
+
+   Molynx must be FIRST. Save the file.
+   (Or in the Flame start window: double-click Molynx so it is Enabled, then drag it to the top.)
+
+
+PLAY
+----
+
+Start the game, go to Skirmish and pick a map:
+
+  MolynxTest1 - Molynx stands next to your Dungeon Heart. Flat open map, lots of gold,
+                every room and spell, and no enemies to bother you.
+  MolynxTest2 - the same, but more Molynx can also come through your Portal.
+                Build a Guard Room and a Training Room (25 tiles or more) to attract him.
+
+If you cannot see the maps in the Skirmish list: in flame\config.toml change
+  Level = ""   to   Level = "MolynxTest1"
+save, and start the game. Put it back to  Level = ""  afterwards.
+
+
+WHAT TO TRY
+-----------
+
+Build him a Lair, Hatchery, Training Room, Workshop, Temple and Torture Chamber, then watch him:
+walking, standing about, fighting/training, eating, sleeping, praying, working, being picked up,
+dropped and slapped, his creature panel and pictures, his sounds, and his special attack
+Ground Slam (he smashes his mace into the floor).
+
+Tell us anything that looks wrong, ugly, too strong, too weak, or that you would change.
+
+
+WHAT TO SEND BACK
+-----------------
+
+- What you liked and what should be better.
+- Screenshots or a short video if you can.
+- If the game crashes or freezes: what you were doing at that moment, and these files
+  (copy them straight after the game closes, the next start overwrites them):
+      flame\latest.log
+      flame\molynx.log
+      the newest file in flame\CrashInfo  (if there is one)
+      the newest file in flame\StackInfo  (if there is one)
+
+
+REMOVE IT AGAIN
+---------------
+
+1. Take  Molynx;  out of the alt-resources line in flame\config.toml.
+2. Delete the folder  flame\resources\Molynx
+3. Delete the 14 files  Data\editor\maps\MolynxTest1*  and  MolynxTest2*
+4. Put back your 3 backed-up files (PATCH.dll, flame\DKII.dll, flame\Flame.dll).
+
+
+Molynx is made by Soles for the DkII More Creatures Mod.
+Thanks to Peter Molyneux and the Bullfrog team, and MegaGlest (CC BY-SA 3.0) for
+inspiration and assets. Made with help from AI.
+Flame by DiaLight: https://github.com/DiaLight/Flame (GPL-3.0)
