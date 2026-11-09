@@ -20,7 +20,7 @@ from scripts.lowpoly import bake
 from scripts.priestess_texture import RGB, band, gauss, ret, shade
 from scripts.soles_model import split_front_back
 
-MARK = "ALBISOL"
+MARK = "E"
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 ATLAS = {
