@@ -157,12 +157,12 @@ def test_clips_are_animations_that_pass_the_format_invariants(export):
 # 34,076 (2); victory_celebration (shipped by no slot) stays at one step.
 GEOM = {
     "stand": 1833, "walk": 8044, "walk_once": 8044, "attack": 11407, "die": 5547,
-    "fidgeting": 18949, "running": 14901, "eating": 21117, "praying": 18226, "happy": 21917,
+    "fidgeting": 18949, "running": 14901, "eating": 21117, "praying": 15716, "happy": 21917,
     "angry": 9844, "celebrating": 34442, "victory_celebration": 74003, "getting_hit": 6219,
     "being_slapped": 10092, "staggering": 33973, "waking_up": 16024, "knockback": 25785,
     "sleeping": 6703, "training": 31942, "fighting_another_creature": 34076, "patrolling": 16934,
     "guarding": 1700, "manufacturing": 16395, "interacting_with_objects": 5977,
-    "being_picked_up": 6464, "falling": 7827, "torture": 24247, "drinking": 19947,
+    "being_picked_up": 8267, "falling": 7827, "torture": 24247, "drinking": 19947,
     "ground_slam": 12338,
 }
 GAME_MAX_GEOM = 34_816
@@ -905,6 +905,30 @@ def test_torture_puts_his_torso_where_the_bile_demon_is_on_the_wheel(export):
     at = assets._part_vertices(plan, 0, assets._torso_ids(rest))
     mine = assets._gather(plan.clips["torture"].frames[0], at).mean(0)
     np.testing.assert_allclose(mine, theirs.mean(0), atol=1e-9)
+
+
+@needs_data
+def test_the_hand_holds_him_by_the_head(export):
+    """The game hangs a picked-up creature from the hand at its Swing file's origin, and every game
+    Swing file has the head there with the body below (the user, 2026-11-10: "he should be held
+    by the head not the legs"). His held clip: head centre on GRIP_HEAD on average, the whole
+    body below the origin but the head, as low as the game's tall creatures hang."""
+    model = export["models"]["being_picked_up"]
+    plan = export["plan"]
+    heads, lows, tops = [], [], []
+    for f in range(model.anim.frame_count):
+        pts = evaluate_anim_frame(model.anim, f)
+        head = np.concatenate([p for p, sp in zip(pts, plan.sprites) if sp.part == assets.HEAD_PART])
+        heads.append(head.mean(0))
+        allp = np.concatenate(pts)
+        lows.append(allp[:, 2].max())    # z is down
+        tops.append(allp[:, 2].min())
+    np.testing.assert_allclose(np.mean(heads, axis=0), assets.GRIP_HEAD, atol=0.003)
+    assert min(lows) > 0.45          # his feet hang well below the hand (Giant-Swing: 0.68)
+    assert max(tops) > -0.2          # only his head and horns are above it (Giant-Swing: -0.13)
+    giant = parse_kmf(assets.game_mesh_path("Giant-Swing").read_bytes())
+    g = np.concatenate(evaluate_anim_frame(giant.anim, 0))
+    assert g[:, 2].min() < 0 < g[:, 2].max()   # the game's own: the origin inside the body
 
 
 @needs_data

@@ -156,19 +156,21 @@ SOURCE_RECORDS = 46
 NAME_FIELD_SIZE = 32
 ICON, PORTRAIT = r"gui\creatures\evil\molynx", r"gui\creatures\evil\molynx-bg"
 # Stage 3: his own character, written out here from the design of 2026-11-07 (a tankier,
-# stronger, slightly faster Bile Demon, the Horned Reaper's bodyguard, hardly ever eating; drawn to
-# a Guard Room and a Training Room, happiest guarding and training, hating research; Ground Slam,
-# creature spell 23, from level 2 and Cast Armour, 15, from level 4 in place of the gas spells). Raw
+# stronger, slightly faster Bile Demon, the Horned Reaper's bodyguard, hardly ever eating) as
+# changed on 2026-11-10 (the Bile Demon's health: hp is not listed, so it must equal the map's Bile
+# Demon's like every unlisted field; drawn by a 5 x 5 Hatchery and a 10 x 10 Combat Pit; happiest
+# guarding and training, hating research; Ground Slam, creature spell 23, from level 2 and Cast
+# Armour, 15, from level 4 in place of the gas spells). Raw
 # record values (float32 fields: value x 4096).
 STAGE3 = {
-    "hp": 8000, "meleeDamage": 600, "speed": 1843, "runSpeed": 2662, "meleeRecharge": 12288,
+    "meleeDamage": 600, "speed": 1843, "runSpeed": 2662, "meleeRecharge": 12288,
     "meleeRange": 2867, "stunDuration": 12288, "mass": 24576, "fear": 600, "threat": 250,
     "pay": 700, "maxGoldHeld": 7000, "timeAwake": 330,
     "hungerRate": 134213632, "hungerFill": 1, "angerNoFood": 1,
     "tortureTimeToConvert": 983040, "possessionManaCost": 400, "scoreRating": 115,
     "manufacturePerSecond": 80, "expPerSecondTraining": 25, "manaGenPrayer": 70, "angerSlap": 4500,
-    "attractions[0].present": 1, "attractions[0].roomId": 9, "attractions[0].roomSize": 0,
-    "attractions[1].present": 1, "attractions[1].roomId": 7, "attractions[1].roomSize": 25,
+    "attractions[0].present": 1, "attractions[0].roomId": 4, "attractions[0].roomSize": 25,
+    "attractions[1].present": 1, "attractions[1].roomId": 16, "attractions[1].roomSize": 100,
     "happyJobs[0].jobType": 6, "happyJobs[0].chance": 50,
     "happyJobs[1].jobType": 4, "happyJobs[1].chance": 50,
     "hateJobs[0]": 3, "hateJobs[1]": 0,

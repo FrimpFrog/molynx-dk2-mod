@@ -195,12 +195,14 @@ def expected_slot_names(bile: Creature) -> dict[str, str]:
 def test_stage3_character_is_the_design_of_2026_11_07():
     """The user's brief: a stronger, tankier, slightly faster Bile Demon, the Horned Reaper's
     bodyguard, eating less, made his own."""
-    assert STATS["hp"] == 8000 and STATS["meleeDamage"] == 600            # Bile 6000 / 525
+    assert "hp" not in STATS and STATS["meleeDamage"] == 600   # 2026-11-10: the Bile Demon's hp; Bile 525
     assert STATS["speed"] == 1843 and STATS["runSpeed"] == 2662           # Bile 1638 / 2293
     assert STATS["hungerRate"] == 134213632 and STATS["hungerFill"] == 1  # stone: hardly ever eats
     assert "hpFromChicken" not in STATS     # 0 there (with hungerFill 0) made the Hatchery spawn nonstop
     assert STATS["stunDuration"] == 12288 and STATS["mass"] == 24576
-    assert PERSONALITY["attractions[0].roomId"] == 9 and PERSONALITY["attractions[1].roomId"] == 7
+    # 2026-11-10: drawn by a 5 x 5 Hatchery (room 4) and a 10 x 10 Combat Pit (room 16)
+    assert PERSONALITY["attractions[0].roomId"] == 4 and PERSONALITY["attractions[0].roomSize"] == 25
+    assert PERSONALITY["attractions[1].roomId"] == 16 and PERSONALITY["attractions[1].roomSize"] == 100
     assert PERSONALITY["happyJobs[0].jobType"] == 6 and PERSONALITY["hateJobs[0]"] == 3
     # no gas: Ground Slam (creature spell 23) from level 2, Cast Armour (15) from level 4, both
     # leaving at the impact frame (34) of his 30-fps magic clip
@@ -661,8 +663,9 @@ def test_stage3_sets_his_stats_and_personality(bile):
     stage3 = build(bile, 3, text_ids=TEXT_IDS)
     for name, value in {**STATS, **PERSONALITY}.items():
         assert stage3.get(name) == value, name
-    for name in ("hp", "meleeDamage", "speed", "runSpeed", "mass", "fear", "threat"):
-        assert stage3.get(name) > bile.get(name), name     # stronger, tankier, faster
+    for name in ("meleeDamage", "speed", "runSpeed", "mass", "fear", "threat"):
+        assert stage3.get(name) > bile.get(name), name     # stronger, heavier, faster
+    assert stage3.get("hp") == bile.get("hp")              # the Bile Demon's health (2026-11-10)
     assert stage3.get("hungerRate") > 100 * bile.get("hungerRate")  # hardly ever eats
     assert stage3.get("stunDuration") < bile.get("stunDuration")
 

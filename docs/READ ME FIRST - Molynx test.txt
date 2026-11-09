@@ -44,7 +44,7 @@ Start the game, go to Skirmish and pick a map:
   MolynxTest1 - Molynx stands next to your Dungeon Heart. Flat open map, lots of gold,
                 every room and spell, and no enemies to bother you.
   MolynxTest2 - the same, but more Molynx can also come through your Portal.
-                Build a Guard Room and a Training Room (25 tiles or more) to attract him.
+                Build a 5 x 5 Hatchery and a 10 x 10 Combat Pit to attract him.
 
 If you cannot see the maps in the Skirmish list: in flame\config.toml change
   Level = ""   to   Level = "MolynxTest1"

@@ -32,8 +32,8 @@ The zip holds two folders. Use **only one at a time**:
 Each folder has three maps: **Molynx Test**, **Molynx Test Portal** (step 7) and **Siege** (as in
 the first zip). While the folder is on, **Dead Walking** is the flat test map with Molynx also in the
 portal pool (the Skirmish list only shows the game's own map names; its own map is back when you
-take the folder out). For a Molynx to come through the portal, build a Guard Room and a Training
-Room of at least 25 tiles: those are what attract him.
+take the folder out). For a Molynx to come through the portal, build a Hatchery of at least 5 x 5
+and a Combat Pit of at least 10 x 10: those are what attract him.
 
 ## What to do
 

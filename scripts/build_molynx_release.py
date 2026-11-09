@@ -197,8 +197,8 @@ def _resource_toml(name: str, maps: dict[str, dict[str, Path]]) -> bytes:
     mpd = len(maps) - skirmish
     description = (f"Molynx, the 47th creature, with his own looks, stats, icon, texts and Ground Slam. "
                    f"He can come through the portal on every Skirmish map ({skirmish}) and every My "
-                   f"Pet Dungeon level ({mpd}); the campaign is not changed. Attract him with a Guard "
-                   f"Room and a Training Room of 25 tiles. List this folder before Quuz_LevelFixes in "
+                   f"Pet Dungeon level ({mpd}); the campaign is not changed. Attract him with a 5 x 5 "
+                   f"Hatchery and a 10 x 10 Combat Pit. List this folder before Quuz_LevelFixes in "
                    f"alt-resources.")
     lines = ["[resource]", f'name = "{name}"', 'version = ""', 'authors = "Soles"',
              'description = """', description, '"""']

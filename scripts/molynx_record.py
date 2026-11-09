@@ -11,7 +11,8 @@ test bundle build all three):
      SIZE_FIELDS (the redesign, 2026-11-06); and the icon1 / portrait resource names (his own
      creature-panel pictures, second review round 2026-11-07).
   3  + his own character (2026-11-07, the user's brief: a tankier, stronger, slightly faster Bile
-     Demon, the Horned Reaper's bodyguard, eating less, made his own): STATS, PERSONALITY and the
+     Demon, the Horned Reaper's bodyguard, eating less, made his own; 2026-11-10: the Bile Demon's
+     health, drawn by a 5 x 5 Hatchery and a 10 x 10 Combat Pit): STATS, PERSONALITY and the
      five text IDs (his texts are TEXTS, added to the game's Text.str by the builder).
 
 Everything else (sound category, lair, spells, attractions, jobs, anger values, flags, the
@@ -110,14 +111,15 @@ SIZE_FIELDS = {"scale": 5734, "height": 4096, "eyeHeight": 2744}
 FX = 4096   # fixed point: float32 fields hold value x 4096
 
 # Stage 3: his own numbers (raw values; the Bile Demon's in the comments). A tank and a bodyguard:
-# more health and harder hits than the Bile Demon (still below the Horned Reaper's 700 damage), a
+# the Bile Demon's health (the user, 2026-11-10: "Health should be the same as bile demons"; not in
+# STATS, so each map keeps its own Bile Demon's hp, which differs between maps: 6000 in most, 1813
+# or 8000 in a few) and harder hits than the Bile Demon (still below the Horned Reaper's 700), a
 # little faster, quicker out of a stun, heavier, more feared, paid more, loyal under torture. He is
 # rock, so he hardly ever eats: the Horned Reaper's hungerRate (32767 s between meals) and no anger
 # when unfed (angerNoFood 1, the Reaper's). A meal stays one chicken (hungerFill 1, a chicken's 200
 # health): with the Reaper's hungerFill 0 and no health from a chicken, the first in-game test had him
 # standing in the Hatchery while chickens and eggs poured out of it without end.
 STATS = {
-    "hp": 8000,                              # 6000
     "meleeDamage": 600,                      # 525 (Horned Reaper 700)
     "speed": round(0.45 * FX),               # 0.40
     "runSpeed": round(0.65 * FX),            # 0.56
@@ -142,8 +144,10 @@ STATS = {
     "angerSlap": 4500,                       # 3000: proud, slaps anger him more
 }
 # Room and job IDs (OpenKeeper's tables; the room order is Rooms.kwd's): 4 Hatchery, 7 Training
-# Room, 9 Guard Room, 10 Workshop; jobs 3 research, 4 train, 5 manufacture, 6 guard.
-ROOM_TRAINING, ROOM_GUARD = 7, 9
+# Room, 9 Guard Room, 10 Workshop, 16 Combat Pit; jobs 3 research, 4 train, 5 manufacture, 6 guard.
+# An attraction's roomSize is the room's tile count (the Bile Demon's Hatchery 25 = 5 x 5).
+ROOM_HATCHERY, ROOM_TRAINING, ROOM_GUARD, ROOM_COMBAT_PIT = 4, 7, 9, 16
+HATCHERY_TILES, COMBAT_PIT_TILES = 5 * 5, 10 * 10
 JOB_RESEARCH, JOB_TRAIN, JOB_GUARD = 3, 4, 6
 SPELL_CAST_ARMOUR = 15   # creature spell IDs are 1 + the entry's place in the CreatureSpells block
 # Ground Slam: creature spell 23 rebuilt by molynx_ground_slam (the game's unused Chicken Arrow
@@ -159,8 +163,8 @@ GROUND_SLAM_IMPACT_FRAME = 34
 GROUND_SLAM_DELAY = round(GROUND_SLAM_IMPACT_FRAME / 30 * 4096)      # 4642
 GROUND_SLAM_OFFSET = (0, -2300, 205)
 CAST_ARMOUR_OFFSET = (0, -1433, 1638)       # the Monk's (his Cast Armour)
-# Stage 3: what makes him unlike the Bile Demon. Drawn to a Guard Room and a Training Room (the
-# Bile Demon: Workshop and Hatchery), happiest guarding and training (the Bile Demon: training and
+# Stage 3: what makes him unlike the Bile Demon. Drawn by a 5 x 5 Hatchery and a 10 x 10 Combat Pit
+# (the user, 2026-11-10; the Bile Demon: any Workshop and a 5 x 5 Hatchery), happiest guarding and training (the Bile Demon: training and
 # manufacturing), hates research, and no gas: in place of the Bile Demon's Gas Cloud (level 4) and
 # Gas Missile (level 8) he has two close-range abilities: Ground Slam from level 2 (his mace into
 # the floor, hurting every enemy within two tiles) and Stone Skin from level 4 (the game's Cast
@@ -168,9 +172,10 @@ CAST_ARMOUR_OFFSET = (0, -1433, 1638)       # the Monk's (his Cast Armour)
 # casts it on his allies). Both play his magic clip and leave at its impact frame.
 SOUND_CATEGORY = "CREATURE_MOLYNX"
 PERSONALITY = {
-    "attractions[0].present": 1, "attractions[0].roomId": ROOM_GUARD, "attractions[0].roomSize": 0,
-    "attractions[1].present": 1, "attractions[1].roomId": ROOM_TRAINING,
-    "attractions[1].roomSize": 25,
+    "attractions[0].present": 1, "attractions[0].roomId": ROOM_HATCHERY,
+    "attractions[0].roomSize": HATCHERY_TILES,
+    "attractions[1].present": 1, "attractions[1].roomId": ROOM_COMBAT_PIT,
+    "attractions[1].roomSize": COMBAT_PIT_TILES,
     "happyJobs[0].jobType": JOB_GUARD, "happyJobs[0].chance": 50,
     "happyJobs[1].jobType": JOB_TRAIN, "happyJobs[1].chance": 50,
     "hateJobs[0]": JOB_RESEARCH, "hateJobs[1]": 0,

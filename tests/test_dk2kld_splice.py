@@ -320,7 +320,8 @@ def test_molynx_stages_differ_the_way_build_molynx_says(fixture):
     one, two, three = (molynx_for_map(data, s, TEXT_IDS) for s in (1, 2, 3))
     assert one.raw != two.raw != three.raw
     assert one.get("hp") == two.get("hp")  # stats come at stage 3
-    assert three.get("hp") > two.get("hp")
+    assert three.get("meleeDamage") > two.get("meleeDamage")
+    assert three.get("hp") == two.get("hp")  # the Bile Demon's health (2026-11-10)
     assert three.get("nameStringId") == TEXT_IDS["name"]
     assert two.get("nameStringId") != TEXT_IDS["name"]
 

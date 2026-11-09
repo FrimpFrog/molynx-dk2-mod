@@ -472,8 +472,15 @@ PROPS = {"eating": ("Knight-Eat", ("chicken",), "hand"),
 # whole clip moved across the floor once, so his body's average place is the Bile Demon's (praying:
 # the game stands a creature at the temple's edge and the file says how far in it bows; his own bow
 # reached twice as far in, into the temple).
+# "grip": the held-in-hand clip (the swing slot). The game hangs a picked-up creature from the hand
+# at the file's origin: every game Swing file has its head there and its body hanging below
+# (Giant-Swing: head top +0.13, feet -0.68; Bile_Demon-Swing +0.12 / -0.42). His clip is moved once
+# (the whole clip, so its own sway stays) so that his head's centre, averaged over the clip, is at
+# GRIP_HEAD; before (2026-11-10, the user: "he should be held by the head not the legs") it sat
+# 0.17 to 0.90 above the origin, so the hand held him under his feet.
 ANCHORS = {"torture": ("Bil-Torture", "centre"), "sleeping": ("BileDemon-bed(sleeping)", "bed"),
-           "praying": ("Bile_Demon-Pray", "average")}
+           "praying": ("Bile_Demon-Pray", "average"), "being_picked_up": ("Giant-Swing", "grip")}
+GRIP_HEAD = (0.0, 0.03, -0.04)   # KMF axes (x, y ahead, z down): just above and ahead of the grip
 BED_HEAD = 0.02          # in the bed the underside of his head rests this far above the bed's rim (KMF
                          # units, z down). His lying clip half sits up (head and knees raised), so with
                          # his lowest point on the bed's floor his head hung in the air well above the
@@ -551,6 +558,11 @@ def _anchor(plan: "MolynxPlan", clip: "Clip", donor: str, how: str, meshes_dir: 
     rest = np.asarray(plan.source[0]["stand"]["frames"][0][0], float)
     at = _part_vertices(plan, 0, _torso_ids(rest))
     out = []
+    if how == "grip":       # see GRIP_HEAD
+        heads = [np.concatenate([f[k] for k, sp in enumerate(plan.sprites) if sp.part == HEAD_PART]).mean(0)
+                 for f in clip.frames]
+        shift = np.asarray(GRIP_HEAD, float) - np.mean(heads, axis=0)
+        return Clip([[p + shift for p in frame] for frame in clip.frames], clip.wrap)
     if how == "average":    # across the floor only (x, y); z is up and down in KMF space
         theirs = np.mean([np.concatenate(f).mean(0) for f in dframes], axis=0)
         mine = np.mean([np.concatenate(f).mean(0) for f in clip.frames], axis=0)

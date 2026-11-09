@@ -1486,7 +1486,7 @@ def test_stage3_text_ids_are_part_of_the_record(tmp_path, assets_dir):
     molynx = record_47(out, SECOND)
     assert molynx.get("nameStringId") == 3001 and molynx.get("weaknessStringId") == 3005
     assert molynx.resource_name("icon1Resource") == r"gui\creatures\evil\molynx"
-    assert molynx.get("hp") > source_bile(SECOND).get("hp")
+    assert molynx.get("hp") == source_bile(SECOND).get("hp")   # the Bile Demon's health (2026-11-10)
 
 
 # ---- fix round 1: which file each slot names, every tail sub-field, file_wraps, the bundle -------
