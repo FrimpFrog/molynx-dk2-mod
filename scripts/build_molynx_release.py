@@ -50,6 +50,7 @@ import struct
 import sys
 from pathlib import Path
 
+from scripts.build_molynx_mod import _flat_map_files
 from scripts.build_molynx_mod import (EDITOR_CREATURES_PATH, MAPS_PATH, TEXT_PATH, _Assets,
                                       _asset_files, _check_name, _editor_creatures_file, _files_for,
                                       _ground_slam_files, _map_bile, _panel_files, molynx_text_file)
@@ -61,6 +62,10 @@ from scripts.molynx_record import CREATURE_ID
 from scripts.molynx_soundbank import sound_files
 
 STAGE = 3
+# The test map: Dead Walking is shipped as the flat test map (dk2_testmap: Molynx at level 5 by the
+# heart, Gems, a big open claimed area, Keeper 1's Mana Vaults, Molynx also in the portal pool).
+# Dead Walking because the Skirmish list only shows shipped map names (Flame adds no new ones).
+FLAT_TEST = "Dead Walking"
 MPD_NAME = re.compile(r"mpd\d+", re.IGNORECASE)
 CAMPAIGN_NAME = re.compile(r"(level\d+[a-c]?|secret\d+)", re.IGNORECASE)
 CREATURE_POOL, AVAILABILITY, AV_CREATURE, ENABLE = 1, 2, 2, 3
@@ -201,7 +206,7 @@ def _resource_toml(name: str, maps: dict[str, dict[str, Path]]) -> bytes:
 
 
 def release_files(map_folders: list[Path], assets_dir: Path, name: str = "Molynx",
-                  sounds: tuple[Path, Path] | None = None) -> dict[str, bytes]:
+                  sounds: tuple[Path, Path] | None = None, flat: str | None = FLAT_TEST) -> dict[str, bytes]:
     """Every file of the release folder (relative path -> bytes), built in memory. `sounds` is
     (the game's Data/Sound/Sfx/Global, the folder of Molynx's WAVs): his own sound bank
     (molynx_soundbank), which his record's sound category names; without it the folder has no
@@ -224,6 +229,14 @@ def release_files(map_folders: list[Path], assets_dir: Path, name: str = "Molynx
                 files[f"{MAPS_PATH}/{map_name}Variables.kld"] = variables
         except ValueError as err:
             raise ValueError(f"{map_name}: {err}") from err
+        stems |= used
+    if flat is not None:
+        if flat not in maps:
+            raise ValueError(f"the test map {flat!r} is not among the maps")
+        for suffix in ("Globals.kld", "Variables.kld"):
+            files.pop(f"{MAPS_PATH}/{flat}{suffix}", None)
+        flat_files, used = _flat_map_files(flat, True, STAGE, text_ids, assets, None, None)
+        files.update(flat_files)
         stems |= used
     data, used = _editor_creatures_file(STAGE, text_ids, assets, None, None)
     files[EDITOR_CREATURES_PATH] = data

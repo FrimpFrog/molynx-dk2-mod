@@ -196,7 +196,10 @@ def audit_release(mod_dir: Path, map_folders: list[Path], game_sounds: Path | No
     shipped = sorted(os.listdir(mod_dir / MAPS))
     globals_ = {f[:-len("Globals.kld")].lower(): f for f in shipped if f.endswith("Globals.kld")}
     variables = {f[:-len("Variables.kld")].lower(): f for f in shipped if f.endswith("Variables.kld")}
-    other = [f for f in shipped if not f.endswith(("Globals.kld", "Variables.kld"))]
+    from scripts.build_molynx_release import FLAT_TEST
+    flat_key = FLAT_TEST.lower()
+    other = [f for f in shipped if not f.endswith(("Globals.kld", "Variables.kld"))
+             and not f.lower().startswith(flat_key)]
     missing = sorted(set(expected) - set(globals_))
     extra = sorted(set(globals_) - set(expected)) + sorted(set(variables) - set(globals_))
     ok = not (missing or extra or other)
@@ -209,6 +212,20 @@ def audit_release(mod_dir: Path, map_folders: list[Path], game_sounds: Path | No
             continue
         label = globals_[key][:-len("Globals.kld")]
         source = found[(name + "Globals.kld").lower()][0]
+        if key == flat_key:     # the flat test map: its creature table is Siege's, its layout dk2_testmap's
+            from scripts.build_molynx_mod import FLAT_GLOBALS
+            from scripts.dk2_testmap import validate_testmap
+            source = found[(FLAT_GLOBALS + "Globals.kld").lower()][0]
+            stage, _m, _t = _audit_globals_file(mod_dir / MAPS / globals_[key], source, label, lines, files)
+            stages.add(stage)
+            tfiles = {f: (mod_dir / MAPS / f).read_bytes() for f in shipped if f.lower().startswith(flat_key)
+                      and not f.endswith("Globals.kld")}
+            errors = validate_testmap(tfiles, FLAT_TEST, molynx_in_pool=True)
+            lines.add(not errors, "r2", label, "the flat test map (dk2_testmap rules, Mana Vaults)" if not errors
+                      else "; ".join(errors))
+            (block,) = [b for b in read_blocks((mod_dir / MAPS / globals_[key]).read_bytes()) if b.signature == 0xAA]
+            lines.add(block.item_count == MOLYNX, "r3", label, f"{block.item_count} creature records")
+            continue
         stage, _meshes, _textures = _audit_globals_file(mod_dir / MAPS / globals_[key], source, label, lines, files)
         stages.add(stage)
         src_var = found[(name + "Variables.kld").lower()][0].read_bytes()

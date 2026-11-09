@@ -78,6 +78,7 @@ SUFFIXES = (".kwd", "Map.kld", "Things.kld", "Players.kld", "Triggers.kld", "Var
 # Terrain ids (1-based index into Terrain.kwd).
 IMPENETRABLE, ROCK, DIRT, GOLD, GEMS, CLAIMED, PORTAL, HEART, EDGE = 1, 2, 3, 6, 7, 8, 12, 14, 30
 REINFORCED_WALL = 9
+CLAIMED_VAULT = 32           # a Mana Vault tile owned by a keeper (raises its mana); no Thing goes with it
 SOLID = frozenset({IMPENETRABLE, ROCK, GOLD, GEMS, REINFORCED_WALL, EDGE})  # everything else is passable
 FLOOR = frozenset({DIRT, CLAIMED})
 NEUTRAL, KEEPER1, KEEPER2 = 2, 3, 4
@@ -102,6 +103,10 @@ GEMS_AT = ((34, 25), (34, 29), (34, 33), (34, 41), (34, 45))
 GOLD_AT = ((10, 20), (24, 20))
 K1_IMPS_AT = ((7, 35), (7, 39), (3, 34), (5, 34), (3, 40), (5, 40))
 MOLYNX_AT = (7, 37)
+# Keeper 1's Mana Vaults: four claimed vault tiles in a square in the open area (Dead Walking's own
+# Keeper 1 vaults are four such tiles round its treasury; each is the base tile at VAULT_SOURCE)
+MANA_VAULTS_AT = ((12, 45), (16, 45), (12, 49), (16, 49))
+VAULT_SOURCE = (14, 41)
 K2_HEART_AT = (56, 56)  # top-left tile of Keeper 2's moved heart
 K2_RING = 1  # chamber floor around Keeper 2's heart (Claimed Path)
 K2_IMPS_AT = ((55, 55), (61, 55), (55, 61), (61, 61))
@@ -410,6 +415,10 @@ def _build_map(base: MapFile, k1: Structure, k2: Structure, portal: Structure) -
         put(x, y, gems)
     for x, y in GOLD_AT:
         put(x, y, gold)
+    vault = base.at(*VAULT_SOURCE)
+    assert vault[0] == CLAIMED_VAULT and vault[1] == KEEPER1, "the base's Keeper 1 vault moved"
+    for x, y in MANA_VAULTS_AT:
+        put(x, y, vault)
     for dx, dy, tile in k1.tiles:  # Keeper 1's heart stays at its base position
         put(k1.origin[0] + dx, k1.origin[1] + dy, tile)
     for dx, dy, tile in portal.tiles:
@@ -563,7 +572,7 @@ def _k1_area(m: MapFile) -> set[tuple[int, int]]:
     """Tiles 4-connected to Keeper 1's heart through floor, portal and heart tiles of Keeper 1
     (Dirt Path may be neutral)."""
     starts = _cells(m, lambda t: t[0] == HEART and t[1] == KEEPER1)
-    ok = lambda t: (t[0] in (CLAIMED, PORTAL, HEART) and t[1] == KEEPER1) or t[0] == DIRT
+    ok = lambda t: (t[0] in (CLAIMED, PORTAL, HEART, CLAIMED_VAULT) and t[1] == KEEPER1) or t[0] == DIRT
     return _flood(m, starts, ok) if starts else set()
 
 
@@ -694,7 +703,11 @@ def validate_testmap(files: dict[str, bytes], stem: str, *, molynx_in_pool: bool
             errors.append(f"rule 4: Gems/Gold at {x},{y} does not touch Keeper 1's open area")
         if not all(c in area or m.at(*c)[0] in (ROCK, GEMS, GOLD) for c in near):
             errors.append(f"rule 4: Gems/Gold at {x},{y} is not embedded in Rock")
-    other = sorted({t[0] for t in m.tiles} - {IMPENETRABLE, ROCK, DIRT, GOLD, GEMS, CLAIMED, PORTAL, HEART, EDGE})
+    other = sorted({t[0] for t in m.tiles} - {IMPENETRABLE, ROCK, DIRT, GOLD, GEMS, CLAIMED, PORTAL, HEART, EDGE,
+                                              CLAIMED_VAULT})
+    vaults = _cells(m, lambda t: t[0] == CLAIMED_VAULT)
+    if sorted(vaults) != sorted(MANA_VAULTS_AT) or any(m.at(*c)[1] != KEEPER1 for c in vaults):
+        errors.append(f"rule 4: Keeper 1's Mana Vaults are at {vaults}, not {list(MANA_VAULTS_AT)}")
     if other:
         errors.append(f"rule 4: other terrain on the map: {other}")
 
