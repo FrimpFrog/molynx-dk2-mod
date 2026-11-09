@@ -20,7 +20,7 @@ from scripts.lowpoly import bake
 from scripts.priestess_texture import RGB, band, gauss, ret, shade
 from scripts.soles_model import split_front_back
 
-MARK = "$"
+MARK = "ALBISOL"
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 ATLAS = {
@@ -61,13 +61,26 @@ def project_uvs(parts):
 
 
 def _mark():
-    """The printed mark as a mask (1 = ink) over the box's front, 256 x 256."""
+    """The printed mark as a mask (1 = ink) over the box's front, 256 x 256: the MARK text in a heavy serif,
+    fitted to the width (two lines when it has a space)."""
+    from pathlib import Path
     im = Image.new("L", (256, 256), 0)
     d = ImageDraw.Draw(im)
-    size = 190 if len(MARK) == 1 else int(200 / max(len(MARK), 1) * 1.6)
-    f = ImageFont.truetype(FONT, size)
-    bb = d.textbbox((0, 0), MARK, font=f)
-    d.text(((256 - (bb[2] - bb[0])) / 2 - bb[0], (256 - (bb[3] - bb[1])) / 2 - bb[1] - 6), MARK, font=f, fill=255)
+    serif = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
+    fpath = serif if Path(serif).exists() else FONT
+    lines = MARK.split(" ") if " " in MARK else [MARK]
+    size = 220
+    while size > 10:
+        f = ImageFont.truetype(fpath, size)
+        boxes = [d.textbbox((0, 0), ln, font=f) for ln in lines]
+        if max(b[2] - b[0] for b in boxes) <= 224 and sum(b[3] - b[1] for b in boxes) * 1.25 <= 224:
+            break
+        size -= 4
+    total = sum(b[3] - b[1] for b in boxes) * 1.25
+    y = (256 - total) / 2
+    for ln, bb in zip(lines, boxes):
+        d.text(((256 - (bb[2] - bb[0])) / 2 - bb[0], y - bb[1]), ln, font=f, fill=255)
+        y += (bb[3] - bb[1]) * 1.25
     return np.asarray(im.filter(ImageFilter.GaussianBlur(1.0)), np.float32) / 255
 
 
