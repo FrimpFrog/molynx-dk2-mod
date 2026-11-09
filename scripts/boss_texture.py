@@ -116,12 +116,33 @@ def body_field(pos, t):
     col = mix(col, GOLD, chain)
     metal = metal + .8 * np.clip(buttons * 2 + chain + pin, 0, 1)
     spec = spec + 1.0 * np.clip(buttons * 2 + chain + pin, 0, 1)
-    # the back: a centre seam and a shaded drape
+    # shirt collar points over the lapels, a shadow under them
+    collar = band(y - (.8 - .9 * (ax - .012)), -.006, .006, .002) * band(ax, .008, .04, .003) * front
+    col = mix(col, SHIRT, collar)
+    col = mix(col, SUIT * .25, .7 * gauss(y - (.79 - .9 * (ax - .012)), .004) * band(ax, .01, .045, .004) * front)
+    # tension creases pulling from the buttons across the paunch
+    for by in (.6, .565, .53):
+        ang = np.arctan2(y - by, ax)
+        cr = gauss(np.sin(ang * 3) * np.hypot(ax, y - by), .002) * smooth(.06, .015, np.hypot(ax, y - by))
+        col = col * (1 - .35 * cr * front)[:, None]
+        h -= .0008 * cr * front
+    # flap pockets at the hips, a breast pocket, stitched seams
+    flapm = band(ax, .05, .09, .002) * band(y, .49, .505, .002) * front
+    col = mix(col, SUIT * .6, flapm)
+    col = mix(col, SUIT * .2, gauss(y - .489, .0015) * band(ax, .05, .09, .002) * front)
+    seam = (gauss(ax - .095, .002) * smooth(.48, .55, y) + gauss(x, .0025) * (1 - front) * smooth(.44, .5, y))
+    col = col * (1 - .45 * seam)[:, None]
+    # the back: a vent and a shaded drape
     back = 1 - front
-    col = mix(col, SUIT * .5, back * gauss(x, .003) * smooth(.44, .5, y))
+    col = mix(col, SUIT * .3, back * gauss(x, .003) * band(y, .44, .5, .004))
     neck = smooth(.808, .816, y)
     col = mix(col, SKIN * np.ones((n, 1)), neck)
-    col = col * (1 - .3 * smooth(.1, .125, ax) * smooth(.68, .75, y))[:, None]
+    # DK2-style painted shadow: dark sides, under the arms, under the paunch, under the lapels and tie
+    occl = (.55 * smooth(.07, .12, ax) + .45 * smooth(.1, .125, ax) * smooth(.68, .75, y)
+            + .35 * gauss(y - .47, .02) * front + .3 * lapel * gauss(ax - v_half, .004)
+            + .25 * tie * gauss(ax - tie_w, .003) + .4 * smooth(.62, .5, y) * smooth(.04, .1, ax))
+    col = col * (1 - .6 * np.clip(occl, 0, 1))[:, None]
+    col = col * (1 + .25 * gauss(np.hypot(ax - .035, y - .7), .03) * front)[:, None]     # light on the chest
     return ret(col, h, spec=spec, gloss=12 + 30 * metal, metal=metal, soft=.4)
 
 
@@ -135,9 +156,13 @@ def arm_field(pos, t):
     folds = fbm(x * 40, y * 20, 5)
     col = SUIT * (.85 + .3 * folds)[:, None]
     col = mix(col, SUIT * 1.7, .3 * stripes(t["u"] * .1))
-    elbow = gauss(_along(pos, ARM) - .5, .08) * (.5 + .5 * np.sin(y * 500))
-    col = col * (1 - .2 * elbow)[:, None]
-    return ret(col, .002 * folds + .001 * elbow, spec=.08, gloss=10)
+    f = _along(pos, ARM)
+    elbow = gauss(f - .55, .1) * (.5 + .5 * np.sin(y * 420 + folds * 4))
+    inner = smooth(.4, .9, t["u"])
+    col = col * (1 - .45 * elbow - .45 * inner - .3 * gauss(f, .12))[:, None]
+    seam = gauss(t["u"] - .95, .04)
+    col = col * (1 - .4 * seam)[:, None]
+    return ret(col, .002 * folds + .0015 * elbow, spec=.08, gloss=10)
 
 
 def cuff_field(pos, t):
@@ -165,8 +190,10 @@ def leg_field(pos, t):
     col = mix(col, SUIT * 1.7, .3 * stripes(u * .12, .016, .0016))
     crease = gauss(u, .04) + gauss(u - 1, .04)
     col = mix(col, SUIT * 1.35, .5 * crease)
-    break_ = gauss(y - .075, .012) * (.5 + .5 * np.sin(u * 30))
-    col = col * (1 - .25 * break_ - .3 * smooth(.43, .47, y))[:, None]
+    break_ = gauss(y - .085, .016) * (.5 + .5 * np.sin(u * 30 + folds * 4))
+    knee = gauss(y - .27, .03) * (.5 + .5 * np.sin(y * 500 + u * 9))
+    inner = smooth(.4, .9, u)
+    col = col * (1 - .4 * break_ - .45 * smooth(.42, .47, y) - .3 * knee - .4 * inner)[:, None]
     return ret(col, .002 * folds + .001 * crease, spec=.08, gloss=10)
 
 
@@ -194,9 +221,16 @@ def box_front(pos, t):
     u, v = t["u"], t["v"]
     H, W = MARK_IMG.shape
     ink = MARK_IMG[np.clip((v * H).astype(int), 0, H - 1), np.clip((u * W).astype(int), 0, W - 1)]
-    card = BOX * (.93 + .07 * fbm(u * 30, v * 30, 11))[:, None]
-    shadow = smooth(.0, .06, np.minimum(np.minimum(u, 1 - u), np.minimum(v, 1 - v)))     # the bevel's shade
-    col = card * (.86 + .14 * shadow)[:, None]
+    grime = fbm(u * 6, v * 6, 21)
+    card = BOX * (.88 + .12 * fbm(u * 40, v * 40, 11) - .25 * smooth(.5, .95, grime) * smooth(.3, 1.0, v))[:, None]
+    shadow = smooth(.0, .12, np.minimum(np.minimum(u, 1 - u), np.minimum(v, 1 - v)))     # the bevel's shade
+    col = card * (.55 + .45 * shadow)[:, None] * (1 - .3 * smooth(.6, 1.0, v))[:, None]   # darker toward the jaw
+    dent = gauss(np.hypot(u - .78, v - .25), .06) + gauss(np.hypot(u - .2, v - .8), .08)
+    col = col * (1 - .2 * dent)[:, None]
+    # the ink's printed drop shadow
+    H, W = MARK_IMG.shape
+    sh = MARK_IMG[np.clip(((v - .02) * H).astype(int), 0, H - 1), np.clip(((u - .02) * W).astype(int), 0, W - 1)]
+    col = col * (1 - .45 * sh)[:, None]
     col = mix(col, GOLD * .95, ink)
     col = mix(col, RGB(70, 50, 20), .7 * gauss(ink - .5, .12))                            # a dark rim on the ink
     return ret(col, .0015 * ink, spec=.15 + .8 * ink, gloss=12 + 40 * ink, metal=.6 * ink, soft=.2)
@@ -204,11 +238,14 @@ def box_front(pos, t):
 
 def box_side(pos, t):
     u, v = t["u"], t["v"]
-    card = BOX * (.93 + .07 * fbm(u * 30, v * 30, 13))[:, None]
-    seam = gauss(v - .5, .006) * .0
-    edge = smooth(.0, .06, np.minimum(np.minimum(u, 1 - u), np.minimum(v, 1 - v)))
+    grime = fbm(u * 6, v * 6, 23)
+    card = BOX * (.86 + .1 * fbm(u * 40, v * 40, 13) - .3 * smooth(.45, .95, grime))[:, None]
+    tape = band(u, .42, .58, .01) * (t["nrm"][:, 1] > .5)                         # packing tape over the top
+    card = mix(card, RGB(200, 170, 110), .6 * tape)
+    edge = smooth(.0, .14, np.minimum(np.minimum(u, 1 - u), np.minimum(v, 1 - v)))
+    card = card * (.6 + .4 * edge)[:, None] * (1 - .35 * smooth(.55, 1.0, v) * (t["nrm"][:, 1] < .5))[:, None]
     nrm = t["nrm"]
-    lift = 1.0 + .45 * np.clip(np.abs(nrm[:, 0]), 0, 1) + .15 * np.clip(-nrm[:, 2], 0, 1)   # the sides catch fill light
+    lift = 1.0 + .2 * np.clip(np.abs(nrm[:, 0]), 0, 1)
     return ret(card * ((.86 + .14 * edge) * lift)[:, None], np.zeros(len(u)), spec=.15, gloss=12, soft=1.0)
 
 
@@ -234,7 +271,8 @@ def case_field(pos, t):
     grain = fbm(u * 40, v * 40, 17)
     col = LEATHER * (.8 + .35 * grain)[:, None]
     stitch = gauss(np.minimum(np.minimum(u, 1 - u), np.minimum(v, 1 - v)) - .05, .01)
-    col = mix(col, LEATHER * .55, stitch)
+    col = mix(col, LEATHER * .45, stitch)
+    col = col * (.55 + .45 * smooth(.0, .15, np.minimum(np.minimum(u, 1 - u), np.minimum(v, 1 - v))))[:, None]
     clasp = sum(gauss(np.hypot(u - cu, v - .12), .04) for cu in (.3, .7))
     col = mix(col, GOLD, smooth(.3, .6, clasp))
     return ret(col, .001 * grain + .002 * clasp, spec=.3 + clasp, gloss=20 + 30 * clasp, metal=.7 * clasp)
