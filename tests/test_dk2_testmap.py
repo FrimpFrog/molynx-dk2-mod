@@ -223,7 +223,7 @@ def test_rule3_validator_catches_missing_portal(tm, files):
 def test_rule4_open_area(files):
     w, h, t = _tiles(_f(files, STEM, "Map.kld"))
     heart = next(i for i, x in enumerate(t) if x[0] == 14 and x[1] == 3)
-    area = _component(w, h, t, heart, lambda x: (x[0] == 8 and x[1] == 3) or x[0] in (3, 12, 14) and x[1] in (2, 3))
+    area = _component(w, h, t, heart, lambda x: (x[0] in (8, 32) and x[1] == 3) or x[0] in (3, 12, 14) and x[1] in (2, 3))
     floor = [i for i in area if t[i][0] in (3, 8)]
     assert len(floor) >= 900
     assert sum(1 for i in area if t[i][0] == 8 and t[i][1] == 3) >= 300
