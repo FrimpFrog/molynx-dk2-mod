@@ -131,9 +131,12 @@ def _restrict(part, mask: np.ndarray):
 class PartTracker:
     """A body part's rigid pose in each frame of a clip, relative to the reference frame."""
 
-    def __init__(self, ref: Clip, ref_frame: int, boxes: dict, min_height: float | None = None):
+    def __init__(self, ref: Clip, ref_frame: int, boxes: dict, min_height: float | None = None, select=None):
         self.boxes = boxes
+        self.select = select
         part = ref.part(boxes)
+        if select is not None:
+            part = select(ref, part)
         pts = ref.points(ref_frame, part)
         self.ref = {}
         low = set()
@@ -143,6 +146,7 @@ class PartTracker:
             self.ref.setdefault(k, []).append(p)
         for k in low:                      # a key also used below the part (a seam) is not the part's
             self.ref.pop(k, None)
+        self.ref_body = np.concatenate([ref.frames[ref_frame][s] for s in ref.troll])
 
     def poses(self, clip: Clip, select=None):
         """Per frame (R, t) taking the reference part onto the clip's part.
@@ -152,14 +156,18 @@ class PartTracker:
         for several vertices, e.g. a mirrored half, is paired with the nearest after a first fit on the
         unambiguous ones, and the worst fifth of the pairs is dropped)."""
         part = clip.part(self.boxes)
+        select = select or self.select
         if select is not None:
-            part = select(clip, part)
+            try:
+                part = select(clip, part)
+            except ValueError:            # no piece of the part at all (TRO_WalkBack's other mapping)
+                return self._poses_by_shape(clip)
         keys = clip.keys(part)
         mine = np.array([k in self.ref for k in keys])
         # keep only the vertices whose key is the part's (the UV box also catches seam vertices)
         part = _restrict(part, mine)
         keys = [k for k, m in zip(keys, mine) if m]
-        if len(keys) < 8:
+        if len(keys) < 5:
             return self._poses_by_shape(clip)
         p0 = clip.points(0, part)
         use = np.ones(len(keys), bool)
@@ -185,24 +193,28 @@ class PartTracker:
 
     def _poses_by_shape(self, clip: Clip):
         """For a file mapped differently from the others (the game's TRO_WalkBack uses an older UV
-        layout): the part is the top of the body in frame 0 (within the reference part's height span
-        of the top), tied to the reference by nearest-point ICP."""
-        refp = np.concatenate([np.array(v) for v in self.ref.values()])
-        span = float(refp[:, 2].max() - refp[:, 2].min())
+        layout): the whole body of the clip's frame 0 is tied to the reference body by nearest-point
+        ICP, and the part is the clip's vertices nearest the reference part's."""
+        body = np.concatenate([clip.frames[0][s] for s in clip.troll])
+        r, t = np.eye(3), body.mean(0) - self.ref_body.mean(0)
+        for _ in range(40):
+            moved = self.ref_body @ r.T + t
+            near = body[np.argmin(np.linalg.norm(moved[:, None] - body[None], axis=2), axis=1)]
+            r, t = kabsch(self.ref_body, near)
+        refp = np.concatenate([np.array(v) for v in self.ref.values()]) @ r.T + t
+        # the clip's vertex nearest each mapped reference vertex, and all vertices at those places
+        cand = [(s, i) for s in clip.troll for i in range(len(clip.frames[0][s]))]
+        cpos = np.array([clip.frames[0][s][i] for s, i in cand])
+        picked = {int(np.argmin(np.linalg.norm(cpos - q, axis=1))) for q in refp}
+        places = cpos[sorted(picked)]
         part = []
-        allz = np.concatenate([clip.frames[0][s][:, 2] for s in clip.troll])
-        top = float(allz.min())
         for s in clip.troll:
-            m = clip.frames[0][s][:, 2] <= top + span
+            d = np.linalg.norm(clip.frames[0][s][:, None] - places[None], axis=2).min(1)
+            m = d < 1e-4
             if m.any():
                 part.append((s, m))
         p0 = clip.points(0, part)
-        r, t = np.eye(3), p0.mean(0) - refp.mean(0)
-        for _ in range(30):
-            moved = refp @ r.T + t
-            near = p0[np.argmin(np.linalg.norm(moved[:, None] - p0[None], axis=2), axis=1)]
-            r, t = kabsch(refp, near)
-        self.residual = float(np.quantile(np.linalg.norm(refp @ r.T + t - near, axis=1), 0.8))
+        self.residual = float(np.quantile(np.linalg.norm(self.ref_body @ r.T + t - near, axis=1), 0.8))
         out = []
         for f in range(len(clip.frames)):
             rf, tf = kabsch(p0, clip.points(f, part))
@@ -237,7 +249,7 @@ def _material(base: Material, name: str, texture: str) -> Material:
     return Material(name, [texture], base.flags, base.brightness, base.shininess, base.environment_map)
 
 
-def orc_kmf(clip: Clip, accessories: list[Accessory], poses: dict, lods: int = 16) -> Kmf:
+def orc_kmf(clip: Clip, accessories: list[Accessory], poses: dict, lods: int = 16, name: str | None = None) -> Kmf:
     """The clip with Orc skins and the accessories, re-encoded."""
     model = clip.model
     mats = []
@@ -276,7 +288,7 @@ def orc_kmf(clip: Clip, accessories: list[Accessory], poses: dict, lods: int = 1
         a = model.anim
         anim = None
         for tol in KEY_TOLERANCES:
-            anim = encode_anim(PREFIX + clip.stem, sprites, frames, a.wrap, a.controls, tolerance=tol)
+            anim = encode_anim(name or PREFIX + clip.stem, sprites, frames, a.wrap, a.controls, tolerance=tol)
             if len(anim.geom_xyz) - 1 <= GAME_MAX_KEYS:
                 break
         return Kmf(model.version, "anim", mats, anim=anim, groups=model.groups)
@@ -286,7 +298,7 @@ def orc_kmf(clip: Clip, accessories: list[Accessory], poses: dict, lods: int = 1
             g[v.geom] = q
     old = model.mesh
     centre = (g.min(0) + g.max(0)) / 2
-    mesh = Mesh(PREFIX + clip.stem, tuple(map(float, centre)), float(np.linalg.norm(g - centre, axis=1).max()),
+    mesh = Mesh(name or PREFIX + clip.stem, tuple(map(float, centre)), float(np.linalg.norm(g - centre, axis=1).max()),
                 sprites, [tuple(map(float, q)) for q in g], old.controls)
     return Kmf(model.version, "mesh", mats, mesh=mesh, groups=model.groups)
 
@@ -299,3 +311,203 @@ def _mm(acc: Accessory) -> float:
 
 def write(model: Kmf, path: Path) -> None:
     Path(path).write_bytes(write_kmf(model))
+
+
+# ------------------------------------------------------------------------------------- skins
+
+ORC_SKIN_HUE = 344 / 360        # the DK1 Orc's magenta-crimson (sprite median (105, 36, 44), lit ~(190, 70, 120))
+STONE = np.array([0.70, 0.64, 0.50])   # the mallet head: pale sandstone, not grey iron
+
+
+def _hsv(a):
+    mx, mn = a.max(-1), a.min(-1)
+    d = mx - mn
+    h = np.zeros_like(mx)
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    nz = d > 1e-9
+    i = nz & (mx == r)
+    h[i] = ((g - b)[i] / d[i]) % 6
+    i = nz & (mx == g) & ~(mx == r)
+    h[i] = (b - r)[i] / d[i] + 2
+    i = nz & (mx == b) & ~(mx == r) & ~(mx == g)
+    h[i] = (r - g)[i] / d[i] + 4
+    return h / 6, np.where(mx > 0, d / np.maximum(mx, 1e-9), 0), mx
+
+
+def _rgb(h, s, v):
+    i = np.floor(h * 6).astype(int) % 6
+    f = h * 6 - np.floor(h * 6)
+    p, q, t = v * (1 - s), v * (1 - f * s), v * (1 - (1 - f) * s)
+    out = np.stack([np.choose(i, [v, q, p, p, t, v]), np.choose(i, [t, v, v, q, p, p]),
+                    np.choose(i, [p, p, t, v, v, q])], -1)
+    return out
+
+
+def _smooth(x, a, b):
+    t = np.clip((x - a) / (b - a), 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+def orc_skin(troll_tex, name: str):
+    """The Troll's skin with his green turned the Orc's magenta (shading kept), and on the front skin the
+    mallet's grey iron head turned pale stone."""
+    from PIL import Image
+    a = np.asarray(troll_tex.convert("RGB"), np.float32) / 255
+    h, s, v = _hsv(a)
+    deg = h * 360
+    # how green a pixel is: 1 inside 70..165 deg, fading out to 45 and 185; greyish greens count less
+    green = _smooth(deg, 45, 70) * (1 - _smooth(deg, 165, 185)) * _smooth(s, 0.08, 0.22)
+    nh = np.full_like(h, ORC_SKIN_HUE)
+    ns = np.clip(s * 0.95, 0, 0.85)
+    nv = np.clip(v * 1.05, 0, 1)
+    orc = _rgb(nh, ns, nv)
+    out = a * (1 - green[..., None]) + orc * green[..., None]
+    if name == "trollfrnt":
+        hgt, wid = a.shape[:2]
+        yy, xx = np.mgrid[0:hgt, 0:wid] / np.array([hgt, wid])[:, None, None]
+        box = np.zeros((hgt, wid), bool)
+        for u0, v0, u1, v1 in MALLET_HEAD_UV["trollfrnt"]:
+            box |= (xx >= u0) & (xx <= u1) & (yy >= v0) & (yy <= v1)
+        grey = box & (s < 0.2)
+        lum = a.mean(-1)
+        stone = STONE[None, None] * (0.45 + 0.9 * lum[..., None])
+        out[grey] = stone[grey]
+    return Image.fromarray((np.clip(out, 0, 1) * 255 + 0.5).astype(np.uint8))
+
+
+MALLET_HEAD_UV = {"trollfrnt": [(0.0, 0.66, 0.45, 1.0), (0.45, 0.66, 0.84, 0.87), (0.76, 0.0, 1.0, 0.19)]}
+
+
+class TextureOverlay:
+    """A TextureCache with some textures replaced or added (for previews)."""
+
+    def __init__(self, base, extra: dict):
+        self.base = base
+        self.extra = {f"{k}MM0": v for k, v in extra.items()}
+        self.names = list(base.names) + list(self.extra)
+
+    def get(self, name):
+        return self.extra[name] if name in self.extra else self.base.get(name)
+
+
+# ------------------------------------------------------------------------------------- the free hand
+
+FOREARM_UV = {"trollfrnt": [(0.80, 0.18, 1.0, 0.36)], "trollback": [(0.84, 0.20, 1.0, 0.36)]}
+
+
+def _pieces(clip: Clip, part):
+    """The part's vertices split into connected pieces (triangles inside the part, and vertices at one
+    place joined across sprites); each piece a list of (sprite, vertex)."""
+    p0 = clip.frames[0]
+    items = [(s, i) for s, m in part for i in np.flatnonzero(m)]
+    index = {it: k for k, it in enumerate(items)}
+    parent = list(range(len(items)))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def join(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    sprites = clip.sprites()
+    for s, m in part:
+        for tri in sprites[s].triangles[0]:
+            ks = [index.get((s, int(v))) for v in tri]
+            ks = [k for k in ks if k is not None]
+            for k in ks[1:]:
+                join(ks[0], k)
+    pts = np.array([p0[s][i] for s, i in items])
+    for a in range(len(items)):
+        for b in np.flatnonzero(np.linalg.norm(pts - pts[a], axis=1) < 1e-4):
+            join(a, int(b))
+    groups = {}
+    for k in range(len(items)):
+        groups.setdefault(find(k), []).append(items[k])
+    return [g for g in groups.values() if len(g) >= 3]
+
+
+def _as_part(clip: Clip, part, keep: set):
+    out = []
+    for s, m in part:
+        mm = np.zeros_like(m)
+        for i in np.flatnonzero(m):
+            mm[i] = (s, i) in keep
+        if mm.any():
+            out.append((s, mm))
+    return out
+
+
+def _key(clip: Clip, s: int, i: int):
+    return (clip.texture(s), tuple(np.round(clip.uv(s)[i], 4)))
+
+
+def free_forearm(clip: Clip, part):
+    """The reference's free forearm: of the two forearm pieces, the one farther from the mallet head."""
+    mallet = clip.points(0, clip.part(MALLET_HEAD_UV)).mean(0)
+    best = max(_pieces(clip, part), key=lambda g: np.linalg.norm(
+        np.mean([clip.frames[0][s][i] for s, i in g], 0) - mallet))
+    return _as_part(clip, part, set(best))
+
+
+class ForearmPicker:
+    """In any clip, the forearm piece whose UV keys are most like the reference's free forearm's (the
+    two forearms map mostly the same texels but not all; the keys only one of them uses decide)."""
+
+    def __init__(self, ref: Clip):
+        part = ref.part(FOREARM_UV)
+        free = free_forearm(ref, part)
+        free_keys = set(ref.keys(free))
+        all_pieces = _pieces(ref, part)
+        other = set()
+        for g in all_pieces:
+            ks = {_key(ref, s, i) for s, i in g}
+            if not ks <= free_keys:
+                other |= ks
+        self.only_free = free_keys - other
+        self.only_other = other - free_keys
+
+    def __call__(self, clip: Clip, part):
+        def score(g):
+            ks = [_key(clip, s, i) for s, i in g]
+            return sum(k in self.only_free for k in ks) - sum(k in self.only_other for k in ks)
+        best = max(_pieces(clip, part), key=score)
+        return _as_part(clip, part, set(best))
+
+
+# ------------------------------------------------------------------------------------- everything
+
+
+def export(meshes_dir: Path, cache, out_dir: Path) -> dict:
+    """Write the Orc's 28 files (Orc-<slot>.kmf, one per Troll slot) and his three skins (PNG) into
+    out_dir. Returns per file: frames, keys, triangles of the first LOD."""
+    from scripts.dk2kmf_write import anim_invariants
+    from scripts.orc_gear import GEAR, buckler, gear_texture, mane
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ref = load_clip(meshes_dir, REFERENCE[0])
+    head = PartTracker(ref, REFERENCE[1], HEAD_UV, HEAD_MIN_HEIGHT)
+    hand = PartTracker(ref, REFERENCE[1], FOREARM_UV, select=ForearmPicker(ref))
+    accs = [mane(np.concatenate([np.array(v) for v in head.ref.values()])),
+            buckler(np.concatenate([np.array(v) for v in hand.ref.values()]))]
+    info = {}
+    for slot, stem in TROLL_FILES.items():
+        clip = load_clip(meshes_dir, stem)
+        k = orc_kmf(clip, accs, {"head": head.poses(clip), "hand": hand.poses(clip)}, name=PREFIX + slot)
+        if k.anim is not None:
+            bad = anim_invariants(k.anim)
+            if bad:
+                raise ValueError(f"{slot}: {bad}")
+        (out_dir / f"{PREFIX}{slot}.kmf").write_bytes(write_kmf(k))
+        x = k.anim or k.mesh
+        info[slot] = {"from": stem, "frames": k.anim.frame_count if k.anim else 1,
+                      "keys": len(k.anim.geom_xyz) - 1 if k.anim else 0,
+                      "tris": sum(len(s.triangles[0]) for s in x.sprites)}
+    for troll, orc in SKINS.items():
+        orc_skin(cache.get(troll + "MM0"), troll).save(out_dir / f"{orc}.png")
+    gear_texture().save(out_dir / f"{GEAR}.png")
+    return info
