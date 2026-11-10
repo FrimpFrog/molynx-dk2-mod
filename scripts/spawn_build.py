@@ -39,8 +39,8 @@ PREFIX = "DemonSpawn-"
 HEIGHT_RATIO = 0.56            # x the Bile Demon's idle1 height (0.536): 0.30 KMF units
 PART_LABEL = {BODY: "Body", HEAD_TEX: "Head"}
 BODY_PARTS = ("trunk", "head", "jaw", "legs")
-HOLD = np.array([0, .365, .12])           # on the back between the shoulders (model space, bind; chest bone)
-MOUTH = np.array([0, .175, .37])           # inside the maw (head bone, bind)
+HOLD = np.array([0, .43, .12])           # on the back between the shoulders (model space, bind; chest bone)
+MOUTH = np.array([0, .225, .37])           # inside the maw (head bone, bind)
 CHICKEN_Z = 0.74                         # the chicken stands this far forward (model units) of the spawn
 TONGUE_FLOOR = 0.004
 FREE_TONGUE = ("being_picked_up", "torture")
@@ -152,13 +152,16 @@ def _eat(plan, poses, model, tongue_i, meshes_dir):
         elif t < T["reel"]:                    # stuck on the tongue's tip, reeled in, tumbling a little
             u = (t - T["hit"]) / (T["reel"] - T["hit"])
             pos = tip + (floor_c - reach)
+            pos[1] = max(pos[1], floor_c[1] * 1.15)       # never through the floor
             a = .6 * _smooth(u)
             Rc = np.array([[1, 0, 0], [0, np.cos(a), -np.sin(a)], [0, np.sin(a), np.cos(a)]])
             s = 1.0
         else:                                  # in the maw, swallowed
             u = np.clip((t - T["reel"]) / (T["gone"] - T["reel"]), 0, 1)
             k = _smooth(u * 2)
-            pos = (tip + (floor_c - reach)) * (1 - k) + mouth * k
+            start = tip + (floor_c - reach)
+            start[1] = max(start[1], floor_c[1] * 1.15)
+            pos = start * (1 - k) + mouth * k
             Rc = R
             s = float(1 - _smooth(u))
         out_chicken.append([plan.to_kmf([pos + s * (q @ Rc.T)])[0] for q in local])

@@ -2,23 +2,26 @@
 weights, UVs. Built the way the Dragon is (scripts.dragon_model: its Part, loft, cone, fin, forward and
 Skinner, here on the spawn's own Skeleton).
 
-To the DK1 sprites (CREATURE.JTY, Stand 666, Ambulate 664, Attack 668 ...; demonspawn.cfg): the baby dragon,
-a squat four-legged olive-green reptile. A wide, heavy, domed body hunched forward, a row of pale spikes
-from the crown of the head down the spine and the long tapering tail that lies on the ground behind it; a
-short broad head held low with small orange-red eyes on top and a big gaping, glowing red-orange maw (the
-jaw is built open, JAW_OPEN, and the mouth's inside is painted as a glow); splayed front legs with long
-bone-coloured claws, thick back legs; a red tongue that lolls out of the mouth (the eating clip shoots it
-at the chicken, see spawn_build).
+To the DK1 sprites (CREATURE.JTY, Stand 666, Ambulate 664, Attack 668 ...; demonspawn.cfg), read as the baby
+dragon it is: a squat, hunched BIPED, like a little toad-lizard T-rex. A wide, heavy, domed body tilted
+forward over two thick digitigrade hind legs (thigh, shin, a long raised foot, three forward toes and a
+backward spur at each ankle), the long tapering tail lying on the floor behind as the counterweight. The
+front limbs are arms: they hang from the shoulders under the chest, reaching forward, long clawed hands
+just off the floor. A row of spikes from the crown down the spine and the tail; a short broad head held low
+with big bulging toad's eyes on top (raised domes, glowing orange-red) and a big gaping, glowing maw (the
+jaw is built open, JAW_OPEN) with big fangs; a red tongue lolling out (the eating clip shoots it at the
+chicken, see spawn_build).
 
 Model space as the Dragon's: Y up, Z forward, X to the creature's LEFT; triangles counter-clockwise seen
-from outside (the KMF export mirrors x into the game's winding). The model is about 1.0 unit from nose
-to tail tip and 0.41 tall at the hump (spikes 0.47); spawn_build scales its files. 327 triangles.
+from outside (the KMF export mirrors x into the game's winding). About 1.0 unit from nose to tail tip and
+0.5 tall at the hump; spawn_build scales its files.
 
 Parts (two 128 x 128 skins: DemonSpawn_Body, DemonSpawn_Head):
   trunk   one 8-sided loft from the tail tip to the neck (belly plates on its ventral faces)
-  legs    four 4-sided lofts shoulder-elbow-wrist-hand (hip-knee-ankle-foot), three claws each
-  head    skull (6-sided loft, the palate its floor), upper fangs, the crown spike, the throat
-  jaw     lower jaw (5-sided loft, U-shaped, built open), lower fangs, the throat
+  legs    two 5-sided lofts hip-knee-ankle-ball, three toe claws and an ankle spur each
+  arms    two 4-sided lofts shoulder-elbow-wrist-hand, three long claws each
+  head    skull (6-sided loft, the palate its floor), two eye domes, the crown spike, upper fangs (cones)
+  jaw     lower jaw (5-sided loft, U-shaped, built open), lower fangs (cones), the throat
   tongue  a flat 4-sided loft lying in the jaw, its tip hanging out
   spikes  double-sided fins along the back and the tail
 
@@ -33,22 +36,23 @@ from scripts.dragon_model import Part, Skeleton, Skinner, _frames, _head_section
 
 # name, parent, head (bind position), tail (end of its segment, for weights)
 _BONES_L = [
-    ("root", None, (0, 0.215, -0.12), (0, 0.245, 0.03)),
-    ("spine", "root", (0, 0.245, 0.03), (0, 0.235, 0.16)),
-    ("chest", "spine", (0, 0.235, 0.16), (0, 0.225, 0.24)),
-    ("neck", "chest", (0, 0.225, 0.24), (0, 0.235, 0.28)),
-    ("head", "neck", (0, 0.235, 0.28), (0, 0.215, 0.43)),
-    ("jaw", "head", (0, 0.2, 0.22), (0, 0.125, 0.42)),
-    ("tail1", "root", (0, 0.165, -0.22), (0, 0.115, -0.32)),
-    ("tail2", "tail1", (0, 0.115, -0.32), (0, 0.075, -0.42)),
-    ("tail3", "tail2", (0, 0.075, -0.42), (0, 0.045, -0.51)),
-    ("tail4", "tail3", (0, 0.045, -0.51), (0, 0.025, -0.6)),
-    ("upperFL", "chest", (0.16, 0.195, 0.16), (0.3, 0.155, 0.2)),
-    ("foreFL", "upperFL", (0.3, 0.155, 0.2), (0.33, 0.035, 0.25)),
-    ("handFL", "foreFL", (0.33, 0.035, 0.25), (0.35, 0.012, 0.31)),
-    ("thighBL", "root", (0.15, 0.195, -0.12), (0.29, 0.145, -0.03)),
-    ("shinBL", "thighBL", (0.29, 0.145, -0.03), (0.29, 0.042, -0.15)),
-    ("footBL", "shinBL", (0.29, 0.042, -0.15), (0.31, 0.012, -0.08)),
+    ("root", None, (0, .335, -.09), (0, .345, .03)),
+    ("spine", "root", (0, .345, .03), (0, .31, .15)),
+    ("chest", "spine", (0, .31, .15), (0, .28, .23)),
+    ("neck", "chest", (0, .28, .23), (0, .285, .28)),
+    ("head", "neck", (0, .285, .28), (0, .255, .43)),
+    ("jaw", "head", (0, .24, .22), (0, .165, .42)),
+    ("tail1", "root", (0, .27, -.21), (0, .17, -.32)),
+    ("tail2", "tail1", (0, .17, -.32), (0, .11, -.42)),
+    ("tail3", "tail2", (0, .11, -.42), (0, .07, -.52)),
+    ("tail4", "tail3", (0, .07, -.52), (0, .04, -.63)),
+    ("upperAL", "chest", (.15, .28, .17), (.24, .2, .15)),
+    ("foreAL", "upperAL", (.24, .2, .15), (.23, .17, .28)),
+    ("handAL", "foreAL", (.23, .17, .28), (.24, .15, .33)),
+    ("thighL", "root", (.15, .3, -.07), (.26, .19, .07)),
+    ("shinL", "thighL", (.26, .19, .07), (.22, .09, -.08)),
+    ("footL", "shinL", (.22, .09, -.08), (.23, .02, .0)),
+    ("toesL", "footL", (.23, .02, .0), (.235, .006, .08)),
 ]
 
 
@@ -66,8 +70,8 @@ SKEL = Skeleton(_build_bones())
 BONES, BONE_NAMES, BONE_INDEX = SKEL.bones, SKEL.names, SKEL.index
 PARENT, HEAD, TAIL = SKEL.parent, SKEL.head, SKEL.tail
 NB_BONES = len(BONES)
-LEGS = {"FL": ("upperFL", "foreFL", "handFL"), "FR": ("upperFR", "foreFR", "handFR"),
-        "BL": ("thighBL", "shinBL", "footBL"), "BR": ("thighBR", "shinBR", "footBR")}
+LEGS = {s: tuple(b + s for b in ("thigh", "shin", "foot", "toes")) for s in "LR"}
+ARMS = {s: tuple(b + s for b in ("upperA", "foreA", "handA")) for s in "LR"}
 
 
 class SpawnPart(Part):
@@ -89,15 +93,15 @@ def _rx(deg):
 # ------------------------------------------------------------------------------------------- trunk
 
 TRUNK_PATH = np.array([
-    (0, .06, -.49), (0, .095, -.37), (0, .148, -.245),         # the tail, lying on the ground
-    (0, .215, -.12), (0, .245, .03), (0, .235, .16),           # pelvis, the hump, the shoulders
-    (0, .23, .24),                                             # the neck (inside the head's back)
+    (0, .115, -.4), (0, .22, -.26),                            # the tail, sloping down to the floor
+    (0, .335, -.1), (0, .345, .03), (0, .31, .15),             # the pelvis (high), the hump, the shoulders
+    (0, .28, .23),                                             # the neck (inside the head's back)
 ])
 # (dorsal-ventral, lateral) half sizes: a squat, wide, heavy, domed body
-TRUNK_RADII = [(.028, .032), (.05, .058), (.085, .1), (.16, .205), (.165, .235), (.14, .21), (.1, .15)]
-TRUNK_TIP = np.array([0, .04, -.6])
+TRUNK_RADII = [(.05, .058), (.09, .1), (.14, .165), (.155, .2), (.135, .18), (.1, .14)]
+PELVIS_RING = 2
+TRUNK_TIP = np.array([0, .04, -.64])
 TRUNK_BONES = ["root", "spine", "chest", "neck", "tail1", "tail2", "tail3", "tail4"]
-TAIL_RINGS = 3            # rings 0..2 are the tail
 
 
 def _trunk_hint(path):
@@ -108,7 +112,7 @@ def trunk_shape(i, th):
     c = np.cos(th)
     if c < -0.3:                 # a broad, low-slung belly
         return 0.95, 1.06
-    if c > 0.6 and i >= 3:       # a high ridge along the hump
+    if c > 0.6 and i >= PELVIS_RING:       # a high ridge along the hump
         return 1.06, 1.0
     return 1.0, 1.0
 
@@ -125,14 +129,21 @@ def build_trunk(parts):
 # ------------------------------------------------------------------------------------------- head
 
 HEAD_RINGS = [  # centre, lateral, up, down (to the lip line): a short, broad, toad-like head
-    ((0, .245, .23), .15, .10, .07),           # behind the eyes: the jaw muscles
-    ((0, .245, .32), .165, .09, .08),          # the brow: the widest part, eyes on top
-    ((0, .22, .39), .125, .06, .07),           # the blunt snout
+    ((0, .295, .23), .15, .10, .07),           # behind the eyes: the jaw muscles
+    ((0, .295, .32), .165, .09, .08),          # the brow: the widest part, the eyes on top
+    ((0, .27, .39), .125, .06, .07),           # the blunt snout
 ]
-SNOUT_TIP = np.array([0, .21, .43])
-SKULL_BACK = np.array([0, .275, .17])
+SNOUT_TIP = np.array([0, .26, .43])
+SKULL_BACK = np.array([0, .325, .17])
 JAW_OPEN = 27.0              # degrees: the bind pose's gaping mouth
 HINGE = HEAD[BONE_INDEX["jaw"]]
+# the eyes: big bulging domes on top of the head (left; mirrored): base centre, outward axis
+EYE_BASE = np.array([.088, .358, .30])
+EYE_AXIS = np.array([.55, .75, .38])
+EYE_RADII = ((.034, .034), (.042, .042))      # base ring, the bulge
+EYE_STEPS = (0.0, .03, .058)                  # along the axis: base, bulge, apex
+UPPER_FANGS = ((.385, .085), (.325, .065))               # (z, length), each side
+LOWER_FANGS = ((2, .062),)                                # (jaw ring, length)
 
 
 def build_head(parts):
@@ -165,17 +176,26 @@ def build_head(parts):
     back = part.add(SKULL_BACK, (0.5, 0.0), "head", "skull", ring=-1, k=-1)
     for k in range(6):
         part.tri(rings[0][(k + 1) % 6], rings[0][k], back, inside=inner[0] + (inner[0] - SKULL_BACK))
-    # the crown spike on top of the head (the front view's single spike)
-    fin(part, "spike", np.array([0, .33, .26]), np.array([0, .332, .33]), np.array([0, .395, .23]),
+    # the crown spike on top of the head (the front view's single spike), between the eyes
+    fin(part, "spike", np.array([0, .38, .22]), np.array([0, .386, .28]), np.array([0, .445, .19]),
         (1, 0, 0), "head", "head")
-    # upper fangs along the lip line, pointing down (double-sided)
+    # the eyes: bulging domes (5-sided: the lid ring sunk in the skin, the bulge, the apex)
+    for s in (1, -1):
+        m = np.array([s, 1, 1.0])
+        axis = _unit(EYE_AXIS * m)
+        base = EYE_BASE * m
+        path = np.array([base + axis * EYE_STEPS[0], base + axis * EYE_STEPS[1]])
+        loft(part, "eye", path, list(EYE_RADII), 5, (0, .3, 1.0), lambda i, p: "head",
+             end_point=base + axis * EYE_STEPS[2], tag=lambda i, th: {"along": min(i, 2) / 2.0},
+             side_axis_sign=s)
+    # big upper fangs along the lip line, pointing down and a little in (3-sided cones)
     zs = [r[0][2] for r in HEAD_RINGS]
     for s in (1, -1):
-        for z, l in ((.385, .055), (.33, .045)):
+        for z, l in UPPER_FANGS:
             c = np.array([0, .0, z])
-            c[1] = np.interp(z, zs, [lp[0][1] for lp in lips]) + .002
-            c[0] = s * np.interp(z, zs, [abs(lp[0][0]) for lp in lips]) * .88
-            fin(part, "fang", c + (0, 0, -.009), c + (0, 0, .009), c + (0, -l, .006), (s, 0, 0), "head", "head")
+            c[1] = np.interp(z, zs, [lp[0][1] for lp in lips]) + .006
+            c[0] = s * np.interp(z, zs, [abs(lp[0][0]) for lp in lips]) * .86
+            cone(part, "fang", c, c + np.array([-.012 * s, -l, .008]), .016, (s, 0, 0), "head", sides=3)
     parts.append(part)
     return part, rings
 
@@ -211,27 +231,28 @@ def build_jaw(parts, head_rings):
             c_, d_ = rings[i + 1][k], rings[i + 1][(k + 1) % 5]
             part.tri(a, b, c_, inside=mid)
             part.tri(b, d_, c_, inside=mid)
-    chin_p = op((0, .165, .425))
+    chin_p = op((0, .215, .425))
     chin = part.add(chin_p, (.5, 1.0), "jaw", "jaw", ring=3, k=-1)
     for k in range(5):
         part.tri(rings[-1][k], rings[-1][(k + 1) % 5], chin, inside=inner[-1] - (chin_p - inner[-1]))
-    back_p = op((0, .175, .18))
+    back_p = op((0, .225, .18))
     back = part.add(back_p, (.5, 0.0), "jaw", "jaw", ring=-1, k=-1)
     for k in range(5):
         part.tri(rings[0][(k + 1) % 5], rings[0][k], back, inside=inner[0] + (inner[0] - back_p))
-    # lower fangs, pointing up
+    # big lower fangs, pointing up (3-sided cones)
+    up = R @ np.array([0, 1.0, 0])
     for s in (1, -1):
-        p = np.asarray(part.points[rings[2][1 if s > 0 else 4]])
-        c = p + (-.006 * s, 0, -.012)
-        up = R @ np.array([0, 1.0, 0])
-        fin(part, "fang", c + (0, 0, -.009), c + (0, 0, .009), c + up * .04, (s, 0, 0), "jaw", "jaw")
+        for r, l in LOWER_FANGS:
+            p = np.asarray(part.points[rings[r][1 if s > 0 else 4]])
+            c = p + (-.01 * s, -.004, -.006)
+            cone(part, "fang", c, c + up * l + np.array([-.008 * s, 0, 0]), .014, (s, 0, 0), "jaw", sides=3)
     # the throat: a glowing wall closing the back of the gaping mouth (head lips to jaw lips, ring 0)
     hl, hr = (np.asarray(head.points[head_rings[0][k]]) for k in (2, 4))
     jl, jr = (np.asarray(part.points[rings[0][k]]) for k in (1, 4))
     hp = np.asarray(head.points[head_rings[0][3]])
     ids = [part.add(p, uv, w, "throat") for p, uv, w in
            ((hl, (0, 0), "head"), (hr, (1, 0), "head"), (jr, (1, 1), "jaw"), (jl, (0, 1), "jaw"),
-            (hp, (.5, -.2), "head"))]
+            (hp, (.5, 0), "head"))]
     front = np.array([0, 0, 1.0])
     for a, b, c in ((ids[0], ids[1], ids[2]), (ids[0], ids[2], ids[3]), (ids[0], ids[4], ids[1])):
         pa, pb, pc = (part.points[j] for j in (a, b, c))
@@ -245,7 +266,7 @@ def build_jaw(parts, head_rings):
 def tongue_path_rest():
     """The tongue lying in the open jaw, its tip lolling out over the chin (bind)."""
     R = _rx(JAW_OPEN)
-    closed = np.array([(0, .175, .27), (0, .165, .40)])
+    closed = np.array([(0, .225, .27), (0, .215, .40)])
     p = np.array([HINGE + R @ (c - HINGE) for c in closed])
     tip = p[-1] + np.array([0, -.05, .03])
     return np.vstack([p, tip])
@@ -268,42 +289,68 @@ def build_tongue(parts, path=None, weights=None):
     return part
 
 
-# ------------------------------------------------------------------------------------------- legs
+# ------------------------------------------------------------------------------------------- limbs
 
-LEG_PATHS = {   # left side; mirrored for the right
-    "F": np.array([(.16, .195, .16), (.30, .155, .20), (.33, .035, .25)]),
-    "B": np.array([(.15, .195, -.12), (.29, .145, -.03), (.29, .042, -.15)]),
-}
-LEG_ENDS = {"F": np.array([.343, .014, .285]), "B": np.array([.30, .014, -.115])}
-LEG_RADII = {"F": [(.08, .075), (.06, .056), (.04, .04)],
-             "B": [(.105, .095), (.072, .066), (.04, .04)]}
-# one dorsal hint per leg (the front of the limb): a hint that turns between rings twists the 4-sided loft
-LEG_HINTS = {"F": (0, .4, 1.0), "B": (0, .4, 1.0)}
-CLAWS = {"F": [(-.55, .095), (0.0, .11), (.55, .09)], "B": [(-.3, .08), (.35, .08)]}
+# hind legs (left; mirrored): hip, knee (forward and out), ankle (back, raised), ball of the foot
+LEG_PATH = np.array([(.15, .3, -.07), (.26, .19, .07), (.22, .09, -.08), (.23, .036, .0)])
+LEG_END = np.array([.232, .024, .04])
+LEG_RADII = [(.115, .105), (.085, .078), (.056, .05), (.038, .05)]
+TOE_CLAWS = [(-.45, .075), (0.0, .085), (.45, .07)]       # (spread, length), forward from the ball
+SPUR = (np.array([0, -.004, -.03]), np.array([0, -.03, -.085]))   # from the ankle: base offset, tip offset
+# arms (left; mirrored): shoulder, elbow (down and back), wrist (forward): carried bent in front of the
+# chest like a T-rex's, the long claws hooked down, the hands clear of the floor
+ARM_PATH = np.array([(.15, .28, .17), (.24, .2, .15), (.23, .17, .28)])
+ARM_END = np.array([.24, .155, .325])
+ARM_RADII = [(.06, .055), (.045, .042), (.03, .034)]
+HAND_CLAWS = [(-.5, .085), (0.0, .1), (.5, .08)]
+
+
+def _limb_weights(bones, n_rings):
+    def w(i, p):
+        if i <= 0:
+            return {bones[0]: 1.0}
+        if i >= n_rings:
+            return {bones[-1]: 1.0}
+        return auto_weights(p, list(bones))
+    return w
 
 
 def build_legs(parts):
     part = SpawnPart("legs", "DemonSpawn_Body")
-    for s in (1, -1):
+    for s, side in ((1, "L"), (-1, "R")):
         m = np.array([s, 1, 1.0])
-        for fb in "FB":
-            bones = LEGS[fb + ("L" if s > 0 else "R")]
-            path = LEG_PATHS[fb] * m
+        thigh, shin, foot, toes = LEGS[side]
+        path = LEG_PATH * m
+        # one dorsal hint for the whole limb (forward): a hint that turns between rings twists the loft,
+        # and one parallel to a ring's tangent (up, at the knee, whose tangent runs hip to ankle) collapses it
+        loft(part, "leg", path, LEG_RADII, 5, (0, .2, 1.0), _limb_weights((thigh, shin, foot, toes), 4),
+             end_point=LEG_END * m, tag=lambda i, th, s=s: {"theta": th, "ring": i, "side": s},
+             side_axis_sign=s)
+        ball = path[3] + np.array([0, -.014, 0])           # the toes spring from the sole
+        for dx, l in TOE_CLAWS:
+            d = _unit(np.array([dx * s, -.12, 1.0]))
+            base = ball + np.array([dx * s * .03, .002, .01])
+            cone(part, "claw", base, base + d * l + (0, -.0135, 0), .016, (0, 1, 0), toes, sides=3)
+        ankle = path[2]
+        cone(part, "claw", ankle + SPUR[0], ankle + SPUR[1], .014, (0, 1, 0), foot, sides=3)   # the spur
+    parts.append(part)
+    return part
 
-            def w(i, p, bones=bones):
-                if i == 0:
-                    return {bones[0]: 1.0}
-                if i >= 3:
-                    return {bones[2]: 1.0}
-                return auto_weights(p, list(bones))
-            loft(part, "leg", path, LEG_RADII[fb], 4, LEG_HINTS[fb], w, end_point=LEG_ENDS[fb] * m,
-                 tag=lambda i, th, s=s: {"theta": th, "ring": i, "side": s}, side_axis_sign=s)
-            ball = LEG_ENDS[fb] * m
-            for dx, l in CLAWS[fb]:
-                d = _unit(np.array([dx * s + (.35 * s if fb == "F" else 0), -.15, 1.0]))
-                base = ball + np.array([dx * s * .028, .006, -.01])
-                cone(part, "claw", base, base + d * l + (0, -.005, 0), .015, (0, 1, 0), bones[2], sides=3,
-                     tag={"claw": True})
+
+def build_arms(parts):
+    part = SpawnPart("arms", "DemonSpawn_Body")
+    for s, side in ((1, "L"), (-1, "R")):
+        m = np.array([s, 1, 1.0])
+        upper, fore, hand = ARMS[side]
+        path = ARM_PATH * m
+        loft(part, "arm", path, ARM_RADII, 4, (0, .3, 1.0), _limb_weights((upper, fore, hand), 3),
+             end_point=ARM_END * m, tag=lambda i, th, s=s: {"theta": th, "ring": i, "side": s},
+             side_axis_sign=s)
+        knuckle = ARM_END * m + np.array([0, .004, -.012])
+        for dx, l in HAND_CLAWS:
+            d = _unit(np.array([dx * s + .2 * s, -.9, 1.0]))
+            base = knuckle + np.array([dx * s * .03, 0, 0])
+            cone(part, "claw", base, base + d * l, .015, (0, 1, 0), hand, sides=3)
     parts.append(part)
     return part
 
@@ -311,8 +358,8 @@ def build_legs(parts):
 # ------------------------------------------------------------------------------------------- spikes
 
 # (ring index along the trunk path as a float, length)
-SPIKES = [(.4, .026), (1.1, .036), (1.8, .046), (2.5, .056), (3.2, .066), (3.85, .072), (4.5, .07),
-          (5.2, .064), (5.85, .058)]
+SPIKES = [(.1, .036), (.8, .048), (1.5, .058), (2.2, .068), (2.85, .074), (3.5, .072), (4.2, .066),
+          (4.85, .06)]
 
 
 def build_spikes(parts):
@@ -327,7 +374,7 @@ def build_spikes(parts):
         t = _unit(frames[i][0] * (1 - u) + frames[j][0] * u)
         d = _unit(frames[i][1] * (1 - u) + frames[j][1] * u)
         r = TRUNK_RADII[i][0] * (1 - u) + TRUNK_RADII[j][0] * u
-        base = c + d * r * (1.0 if i >= 3 else .95)
+        base = c + d * r * (1.0 if i >= PELVIS_RING else .95)
         half = max(.014, length * .42)
         a, b = base - t * half, base + t * half
         tip = base + d * length - t * length * .5          # leaning toward the tail
@@ -342,6 +389,7 @@ def build_spawn():
     parts = []
     build_trunk(parts)
     build_legs(parts)
+    build_arms(parts)
     head, rings = build_head(parts)
     build_jaw(parts, rings)
     build_tongue(parts)
