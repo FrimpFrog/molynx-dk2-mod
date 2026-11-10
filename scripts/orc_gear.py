@@ -24,6 +24,7 @@ SIZE = 128
 SHIELD_FRONT = (0.0, 0.0, 0.5, 0.5)
 SHIELD_BACK = (0.5, 0.0, 1.0, 0.5)
 HAIR = (0.0, 0.5, 1.0, 1.0)
+BALL = (0.9375, 0.4375, 1.0, 0.5)     # an 8 x 8 corner of the shield back's square, outside its circle
 
 
 # ------------------------------------------------------------------------------------- geometry
@@ -68,56 +69,73 @@ def _outward(p, tris, centre):
 
 
 def mane(head: np.ndarray, seed: int = 7) -> Accessory:
-    """A shaggy closed bush over the top and back of the head, clear of the face, with spiky tufts and
-    a crest at the front. head: the head's reference points (KMF)."""
+    """Hair slicked back: a smooth cap over the top of the head from the hairline, swept backwards and
+    down into a tapering tail behind the skull, ending in three swept-back points; clear of the face.
+    head: the head's reference points (KMF)."""
     rng = np.random.default_rng(seed)
     lo, hi = head.min(0), head.max(0)
     cx = (lo[0] + hi[0]) / 2
     top = lo[2]                                   # z of the crown (most negative)
     back = lo[1]
-    centre = np.array([cx, back + 0.030, top + 0.052])
-    radii = np.array([(hi[0] - lo[0]) / 2 + 0.014, 0.064, 0.078])
+    centre = np.array([cx, back + 0.030, top + 0.038])
+    radii = np.array([(hi[0] - lo[0]) / 2 + 0.002, 0.070, 0.046])
     v, f = _icosphere(1)
     p = centre + v * radii
-    hairline = lo[1] + 0.62 * (hi[1] - lo[1])      # nothing forward of this but the crest ...
-    brow = top + 0.026                             # ... and in front of the ears nothing below the brow
+    hairline = lo[1] + 0.66 * (hi[1] - lo[1])
+    brow = top + 0.024
     for i in range(len(p)):
-        up = (centre[2] - p[i, 2]) / radii[2]     # +1 at the top of the bush, -1 at its bottom
-        lim = hairline + (0.02 if up > 0.55 else 0.0)
-        if p[i, 1] > lim:
-            p[i, 1] = lim
-        fwd = (p[i, 1] - (back + 0.012)) / 0.035  # 0 at the back of the skull, 1 by the ears
+        if p[i, 1] > hairline:
+            p[i, 1] = hairline
+        fwd = (p[i, 1] - (back + 0.012)) / 0.035
         if fwd > 0 and p[i, 2] > brow:
             p[i, 2] = brow + (p[i, 2] - brow) * max(0.0, 1 - fwd) * 0.3
-        # spikes: tufts pushed out from the centre, longest on the top and back
-        d = p[i] - centre
-        d /= np.linalg.norm(d)
-        k = 0.008 + 0.020 * rng.random() * (0.6 + 0.4 * max(up, 0.0)) * (1.2 if p[i, 1] < centre[1] else 1.0)
-        if i % 3 == 0:
-            k *= 1.7
-        p[i] += d * k
-    # the crest: four tall tufts along the top, from the hairline back
-    crest = []
-    for j, y in enumerate(np.linspace(hairline + 0.01, back + 0.03, 4)):
-        base = np.array([cx + rng.uniform(-0.01, 0.01), y, top - 0.012])
-        tip = base + np.array([rng.uniform(-0.008, 0.008), 0.018 - 0.012 * j, -0.05 + 0.006 * j])
-        w = 0.016
-        crest.append((base + [-w, -w * 0.6, 0], base + [w, -w * 0.6, 0], base + [0, w, 0], tip))
+        # swept back: behind the crown the hair is pulled backwards and down and narrows to a tail
+        e = max(0.0, (centre[1] - p[i, 1]) / radii[1])
+        p[i, 1] -= 0.034 * e * e
+        p[i, 2] += 0.026 * e * e
+        p[i, 0] = cx + (p[i, 0] - cx) * (1 - 0.35 * e)
+        below = max(0.0, (p[i, 2] - centre[2]) / radii[2])   # the lower half hugs the skull
+        p[i, 0] = cx + (p[i, 0] - cx) * (1 - 0.18 * below)
+        p[i] += (rng.random(3) - 0.5) * 0.004          # a little unevenness, no tufts
+    # three swept-back points at the tail
+    tail_y = p[:, 1].min()
+    tail = p[np.argmin(p[:, 1])]
+    tips = []
+    for j, dx in enumerate((-0.022, 0.0, 0.022)):
+        base = tail + np.array([dx, 0.012, -0.004 + 0.004 * abs(dx) / 0.022])
+        tip = base + np.array([dx * 0.5, -0.042 - 0.008 * (j == 1), 0.022])
+        w = 0.011
+        tips.append((base + [-w, 0, 0], base + [w, 0, 0], base + [0, 0.004, -w], tip))
+    del tail_y
     pts = [p]
     tris = [f]
     n = len(p)
-    for b0, b1, b2, tip in crest:
+    for b0, b1, b2, tip in tips:
         pts.append(np.array([b0, b1, b2, tip]))
         tris.append(np.array([(n, n + 1, n + 3), (n + 1, n + 2, n + 3), (n + 2, n, n + 3), (n, n + 2, n + 1)]))
         n += 4
     P = np.concatenate(pts)
     T = np.concatenate(tris)
     T = _outward(P, T, centre)
-    # UVs: around the vertical axis for u, height for v, inside the hair region
-    az = (np.arctan2(P[:, 0] - cx, P[:, 1] - centre[1]) / (2 * np.pi)) % 1.0
-    ht = np.clip((P[:, 2] - (top - 0.07)) / (radii[2] * 2 + 0.07), 0, 1)
-    uv = np.stack([HAIR[0] + (HAIR[2] - HAIR[0]) * az, HAIR[1] + (HAIR[3] - HAIR[1]) * ht], 1)
+    # UVs from above: across the head for u, front to back for v, so the painted strands run backwards
+    span_x = (P[:, 0].max() - P[:, 0].min()) or 1.0
+    span_y = (P[:, 1].max() - P[:, 1].min()) or 1.0
+    u = (P[:, 0] - P[:, 0].min()) / span_x
+    w = (P[:, 1].max() - P[:, 1]) / span_y
+    uv = np.stack([HAIR[0] + (HAIR[2] - HAIR[0]) * u, HAIR[1] + (HAIR[3] - HAIR[1]) * w], 1)
     return Accessory("Mane", P, T, uv, GEAR, "head")
+
+
+def ball(at: np.ndarray, radius: float = 0.017) -> Accessory:
+    """The little brown ball DK1 gave its Orc and Troll between the legs, hanging just below and in
+    front of the crotch."""
+    v, f = _icosphere(0)
+    centre = at + np.array([0.0, 0.004, radius * 0.6])
+    P = centre + v * np.array([radius, radius * 0.9, radius * 1.1])
+    T = _outward(P, f, centre)
+    u = BALL[0] + (BALL[2] - BALL[0]) * (0.5 + 0.45 * v[:, 0])
+    w = BALL[1] + (BALL[3] - BALL[1]) * (0.5 + 0.45 * v[:, 2])
+    return Accessory("Ball", P, T, np.stack([u, w], 1), GEAR, "hips")
 
 
 def buckler(hand: np.ndarray, radius: float = 0.082) -> Accessory:
@@ -261,26 +279,35 @@ def gear_texture(seed: int = 3) -> Image.Image:
     strap = np.abs(yy[:h, :h] - cy) < 5
     back[strap] = np.array([0.24, 0.13, 0.07]) * (0.8 + 0.2 * _noise((h, h), 2, rng)[strap][..., None])
     img[:h, h:] = back
+    # the ball's patch: a shaded brown, lighter in the middle
+    bx0, by0 = int(BALL[0] * S), int(BALL[1] * S)
+    py, px = np.mgrid[0:8, 0:8]
+    rr = np.hypot(px - 3.0, py - 3.0) / 5
+    img[by0:by0 + 8, bx0:bx0 + 8] = np.array([0.50, 0.32, 0.16]) * (1.05 - 0.45 * rr)[..., None]
 
-    # --- hair (bottom half): straw strands running down, darker at the roots and in clumps
+    # --- hair (bottom half): combed straw strands running front to back (down the texture), slick,
+    # with a long sheen and dark grooves between the combed locks
     H = S - h
     strands = np.zeros((H, S), np.float32)
-    for _ in range(420):
+    for _ in range(260):
         x0 = rng.uniform(0, S)
-        y0 = rng.uniform(-10, H)
-        ln = rng.uniform(8, 26)
-        dx = rng.uniform(-0.25, 0.25)
+        y0 = rng.uniform(-20, H * 0.6)
+        ln = rng.uniform(30, 70)
+        dx = rng.uniform(-0.05, 0.05)
         b = rng.uniform(0.5, 1.0)
         for t in np.linspace(0, ln, int(ln * 2)):
             xi, yi = int(x0 + dx * t) % S, int(y0 + t)
             if 0 <= yi < H:
-                strands[yi, xi] = max(strands[yi, xi], b * (1 - t / ln * 0.5))
+                strands[yi, xi] = max(strands[yi, xi], b)
     strands = np.asarray(Image.fromarray((strands * 255).astype(np.uint8)).filter(
-        ImageFilter.GaussianBlur(0.6)), np.float32) / 255
-    clump = _noise((H, S), 10, rng)
-    base = np.array([0.62, 0.48, 0.24])
-    hi = np.array([0.95, 0.82, 0.52])
-    hair = base * (0.50 + 0.40 * clump[..., None]) + (hi - base) * strands[..., None] * 0.9
-    hair *= (0.75 + 0.25 * (yy[h:, :] - h)[..., None] / H)
+        ImageFilter.GaussianBlur(0.5)), np.float32) / 255
+    xs = xx[h:, :]
+    locks = 0.5 + 0.5 * np.sin(xs / S * 2 * np.pi * 9 + _noise((H, S), 16, rng) * 3)
+    base = np.array([0.55, 0.42, 0.20])
+    hi = np.array([0.98, 0.86, 0.55])
+    hair = base * (0.45 + 0.45 * locks[..., None]) + (hi - base) * strands[..., None] * 0.7
+    sheen = np.exp(-(((yy[h:, :] - h) / H - 0.3) / 0.12) ** 2) * locks
+    hair += (hi - hair) * (0.45 * sheen)[..., None]
+    hair *= (1.0 - 0.3 * (yy[h:, :] - h)[..., None] / H)
     img[h:, :] = hair
     return Image.fromarray((np.clip(img, 0, 1) * 255 + 0.5).astype(np.uint8))

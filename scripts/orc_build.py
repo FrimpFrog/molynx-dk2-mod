@@ -362,6 +362,21 @@ def orc_skin(troll_tex, name: str):
     nv = np.clip(v * 1.05, 0, 1)
     orc = _rgb(nh, ns, nv)
     out = a * (1 - green[..., None]) + orc * green[..., None]
+    hgt, wid = a.shape[:2]
+    yy, xx = np.mgrid[0:hgt, 0:wid] / np.array([hgt, wid])[:, None, None]
+    loin = np.zeros((hgt, wid), bool)
+    for u0, v0, u1, v1 in LOIN_UV[name]:
+        loin |= (xx >= u0) & (xx <= u1) & (yy >= v0) & (yy <= v1)
+    deg_ = h * 360
+    cloth = loin & (deg_ > 8) & (deg_ < 50) & (s > 0.22)
+    # grow the cloth mask by a texel so no brown fringe is left, then paint skin with its shading
+    from PIL import ImageFilter as _F
+    from PIL import Image as _I
+    cloth = np.asarray(_I.fromarray((cloth * 255).astype(np.uint8)).filter(_F.MaxFilter(3)), np.uint8) > 0
+    cloth &= loin
+    lum = a.mean(-1)
+    skin = _rgb(np.full_like(h, ORC_SKIN_HUE), np.full_like(h, 0.62), np.clip(0.20 + 0.85 * lum, 0, 0.75))
+    out[cloth] = skin[cloth]
     if name == "trollfrnt":
         hgt, wid = a.shape[:2]
         yy, xx = np.mgrid[0:hgt, 0:wid] / np.array([hgt, wid])[:, None, None]
@@ -375,6 +390,8 @@ def orc_skin(troll_tex, name: str):
     return Image.fromarray((np.clip(out, 0, 1) * 255 + 0.5).astype(np.uint8))
 
 
+# the Troll's loincloth (front apron, back band and seat): painted over with skin, the Orc wears none
+LOIN_UV = {"trollfrnt": [(0.0, 0.42, 0.42, 0.64)], "trollback": [(0.0, 0.43, 0.44, 0.54), (0.42, 0.30, 0.90, 0.52)]}
 MALLET_HEAD_UV = {"trollfrnt": [(0.0, 0.66, 0.45, 1.0), (0.45, 0.66, 0.84, 0.87), (0.76, 0.0, 1.0, 0.19)]}
 
 
@@ -486,18 +503,23 @@ def export(meshes_dir: Path, cache, out_dir: Path) -> dict:
     """Write the Orc's 28 files (Orc-<slot>.kmf, one per Troll slot) and his three skins (PNG) into
     out_dir. Returns per file: frames, keys, triangles of the first LOD."""
     from scripts.dk2kmf_write import anim_invariants
-    from scripts.orc_gear import GEAR, buckler, gear_texture, mane
+    from scripts.orc_gear import GEAR, ball, buckler, gear_texture, mane
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     ref = load_clip(meshes_dir, REFERENCE[0])
+    beef_arms(ref)
     head = PartTracker(ref, REFERENCE[1], HEAD_UV, HEAD_MIN_HEIGHT)
     hand = PartTracker(ref, REFERENCE[1], FOREARM_UV, select=ForearmPicker(ref))
+    hips = PartTracker(ref, REFERENCE[1], LOIN_UV)
     accs = [mane(np.concatenate([np.array(v) for v in head.ref.values()])),
-            buckler(np.concatenate([np.array(v) for v in hand.ref.values()]))]
+            buckler(np.concatenate([np.array(v) for v in hand.ref.values()])),
+            ball(crotch(ref, REFERENCE[1]))]
     info = {}
     for slot, stem in TROLL_FILES.items():
         clip = load_clip(meshes_dir, stem)
-        k = orc_kmf(clip, accs, {"head": head.poses(clip), "hand": hand.poses(clip)}, name=PREFIX + slot)
+        beef_arms(clip)
+        k = orc_kmf(clip, accs, {"head": head.poses(clip), "hand": hand.poses(clip), "hips": hips.poses(clip)},
+                    name=PREFIX + slot)
         if k.anim is not None:
             bad = anim_invariants(k.anim)
             if bad:
@@ -511,3 +533,86 @@ def export(meshes_dir: Path, cache, out_dir: Path) -> dict:
         orc_skin(cache.get(troll + "MM0"), troll).save(out_dir / f"{orc}.png")
     gear_texture().save(out_dir / f"{GEAR}.png")
     return info
+
+
+# ------------------------------------------------------------------------------------- the Orc's body
+
+ARM_UV = {"trollfrnt": [(0.50, 0.0, 1.0, 0.36)], "trollback": [(0.55, 0.0, 1.0, 0.36)]}
+ARM_NOT_UV = {"trollfrnt": [(0.76, 0.0, 1.0, 0.19)]}     # the mallet's face sits in the arm strip's corner
+ARM_THICK = 1.30        # upper arm and forearm girth, against the Troll's
+SHOULDER_RAISE = 0.012  # shoulders and upper arms lifted (KMF units; the Troll stands 0.50)
+
+
+def _smooth01(x, a, b):
+    t = np.clip((x - a) / (b - a), 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+def beef_arms(clip: Clip, thick: float = ARM_THICK, raise_: float = SHOULDER_RAISE) -> None:
+    """The DK1 Orc's arms: thicker than the Troll's from shoulder to wrist and carried higher at the
+    shoulder. Each arm is the larger connected piece of the arm strips (UV u runs 0.5 at the shoulder
+    to 1.0 at the hand, t = 0..1); per frame its axis is the centroid of its vertices in bins of t,
+    every vertex is pushed away from the axis by the girth factor (fading to none at the wrist so
+    the hands, the mallet and the buckler keep their grip), and the shoulder end is lifted (fading out
+    by the elbow). Rows shared between sprites move together. Frames are changed in place."""
+    part = []
+    for s in clip.troll:
+        t = clip.texture(s)
+        if t not in ARM_UV:
+            continue
+        m = _in_boxes(clip.uv(s), ARM_UV[t])
+        if t in ARM_NOT_UV:
+            m &= ~_in_boxes(clip.uv(s), ARM_NOT_UV[t])
+        if m.any():
+            part.append((s, m))
+    if not part:
+        return                                   # TRO_WalkBack: its UVs do not show the arms
+    pieces = []
+    for g in _pieces(clip, part):
+        u = np.array([clip.uv(s)[i][0] for s, i in g])
+        if u.max() - u.min() > 0.3:
+            pieces.append((g, (u - 0.5) / 0.5))
+    pieces = sorted(pieces, key=lambda p: -len(p[0]))[:2]
+    sprites = clip.sprites()
+    row_of = (lambda s, i: sprites[s].vertices[i].itab_index) if clip.is_anim else \
+        (lambda s, i: sprites[s].vertices[i].geom)
+    by_row = {}
+    for s, sp in enumerate(sprites):
+        for i in range(len(sp.vertices)):
+            by_row.setdefault(row_of(s, i), []).append((s, i))
+    bins = np.linspace(0, 1, 9)
+    for g, t in pieces:
+        t = np.clip(t, 0, 1)
+        k = np.clip(np.digitize(t, bins) - 1, 0, len(bins) - 2)
+        centres = (bins[:-1] + bins[1:]) / 2
+        grow = 1 + (thick - 1) * (1 - _smooth01(t, 0.72, 0.93))
+        lift = raise_ * (1 - _smooth01(t, 0.12, 0.5))
+        rows = [row_of(s, i) for s, i in g]
+        for f, fr in enumerate(clip.frames):
+            P = np.array([fr[s][i] for s, i in g])
+            cen = np.array([P[k == b].mean(0) if (k == b).any() else np.full(3, np.nan) for b in range(len(centres))])
+            ok = ~np.isnan(cen[:, 0])
+            axis = np.stack([np.interp(t, centres[ok], cen[ok, j]) for j in range(3)], 1)
+            newp = axis + (P - axis) * grow[:, None]
+            newp[:, 2] -= lift
+            done = set()
+            for (s, i), r, q in zip(g, rows, newp):
+                if r in done:
+                    continue
+                done.add(r)
+                for s2, i2 in by_row[r]:
+                    fr[s2][i2] = q
+
+
+def crotch(ref: Clip, frame: int) -> np.ndarray:
+    """Where the front apron of the Troll's loincloth ends between the legs (reference frame)."""
+    pts = []
+    for s in ref.troll:
+        if ref.texture(s) == "trollfrnt":
+            m = _in_boxes(ref.uv(s), LOIN_UV["trollfrnt"])
+            pts.append(ref.frames[frame][s][m])
+    p = np.concatenate(pts)
+    low = p[p[:, 2] >= np.quantile(p[:, 2], 0.8)]          # the lowest fifth (z down)
+    c = low.mean(0)
+    c[1] = p[:, 1].max() - 0.004                           # at the front of the body
+    return c
