@@ -75,12 +75,14 @@ def island_local(part):
     return uv
 
 
-def atlas_uv(part):
-    """Texture-space (0..1) UVs of a part's vertices."""
-    loc = island_local(part)
+def atlas_uv(part, atlas=None, local=None):
+    """Texture-space (0..1) UVs of a part's vertices (`atlas`, `local`: another creature's ATLAS and
+    island_local; default the dragon's)."""
+    atlas = ATLAS if atlas is None else atlas
+    loc = (island_local if local is None else local)(part)
     out = np.zeros_like(loc)
     for i, (isl, (u, v)) in enumerate(zip(part.island, loc)):
-        (x0, y0, x1, y1), tr = ATLAS[part.texture][isl]
+        (x0, y0, x1, y1), tr = atlas[part.texture][isl]
         a, b = (v, u) if tr else (u, v)
         # half a texel inside the rectangle
         out[i] = ((x0 + 0.5 + a * (x1 - x0 - 1)) / SIZE, (y0 + 0.5 + b * (y1 - y0 - 1)) / SIZE)
@@ -390,13 +392,13 @@ def _vertex_normals(P, T):
     return n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
 
 
-def _radius(part):
+def _radius(part, islands=("trunk", "leg")):
     """Per vertex: distance from its loft ring's centre (for scale sizes); 0.05 elsewhere."""
     P = np.array(part.points)
     out = np.full(len(P), 0.05)
     groups = {}
     for i, tg in enumerate(part.tag):
-        if "ring" in tg and part.island[i] in ("trunk", "leg"):
+        if "ring" in tg and part.island[i] in islands:
             groups.setdefault((part.island[i], tg["ring"], tg.get("side", 0)), []).append(i)
     for idx in groups.values():
         c = P[idx].mean(0)
@@ -443,22 +445,28 @@ def vertex_occlusion(parts, posed=None, rays=48, reach=0.18, skip=("wings",)):
     return out
 
 
-def bake(parts, size=SIZE, ss=SS, occlusion=None):
-    """-> {texture name: PIL RGB image (size x size)}. `occlusion`: vertex_occlusion(parts)."""
+def bake(parts, size=SIZE, ss=SS, occlusion=None, atlas=None, painters=None, local=None,
+         ring_islands=("trunk", "leg")):
+    """-> {texture name: PIL RGB image (size x size)}. `occlusion`: vertex_occlusion(parts).
+    `atlas`, `painters`, `local` (island_local), `ring_islands` (lofts whose ring radius sizes the
+    scales): another creature's; default the dragon's."""
+    atlas = ATLAS if atlas is None else atlas
+    painters = PAINTERS if painters is None else painters
+    local = island_local if local is None else local
     big = size * ss
-    layers = {tex: (np.zeros((big, big, 3), np.float32), np.zeros((big, big), bool)) for tex in ATLAS}
+    layers = {tex: (np.zeros((big, big, 3), np.float32), np.zeros((big, big), bool)) for tex in atlas}
     for part in parts:
         P = np.array(part.points)
         T = np.array(part.tris)
         N = _vertex_normals(P, T)
-        loc = island_local(part)
-        tex_uv = atlas_uv(part) * big
-        rad = _radius(part)
+        loc = local(part)
+        tex_uv = atlas_uv(part, atlas, local) * big
+        rad = _radius(part, ring_islands)
         along = np.array([tg.get("along", 0.0) for tg in part.tag])
         ao = occlusion.get(part.name) if occlusion else None
         col, mask = layers[part.texture]
         for isl in sorted(set(part.island)):
-            painter = PAINTERS[(part.texture, isl)]
+            painter = painters[(part.texture, isl)]
             tris = [t for t in T if part.island[t[0]] == isl]
             samples = {k: [] for k in ("u", "v", "pos", "nrm", "radius", "along", "ao")}
             where = []

@@ -47,6 +47,7 @@ class DragonPlan:
     scale: float = 1.0
     offset: np.ndarray = field(default_factory=lambda: np.zeros(3))
     controls: list = field(default_factory=list)
+    prefix: str = PREFIX             # file and animation name prefix
 
     def to_kmf(self, model_parts):
         out = []
@@ -63,26 +64,31 @@ class DragonPlan:
         return self.to_sprites(self.to_kmf(model_parts))
 
 
-def make_plan(parts, rest_points, bile_idle: Kmf, height_ratio=HEIGHT_RATIO):
-    """parts: dragon_model Parts; rest_points: the stand frame 0 points per part (model space)."""
-    from scripts.dragon_texture import atlas_uv
-    pl = [{"name": p.name, "uv": atlas_uv(p), "texture": p.texture} for p in parts]
+def make_plan(parts, rest_points, bile_idle: Kmf, height_ratio=HEIGHT_RATIO, *, uv_of=None, part_label=None,
+              body_parts=None, prefix=PREFIX):
+    """parts: dragon_model Parts; rest_points: the stand frame 0 points per part (model space).
+    Another creature passes its own `uv_of(part)` (atlas UVs), `part_label`, `body_parts` and `prefix`."""
+    if uv_of is None:
+        from scripts.dragon_texture import atlas_uv as uv_of
+    part_label = PART_LABEL if part_label is None else part_label
+    body_parts = BODY_PARTS if body_parts is None else body_parts
+    pl = [{"name": p.name, "uv": uv_of(p), "texture": p.texture} for p in parts]
     sprites = [lay for i, p in enumerate(parts) for lay in _split(i, np.array(p.tris).ravel(), p.texture)]
     textures = list(dict.fromkeys(s.texture for s in sprites))
     donor = bile_idle.materials[bile_idle.anim.sprites[0].material]
-    materials = [Material(PART_LABEL[t] + t, [t], donor.flags, donor.brightness, donor.shininess,
+    materials = [Material(part_label[t] + t, [t], donor.flags, donor.brightness, donor.shininess,
                           donor.environment_map) for t in textures]
-    plan = DragonPlan(pl, sprites, materials, [])
+    plan = DragonPlan(pl, sprites, materials, [], prefix=prefix)
     raw = plan.to_kmf(rest_points)
     allp = np.concatenate(raw)
     target = BILE_IDLE_HEIGHT * height_ratio
     plan.scale = target / float(allp[:, 2].max() - allp[:, 2].min())
-    body = np.concatenate([r for r, p in zip(raw, parts) if p.name in BODY_PARTS]) * plan.scale
+    body = np.concatenate([r for r, p in zip(raw, parts) if p.name in body_parts]) * plan.scale
     plan.offset = np.array([-body[:, 0].mean(), -body[:, 1].mean(), -allp[:, 2].max() * plan.scale])
     rest = plan.frame(rest_points)
     plan.mm_factors = [_mm_factor(p, np.asarray(pl[s.part]["uv"], float)[s.vertices], s.triangles)
                        for p, s in zip(rest, sprites)]
-    plan.controls = _controls(plan, parts, bile_idle, rest)
+    plan.controls = _controls(plan, parts, bile_idle, rest, body_parts)
     return plan
 
 
@@ -91,14 +97,14 @@ def _unit_box(p):
     return (p - lo) / np.maximum(hi - lo, 1e-12)
 
 
-def _controls(plan, parts, bile_idle, rest):
+def _controls(plan, parts, bile_idle, rest, body_parts=BODY_PARTS):
     theirs = evaluate_anim_frame(bile_idle.anim, 0)
     pairs = np.frombuffer(bile_idle.anim.controls, "<u4").reshape(-1, 2)
     flat = _unit_box(np.concatenate(theirs))
     starts = np.cumsum([0] + [len(p) for p in theirs])
     ours = _unit_box(np.concatenate(rest))
     our_starts = np.cumsum([0] + [len(p) for p in rest])
-    body = [s for s, lay in enumerate(plan.sprites) if parts[lay.part].name in BODY_PARTS]
+    body = [s for s, lay in enumerate(plan.sprites) if parts[lay.part].name in body_parts]
     cand = np.concatenate([np.arange(our_starts[s], our_starts[s + 1]) for s in body])
     out = []
     for ref, ident in pairs:
@@ -130,7 +136,7 @@ def anim_kmf(plan, stem, frames, wrap, reduce=True, extra=None):
     controls = b"".join(np.array([(v << 16) | s, ident], "<u4").tobytes() for s, v, ident in plan.controls)
     anim = None
     for tol in KEY_TOLERANCES if reduce else (1.0,):
-        anim = encode_anim(PREFIX + stem, sprites, frames, wrap, controls, reduce=reduce, tolerance=tol)
+        anim = encode_anim(plan.prefix + stem, sprites, frames, wrap, controls, reduce=reduce, tolerance=tol)
         if len(anim.geom_xyz) - 1 <= GAME_MAX_KEYS:
             break
     return Kmf(VERSION, "anim", materials, anim=anim)
@@ -147,7 +153,7 @@ def pose_kmf(plan, stem, frame):
     starts = np.cumsum([0] + [len(p) for p in frame])
     controls = b"".join(np.array([int(rows[starts[s] + v]), ident], "<u4").tobytes()
                         for s, v, ident in plan.controls)
-    mesh = Mesh(PREFIX + stem, tuple(float(c) for c in centre),
+    mesh = Mesh(plan.prefix + stem, tuple(float(c) for c in centre),
                 float(np.linalg.norm(geometry - centre, axis=1).max()),
                 _sprites(plan, frame, rows, mesh=True), [tuple(map(float, g)) for g in geometry], controls)
     return Kmf(VERSION, "mesh", list(plan.materials), mesh=mesh)

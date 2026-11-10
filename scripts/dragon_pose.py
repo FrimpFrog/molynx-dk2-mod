@@ -73,7 +73,7 @@ class Pose:
         self.root = np.asarray(root, float)
 
     def copy(self):
-        return Pose(self.local.copy(), self.root.copy())
+        return type(self)(self.local.copy(), self.root.copy())
 
     def world(self):
         return forward(self.local, self.root)
@@ -130,7 +130,7 @@ def blend(a, b, t):
             th = np.arccos(np.clip(dot[i], -1, 1))
             q = (np.sin((1 - t) * th) * qa[i] + np.sin(t * th) * qb[i]) / np.sin(th)
         out[i] = q / np.linalg.norm(q)
-    return Pose(Rot.from_quat(out).as_matrix(), a.root * (1 - t) + b.root * t)
+    return type(a)(Rot.from_quat(out).as_matrix(), a.root * (1 - t) + b.root * t)
 
 
 def ease(t):

@@ -195,11 +195,11 @@ def export(built, out_dir, textures=None, reduce=True):
         bad = anim_invariants(k.anim)
         if bad:
             raise ValueError(f"{name}: {bad}")
-        (out_dir / f"{PREFIX}{name}.kmf").write_bytes(write_kmf(k))
+        (out_dir / f"{built.plan.prefix}{name}.kmf").write_bytes(write_kmf(k))
         info[name] = {"frames": k.anim.frame_count, "fps": 30, "wrap": built.wraps[name],
                       "keys": len(k.anim.geom_xyz) - 1}
     for stem, f in built.poses.items():
-        (out_dir / f"{PREFIX}{stem}.kmf").write_bytes(write_kmf(pose_kmf(built.plan, stem, f)))
+        (out_dir / f"{built.plan.prefix}{stem}.kmf").write_bytes(write_kmf(pose_kmf(built.plan, stem, f)))
     if textures is None:
         textures = bake(built.parts, occlusion=vertex_occlusion(built.parts))
     for name, img in textures.items():

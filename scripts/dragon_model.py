@@ -89,6 +89,20 @@ for _i, _p in enumerate(PARENT):        # parents come first: forward kinematics
     assert _p is None or _p < _i
 
 
+class Skeleton:
+    """Another creature's skeleton (same conventions as BONES): `forward`, `Skinner` and `Part` take one
+    to work on it instead of the dragon's."""
+
+    def __init__(self, bones):
+        self.bones = bones
+        self.names = [b[0] for b in bones]
+        self.index = {n: i for i, n in enumerate(self.names)}
+        self.parent = [None if b[1] is None else self.index[b[1]] for b in bones]
+        self.head = np.array([b[2] for b in bones])
+        self.tail = np.array([b[3] for b in bones])
+        assert all(p is None or p < i for i, p in enumerate(self.parent))
+
+
 # ------------------------------------------------------------------------------------------- parts
 
 @dataclass
@@ -101,11 +115,12 @@ class Part:
     tris: list = field(default_factory=list)       # (a, b, c), counter-clockwise from outside
     island: list = field(default_factory=list)     # island name of each vertex
     tag: list = field(default_factory=list)        # painter hints per vertex (dict)
+    bone_index = None                              # a subclass's own {bone name: index} (default: the dragon's)
 
     def add(self, p, uv, w, island, **tag):
         self.points.append(np.asarray(p, float))
         self.uv.append(tuple(map(float, uv)))
-        self.weights.append(_norm_weights(w))
+        self.weights.append(_norm_weights(w, self.bone_index))
         self.island.append(island)
         self.tag.append(tag)
         return len(self.points) - 1
@@ -120,10 +135,11 @@ class Part:
         self.tris.append((a, b, c))
 
 
-def _norm_weights(w):
+def _norm_weights(w, index=None):
+    index = BONE_INDEX if index is None else index
     if isinstance(w, str):
-        return {BONE_INDEX[w]: 1.0}
-    w = {BONE_INDEX[k] if isinstance(k, str) else k: float(v) for k, v in w.items() if v > 1e-4}
+        return {index[w]: 1.0}
+    w = {index[k] if isinstance(k, str) else k: float(v) for k, v in w.items() if v > 1e-4}
     s = sum(w.values())
     return {k: v / s for k, v in w.items()}
 
@@ -620,20 +636,21 @@ def _rotmat(rv):
     return Rot.from_rotvec(rv).as_matrix()
 
 
-def forward(local, root_offset=(0, 0, 0)):
+def forward(local, root_offset=(0, 0, 0), skel=None):
     """local: (B, 3, 3) local rotations (bind = identity, world-aligned frames).
-    -> (world rotations (B,3,3), world heads (B,3))."""
-    B = len(BONES)
+    -> (world rotations (B,3,3), world heads (B,3)). `skel`: a Skeleton (default the dragon's)."""
+    head, parent = (HEAD, PARENT) if skel is None else (skel.head, skel.parent)
+    B = len(parent)
     Rw = np.zeros((B, 3, 3))
     Pw = np.zeros((B, 3))
     for i in range(B):
-        p = PARENT[i]
+        p = parent[i]
         if p is None:
             Rw[i] = local[i]
-            Pw[i] = HEAD[i] + np.asarray(root_offset, float)
+            Pw[i] = head[i] + np.asarray(root_offset, float)
         else:
             Rw[i] = Rw[p] @ local[i]
-            Pw[i] = Pw[p] + Rw[p] @ (HEAD[i] - HEAD[p])
+            Pw[i] = Pw[p] + Rw[p] @ (head[i] - head[p])
     return Rw, Pw
 
 
@@ -649,13 +666,14 @@ def skin(part, Rw, Pw):
 
 
 class Skinner:
-    """Vectorised linear blend skinning of all parts."""
+    """Vectorised linear blend skinning of all parts (`skel`: a Skeleton, default the dragon's)."""
 
-    def __init__(self, parts):
+    def __init__(self, parts, skel=None):
+        head = HEAD if skel is None else skel.head
         self.parts = parts
         self.sizes = [len(p.points) for p in parts]
         P = np.concatenate([np.array(p.points) for p in parts])
-        W = np.zeros((len(P), len(BONES)))
+        W = np.zeros((len(P), len(head)))
         k = 0
         for p in parts:
             for w in p.weights:
@@ -663,7 +681,7 @@ class Skinner:
                     W[k, b] = x
                 k += 1
         self.P, self.W = P, W
-        self.rel = P[:, None, :] - HEAD[None, :, :]       # (V, B, 3)
+        self.rel = P[:, None, :] - head[None, :, :]       # (V, B, 3)
 
     def __call__(self, Rw, Pw):
         moved = np.einsum("bij,vbj->vbi", Rw, self.rel) + Pw[None]
