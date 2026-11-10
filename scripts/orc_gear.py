@@ -166,39 +166,93 @@ def _noise(shape, scale, rng):
     return np.asarray(im, np.float32) / 255
 
 
+def _capsule(px, py, a, b, rad):
+    """Distance field of a capsule from a to b, minus its radius (negative inside)."""
+    ax, ay = a
+    bx, by = b
+    vx, vy = bx - ax, by - ay
+    t = np.clip(((px - ax) * vx + (py - ay) * vy) / (vx * vx + vy * vy), 0, 1)
+    return np.hypot(px - (ax + t * vx), py - (ay + t * vy)) - rad
+
+
+def _shield_face(h: int, rng, k: int = 4) -> np.ndarray:
+    n = h * k
+    yy, xx = np.mgrid[0:n, 0:n].astype(np.float32)
+    px = (xx + 0.5) / n * 2 - 1                  # -1..1 across, +x right
+    py = (yy + 0.5) / n * 2 - 1                  # -1..1 down, +y down
+    r = np.hypot(px, py)
+
+    # base: dark olive-brown, mottled at two scales, lit from the upper left
+    m1 = _noise((n, n), 10 * k, rng)
+    m2 = _noise((n, n), 3 * k, rng)
+    base = np.array([0.20, 0.17, 0.08]) * (0.55 + 0.45 * m1[..., None]) * (0.8 + 0.3 * m2[..., None])
+    base *= (1.05 - 0.25 * ((px - py) * 0.5 + 0.5))[..., None] * 1.1
+    base += np.array([0.05, 0.05, 0.0]) * np.clip(m1 - 0.6, 0, 1)[..., None] * 2   # olive blotches
+
+    # the emblem as a height field: two crossed bones (a ridge, knobbed ends) under a domed skull
+    hf = np.zeros((n, n), np.float32)
+    for (x0, y0), (x1, y1) in (((0.50, -0.50), (-0.50, 0.50)), ((-0.50, -0.50), (0.50, 0.50))):
+        d = _capsule(px, py, (x0, y0), (x1, y1), 0.065)
+        dx, dy = (x1 - x0), (y1 - y0)
+        ln = np.hypot(dx, dy)
+        nx, ny = -dy / ln, dx / ln               # across the bone
+        for ex, ey, sx, sy in ((x0, y0, dx, dy), (x1, y1, -dx, -dy)):
+            for side in (-1, 1):                 # the two knobs at each end
+                cx = ex + nx * side * 0.075 + sx / ln * 0.0
+                cy = ey + ny * side * 0.075 + sy / ln * 0.0
+                d = np.minimum(d, np.hypot(px - cx, py - cy) - 0.088)
+        bone = np.clip(-d / 0.05, 0, 1)
+        hf = np.maximum(hf, bone ** 0.6 * 0.55)
+    # the skull, front on, as a silhouette: a round cranium, the temples pinching in, the cheekbones
+    # flaring, then the jaw narrowing to a flat chin (no eye sockets, nose or mouth)
+    def width(y):                                   # half-width of the skull at height y (down = +)
+        cran = np.where(np.abs(y + 0.12) <= 0.33, 0.37 * np.sqrt(np.clip(1 - ((y + 0.12) / 0.33) ** 2, 0, 1)), 0)
+        cheek = np.where((y > 0.02) & (y < 0.22), 0.30 - 0.6 * np.abs(y - 0.12) ** 1.6, 0)
+        jaw = np.where((y >= 0.16) & (y <= 0.40), 0.22 - 0.16 * ((y - 0.16) / 0.24) ** 2, 0)
+        return np.maximum(np.maximum(cran, cheek), jaw)
+    w = width(py)
+    inside = np.clip((w - np.abs(px)) / 0.05, 0, 1) * (w > 0)
+    skull = inside
+    dome = np.sqrt(np.clip(1 - (px / 0.4) ** 2 - ((py + 0.05) / 0.48) ** 2, 0, 1))
+    hf = hf * (1 - skull) + skull * (0.55 + 0.45 * dome)
+    emblem = (hf > 0.02).astype(np.float32)
+
+    # lighting of the relief: light from the upper left
+    gy, gx = np.gradient(hf * n * 0.02)
+    lit = np.clip(0.6 - (gx * -0.7 + gy * -0.7) * 3.0, 0, 1.5)
+    bronze = np.array([0.66, 0.44, 0.20])
+    hi = np.array([1.0, 0.82, 0.48])
+    metal = bronze * (0.35 + 0.75 * lit[..., None]) + (hi - bronze) * np.clip(lit - 0.95, 0, 1)[..., None] * 1.6
+    metal *= (0.85 + 0.25 * m2[..., None])           # hammered, uneven
+    # a soft shadow of the emblem on the face, cast down-right
+    sh = np.roll(np.roll(emblem, 2 * k, 0), 2 * k, 1)
+    base *= (1 - 0.45 * sh)[..., None]
+    out = base * (1 - emblem[..., None]) + metal * emblem[..., None]
+
+    # the rim: a thin bronze band with a dark inner lip and its own sheen
+    ang = np.arctan2(py, px)
+    sheen = 0.55 + 0.45 * np.cos(ang + 2.35)
+    rim = r > 0.86
+    out[rim] = (bronze * (0.5 + 0.7 * sheen[..., None]) * (0.85 + 0.25 * m2[..., None]))[rim]
+    out[(r > 0.83) & (r <= 0.86)] *= 0.35
+    out[r > 0.985] *= 0.55
+    out = np.clip(out, 0, 1)
+    im = Image.fromarray((out * 255 + 0.5).astype(np.uint8)).resize((h, h), Image.LANCZOS)
+    return np.asarray(im, np.float32) / 255
+
+
 def gear_texture(seed: int = 3) -> Image.Image:
     rng = np.random.default_rng(seed)
     S = SIZE
     img = np.zeros((S, S, 3), np.float32)
     yy, xx = np.mgrid[0:S, 0:S].astype(np.float32)
 
-    # --- shield face (top-left 64 x 64): dark oiled wood planks, gold rim, iron boss with rivets
+    # --- shield face (top-left 64 x 64), after the DK1 sprite: a dark mottled olive-brown face, a thin
+    # bronze rim and an embossed bronze skull (the head only, no eyes or mouth) on two crossed bones.
+    # Painted at 4x and scaled down.
     h = S // 2
-    cx = cy = h / 2
-    r = np.hypot(xx[:h, :h] + 0.5 - cx, yy[:h, :h] + 0.5 - cy) / (h / 2)
-    plank = ((xx[:h, :h] // 9) % 2).astype(np.float32)
-    grain = _noise((h, h), 3, rng) * 0.5 + 0.5 * np.sin(xx[:h, :h] * 2.1 + _noise((h, h), 6, rng) * 6) * 0.5 + 0.5
-    wood = np.array([0.30, 0.22, 0.12]) * (0.65 + 0.35 * grain[..., None]) * (0.85 + 0.15 * plank[..., None])
-    seam = (np.abs((xx[:h, :h] % 9) - 0) < 1)[..., None]
-    wood = np.where(seam, wood * 0.45, wood)
-    face = wood.copy()
-    gold = np.array([0.80, 0.62, 0.22])
-    ring = (r > 0.80)
-    sheen = 0.6 + 0.4 * np.cos((np.arctan2(yy[:h, :h] - cy, xx[:h, :h] - cx) - 2.3))
-    face[ring] = (gold * (0.55 + 0.45 * sheen[..., None]))[ring]
-    face[(r > 0.78) & (r <= 0.82)] *= 0.45                     # the rim's inner edge
-    inner_band = (r > 0.50) & (r < 0.56)
-    face[inner_band] = (gold * 0.7 * (0.6 + 0.4 * sheen[..., None]))[inner_band]
-    boss = r < 0.22
-    iron = np.array([0.42, 0.40, 0.38])
-    face[boss] = (iron * (0.55 + 0.6 * np.clip(1 - r / 0.22, 0, 1)[..., None]))[boss]
-    for k in range(8):                                        # rivets on the rim
-        t = k * np.pi / 4 + 0.39
-        px, py = cx + np.cos(t) * h * 0.45, cy + np.sin(t) * h * 0.45
-        d = np.hypot(xx[:h, :h] - px, yy[:h, :h] - py)
-        face[d < 1.6] = np.array([0.95, 0.85, 0.50])
-        face[(d >= 1.6) & (d < 2.4)] *= 0.6
-    face *= (1 - 0.25 * np.clip(r - 0.9, 0, 1)[..., None])
+    cy = h / 2
+    face = _shield_face(h, rng)
     img[:h, :h] = face
 
     # --- shield back (top-right): plain planks and a leather strap
