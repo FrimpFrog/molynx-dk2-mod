@@ -344,6 +344,8 @@ html.lb-open { overflow: hidden; }
 .slapgame .x { position: static; width: 34px; height: 34px; display: grid; place-items: center; padding: 0; cursor: pointer; color: #f1e2b4;
   border: 1px solid; border-color: #6b5a45 #000 #000 #6b5a45; background: url(assets/img/ui_steel2.png) center / 100% 100% #333; box-shadow: 1px 1px 0 #000; }
 .slapgame .x svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: square; }
+.slapgame .snd svg { width: 18px; height: 18px; stroke-width: 1.8; } .slapgame .snd .spk { fill: currentColor; stroke-linejoin: round; }
+.slapgame .snd[aria-pressed="true"] .off, .slapgame .snd[aria-pressed="false"] .on { display: none; } .slapgame .snd[aria-pressed="false"] { color: #9a8d72; }
 .slapgame .x:hover { filter: brightness(1.2); } .slapgame .x:active { border-color: #000 #6b5a45 #6b5a45 #000; transform: translate(1px, 1px); }
 .sgbar { display: flex; justify-content: space-around; gap: 8px; padding: 5px 8px 4px; background: url(assets/img/ui_bronze.png) center / 100% 100% #6a4320; border-bottom: 2px solid #000;
   font-family: var(--f-disp); font-size: 15px; letter-spacing: .06em; color: #ffe2a0; text-shadow: 1px 1px 0 #000; }
@@ -573,6 +575,7 @@ footer { margin-top: var(--s5); padding: 0 0 var(--s2); }
   <div class="slapgame" id="slap" hidden role="dialog" aria-modal="true" aria-labelledby="slapTitle">
     <div class="sgframe iron">
       <div class="sghead"><img src="assets/img/i_slap.png" alt="" width="32" height="32"><h3 id="slapTitle">Slap the Imp</h3>
+        <button class="x snd" id="sgSound" type="button" aria-pressed="true" aria-label="Sound"><svg viewBox="0 0 16 16" aria-hidden="true"><path class="spk" d="M2 6h3l4-3v10l-4-3H2z"/><path class="on" d="M11 5.5q1.6 2.5 0 5M12.8 3.5q3 4.5 0 9"/><path class="off" d="M11 6l4 4M15 6l-4 4"/></svg></button>
         <button class="x" id="slapClose" type="button" aria-label="Close the game"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg></button></div>
       <div class="sgbar" aria-live="off"><span>Slaps <b id="sgScore">0</b></span><span>Lives <b id="sgTime">3</b></span><span>Best <b id="sgBest">0</b></span></div>
       <div class="sgboard" id="sgBoard" tabindex="-1">
@@ -607,7 +610,7 @@ const CREATURES = {
   reaper: { name: 'Classic Reaper', by: 'Design by Quuz', line: 'An old friend.', img: 'p_hreaper', hero: 'reaper', moves: [['Walk', 'reaper_walk'], ['Roar', 'reaper_roar'], ['Attack', 'rv_reaper_melee1'], ['Dance', 'reaper_dance']] },
   gargoyle: { name: 'Gargoyle', line: 'Carved from stone. Woken by war.', img: 'p_gargoyle', hero: 'gargoyle', moves: [['Idle', 'garg_idle1'], ['Walk', 'garg_walk'], ['Pray', 'rv_garg_pray'], ['Sleep', 'rv_garg_sleep']] },
   dragon: { name: 'Dragon', line: 'Lights the torches. And the heroes.', img: 'p_dragon', hero: 'dragon', moves: [['Idle', 'dragon_idle1'], ['Walk', 'dragon_walk'], ['Roar', 'dragon_angry'], ['Dance', 'n2_dragon_dance']] },
-  krefft: { name: 'Krefft', line: 'The house always wins. So does he.', img: 'p_krefft', hero: 'krefft', moves: [['Idle', 'krefft_idle1'], ['Walk', 'krefft_walk'], ['Bite', 'krefft_melee'], ['Coin Spit', 'krefft_magic_shot'], ['Gamble', 'krefft_gamble_machine'], ['Gloat', 'krefft_happy'], ['Sleep', 'krefft_sleep']] },
+  krefft: { name: 'Krefft', line: 'The house always wins. So does he.', img: 'p_krefft', hero: 'krefft', moves: [['Idle', 'krefft_idle1'], ['Walk', 'krefft_walk'], ['Bite', 'krefft_melee'], ['Coin Spit', 'krefft_magic_shot'], ['Gamble', 'krefft_gamble_machine'], ['Gloat', 'krefft_happy']] },
 };
 // who is who when a creature in the dungeon is clicked (vanilla creatures: the game's own panel pictures)
 const WHO = {
@@ -2006,15 +2009,39 @@ const Feed = {
     }).join('');
   },
 };
+// ===================================================================== sound: DK2's own sounds (the Hand's slap, the Imp's squeals, ...)
+// played through Web Audio so slaps land instantly; loaded the first time the game opens (a click, so browsers allow it)
+const Sfx = {
+  KEY: 'scm.sound', on: true, ctx: null, buf: {},
+  SETS: { slap: 4, squeal: 7, flee: 3, gold: 0, pop: 0, over: 0, record: 0, click: 0 },
+  init() {
+    try { this.on = localStorage.getItem(this.KEY) !== 'off'; } catch (e) {}
+    const b = $('#sgSound'); if (!b) return; this.paint();
+    b.addEventListener('click', () => { this.on = !this.on; try { localStorage.setItem(this.KEY, this.on ? 'on' : 'off'); } catch (e) {} this.paint(); this.load(); this.play('click', 0.7); });
+  },
+  paint() { const b = $('#sgSound'); b.setAttribute('aria-pressed', String(this.on)); b.setAttribute('aria-label', this.on ? 'Sound on (click to mute)' : 'Sound off (click to unmute)'); b.title = this.on ? 'Sound on' : 'Sound off'; },
+  load() {
+    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {}); return; }
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    try { this.ctx = new AC(); } catch (e) { return; }
+    for (const [k, n] of Object.entries(this.SETS)) for (const f of n ? Array.from({ length: n }, (_, i) => k + (i + 1)) : [k])
+      fetch('assets/sfx/' + f + '.mp3').then((r) => r.arrayBuffer()).then((a) => new Promise((ok, no) => this.ctx.decodeAudioData(a, ok, no))).then((d) => { this.buf[f] = d; }).catch(() => {});
+  },
+  play(k, vol = 1, delay = 0, vary = 0) {
+    if (!this.on || !this.ctx) return; const n = this.SETS[k], d = this.buf[n ? k + (1 + Math.floor(Math.random() * n)) : k]; if (!d) return;
+    try { const s = this.ctx.createBufferSource(), g = this.ctx.createGain(); s.buffer = d; if (vary) s.playbackRate.value = 1 + (Math.random() * 2 - 1) * vary;
+      g.gain.value = vol; s.connect(g); g.connect(this.ctx.destination); s.start(this.ctx.currentTime + delay); } catch (e) {}
+  },
+};
 // ===================================================================== Slap the Imp: the Dungeon Heart's little game
 // Imps (rendered from the game's own Imp model: idle loop + the recoil when hit) pop up round the Heart for 20 seconds;
-// slap them with the Hand of Evil (DK2's own slap icon). Best score per visitor in localStorage. No sound.
+// slap them with the Hand of Evil (DK2's own slap icon). Best score per visitor in localStorage. Sounds: Sfx above.
 const Slap = {
   SPOTS: [[24, 31], [50, 27], [76, 31], [15, 62], [85, 62], [26, 90], [50, 94], [74, 90]],   // % of the board: an Imp's feet
   LIVES: 3, KEY: 'scm.slapBest2',
   init() {
     this.el = $('#slap'); if (!this.el) return;
-    this.board = $('#sgBoard'); this.best = this.load();
+    this.board = $('#sgBoard'); this.best = this.load(); Sfx.init();
     $('#sgBest').textContent = this.best;
     $('#sgStart').addEventListener('click', () => this.start());
     $('#slapClose').addEventListener('click', () => this.close());
@@ -2026,12 +2053,12 @@ const Slap = {
   },
   load() { try { return Math.max(0, parseInt(localStorage.getItem(this.KEY) || '0', 10) || 0); } catch (e) { return 0; } },
   save(n) { try { localStorage.setItem(this.KEY, String(n)); } catch (e) { /* private mode: the best score lasts this visit only */ } },
-  open(from) { this.from = from; this.el.hidden = false; document.documentElement.classList.add('lb-open'); this.reset(); $('#sgStart').focus(); },
+  open(from) { this.from = from; Sfx.load(); this.el.hidden = false; document.documentElement.classList.add('lb-open'); this.reset(); $('#sgStart').focus(); },
   close() { this.stop(); this.el.hidden = true; document.documentElement.classList.remove('lb-open'); if (this.from?.focus) this.from.focus({ preventScroll: true }); },
   reset() { this.stop(); this.score = 0; this.lives = this.LIVES; $('#sgScore').textContent = '0'; $('#sgTime').textContent = this.LIVES;
     $('#sgLine').textContent = "The Imps round your Heart are slacking, Keeper. Slap them before they slip away. Three escapes and it's over."; $('#sgStart').textContent = 'Start slapping'; $('#sgMsg').hidden = false; $('#sgForm').hidden = true; this.board10(); },
   start() {
-    this.stop(); this.score = 0; this.lives = this.LIVES; $('#sgScore').textContent = '0'; $('#sgTime').textContent = this.LIVES; $('#sgMsg').hidden = true; this.board.classList.add('on');
+    this.stop(); Sfx.load(); Sfx.play('click', 0.8); this.score = 0; this.lives = this.LIVES; $('#sgScore').textContent = '0'; $('#sgTime').textContent = this.LIVES; $('#sgMsg').hidden = true; this.board.classList.add('on');
     this.t0 = performance.now(); this.busy = new Set(); this.next = 0; this.over = false;
     this.timer = setInterval(() => this.tick(), 60); this.tick(); this.board.focus({ preventScroll: true });
   },
@@ -2054,13 +2081,14 @@ const Slap = {
     const stay = this.stayMs() * (gold ? 0.7 : 1), gone = () => { this.busy.delete(i); b.remove(); };
     b.addEventListener('pointerdown', (e) => { e.preventDefault(); this.hit(b, gone, gold); });
     b.addEventListener('click', (e) => { if (e.detail === 0) this.hit(b, gone, gold); });   // keyboard (Enter / Space)
-    this.board.appendChild(b);
+    this.board.appendChild(b); Sfx.play(gold ? 'gold' : 'pop', gold ? 0.45 : 0.3, 0, 0.1);
     b._t = setTimeout(() => { if (b.classList.contains('hit') || !this.timer) return; b.classList.add('duck'); setTimeout(gone, REDUCED ? 0 : 160);
-      if (!gold) { this.lives--; $('#sgTime').textContent = Math.max(0, this.lives); this.board.classList.remove('ouch'); void this.board.offsetWidth; this.board.classList.add('ouch'); if (this.lives <= 0) this.end(); } }, stay);
+      if (!gold) { Sfx.play('flee', 0.75, 0, 0.06); this.lives--; $('#sgTime').textContent = Math.max(0, this.lives); this.board.classList.remove('ouch'); void this.board.offsetWidth; this.board.classList.add('ouch'); if (this.lives <= 0) this.end(); } }, stay);
   },
   hit(b, gone, gold) {
     if (b.classList.contains('hit') || !this.timer) return;
-    clearTimeout(b._t); b.classList.add('hit'); this.score += gold ? 5 : 1; $('#sgScore').textContent = this.score;
+    clearTimeout(b._t); b.classList.add('hit'); this.score += gold ? 5 : 1;
+    Sfx.play('slap', 1, 0, 0.06); Sfx.play('squeal', 0.8, 0.04, 0.08); if (gold) Sfx.play('gold', 0.9, 0.05); $('#sgScore').textContent = this.score;
     const h = document.createElement('span'); h.className = 'sghand'; b.appendChild(h);
     setTimeout(gone, REDUCED ? 450 : 700);
   },
@@ -2073,13 +2101,14 @@ const Slap = {
   async submit(ev) {
     ev.preventDefault(); const n = $('#sgName').value.trim().slice(0, 16), f = $('#sgForm'); if (!n || !this.last) return;
     try { localStorage.setItem('scm.slapName', n); } catch (e) {}
-    f.querySelector('button').disabled = true;
+    f.querySelector('button').disabled = true; Sfx.play('click', 0.8);
     try { await fetch(LB.url + '/rest/v1/slap_scores', { method: 'POST', headers: { apikey: LB.key, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ name: n, score: this.last }) }); } catch (e) {}
     f.hidden = true; f.querySelector('button').disabled = false; this.last = 0; this.board10();
   },
   end() {
     this.over = true; this.stop(); const s = this.score, rec = s > this.best && s > 0;
     if (rec) { this.best = s; this.save(s); $('#sgBest').textContent = s; }
+    Sfx.play('over', 0.85); if (rec) Sfx.play('record', 0.75, 0.9);
     $('#sgLine').textContent = (s === 0 ? 'Not a single slap. The Imps are laughing at you, Keeper.'
       : s < 15 ? 'A few gentle taps. Your Imps barely noticed.'
       : s < 40 ? 'Your Imps have been suitably motivated.'
