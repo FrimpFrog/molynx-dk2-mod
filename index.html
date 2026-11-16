@@ -519,7 +519,7 @@ footer { margin-top: var(--s5); padding: 0 0 var(--s2); }
 
   <section id="artwork" aria-labelledby="h-art">
     <h2 id="h-art"><span>Artwork</span></h2>
-    <p class="sub">Concept art for the new creatures, drawn by Soles. Click a drawing to enlarge it.</p>
+    <p class="sub">Concept art for the new creatures, drawn by <a href="https://www.instagram.com/earthwormsurprise/" target="_blank" rel="noopener">@earthwormsurprise</a> on Instagram. Click a drawing to enlarge it.</p>
     <!-- written by app.js from ART in data.js -->
     <div id="artList"></div>
     <p class="artmore">More concept art coming soon.</p>
@@ -551,6 +551,7 @@ footer { margin-top: var(--s5); padding: 0 0 var(--s2); }
     <div class="cols framed">
       <div>
         <h3>Mod by Soles</h3>
+        <p><b>Concept art:</b> <a href="https://www.instagram.com/earthwormsurprise/" target="_blank" rel="noopener">@earthwormsurprise</a> (Instagram).</p>
         <p><b>Special thanks:</b> the Flame team, the KeeperFX team, Keeper Klan, Quuz and Coolkid.</p>
         <p><b>Inspiration and assets:</b> Peter Molyneux and the Bullfrog team, MegaGlest (some creature art is adapted from MegaGlest game art by the MegaGlest team, <a href="https://megaglest.org/" target="_blank" rel="noopener">megaglest.org</a>, used under <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener">CC BY-SA 3.0</a>).</p>
       </div>
@@ -2126,8 +2127,8 @@ const Art = {
   init() {
     const box = $('#artList'); if (!box) return;
     box.innerHTML = ART.map((a) => `<div class="artset"><h3>${esc(a.creature)}</h3><ul class="arts">${a.pieces.map((p) => {
-      const n = this.list.push({ src: `assets/img/${p.img}.jpg`, w: p.w, h: p.h, cap: `${a.creature} \u2013 concept art by Soles (${p.label})` }) - 1;
-      return `<li><button class="framed" type="button" data-art="${n}" aria-label="Enlarge: ${esc(a.creature)}, ${esc(p.label)}"><img src="assets/img/${p.img}_s.jpg" alt="${esc(a.creature)} concept art by Soles, ${esc(p.label)}" width="270" height="480" loading="lazy"><span>${esc(p.label)}</span></button></li>`; }).join('')}</ul></div>`).join('');
+      const n = this.list.push({ src: `assets/img/${p.img}.jpg`, w: p.w, h: p.h, cap: `${a.creature} \u2013 concept art by @earthwormsurprise (${p.label})` }) - 1;
+      return `<li><button class="framed" type="button" data-art="${n}" aria-label="Enlarge: ${esc(a.creature)}, ${esc(p.label)}"><img src="assets/img/${p.img}_s.jpg" alt="${esc(a.creature)} concept art by @earthwormsurprise, ${esc(p.label)}" width="270" height="480" loading="lazy"><span>${esc(p.label)}</span></button></li>`; }).join('')}</ul></div>`).join('');
     for (const b of $$('[data-art]')) b.addEventListener('click', () => this.open(+b.dataset.art, b));
     $('#lbClose').addEventListener('click', () => this.close());
     $('#lbPrev').addEventListener('click', () => this.show(this.i - 1)); $('#lbNext').addEventListener('click', () => this.show(this.i + 1));
