@@ -419,6 +419,11 @@ footer { margin-top: var(--s5); padding: 0 0 var(--s2); }
 #sgTop h4{margin:0 0 4px;font-family:SolesStone,serif;letter-spacing:.06em;color:#f0c060}
 #sgList{margin:0;padding:0 0 0 1.6em;text-align:left;max-height:11em;overflow:auto}
 #sgList li{display:flex;justify-content:space-between;gap:1em}
+
+.sgimp.gold i{filter:sepia(1) saturate(5) hue-rotate(5deg) brightness(1.25) drop-shadow(0 0 6px #ffd24a)}
+.sgboard.ouch{animation:sgouch .35s}
+@keyframes sgouch{0%,100%{box-shadow:inset 0 0 0 0 rgba(200,20,10,0)}40%{box-shadow:inset 0 0 60px 10px rgba(200,20,10,.55)}}
+@media (prefers-reduced-motion: reduce){.sgboard.ouch{animation:none}}
 </style>
 <a class="skip" href="#roadmap">Skip to the roadmap</a>
 <div class="page">
@@ -569,11 +574,11 @@ footer { margin-top: var(--s5); padding: 0 0 var(--s2); }
     <div class="sgframe iron">
       <div class="sghead"><img src="assets/img/i_slap.png" alt="" width="32" height="32"><h3 id="slapTitle">Slap the Imp</h3>
         <button class="x" id="slapClose" type="button" aria-label="Close the game"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg></button></div>
-      <div class="sgbar" aria-live="off"><span>Slaps <b id="sgScore">0</b></span><span>Time <b id="sgTime">20</b></span><span>Best <b id="sgBest">0</b></span></div>
+      <div class="sgbar" aria-live="off"><span>Slaps <b id="sgScore">0</b></span><span>Lives <b id="sgTime">3</b></span><span>Best <b id="sgBest">0</b></span></div>
       <div class="sgboard" id="sgBoard" tabindex="-1">
         <div class="sgmsg" id="sgMsg"><p id="sgLine" aria-live="polite"></p><form id="sgForm" hidden><label for="sgName">Your name for the leaderboard</label><input id="sgName" maxlength="16" autocomplete="nickname" required><button class="btn" type="submit">Submit score</button></form><button class="btn" id="sgStart" type="button">Start slapping</button><div id="sgTop" hidden><h4>Top 10 Keepers</h4><ol id="sgList"></ol></div></div>
       </div>
-      <p class="sghint">Click or tap the Imps before they duck away. 20 seconds.</p>
+      <p class="sghint">Slap the Imps before they escape. They get faster as you score. Golden Imps are worth 5.</p>
     </div>
   </div>
   <div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-labelledby="lbCap">
@@ -2006,7 +2011,7 @@ const Feed = {
 // slap them with the Hand of Evil (DK2's own slap icon). Best score per visitor in localStorage. No sound.
 const Slap = {
   SPOTS: [[24, 31], [50, 27], [76, 31], [15, 62], [85, 62], [26, 90], [50, 94], [74, 90]],   // % of the board: an Imp's feet
-  LEN: 20, KEY: 'scm.slapBest',
+  LIVES: 3, KEY: 'scm.slapBest2',
   init() {
     this.el = $('#slap'); if (!this.el) return;
     this.board = $('#sgBoard'); this.best = this.load();
@@ -2023,35 +2028,39 @@ const Slap = {
   save(n) { try { localStorage.setItem(this.KEY, String(n)); } catch (e) { /* private mode: the best score lasts this visit only */ } },
   open(from) { this.from = from; this.el.hidden = false; document.documentElement.classList.add('lb-open'); this.reset(); $('#sgStart').focus(); },
   close() { this.stop(); this.el.hidden = true; document.documentElement.classList.remove('lb-open'); if (this.from?.focus) this.from.focus({ preventScroll: true }); },
-  reset() { this.stop(); this.score = 0; $('#sgScore').textContent = '0'; $('#sgTime').textContent = this.LEN;
-    $('#sgLine').textContent = "The Imps round your Heart are slacking, Keeper. Show them who's in charge."; $('#sgStart').textContent = 'Start slapping'; $('#sgMsg').hidden = false; $('#sgForm').hidden = true; this.board10(); },
+  reset() { this.stop(); this.score = 0; this.lives = this.LIVES; $('#sgScore').textContent = '0'; $('#sgTime').textContent = this.LIVES;
+    $('#sgLine').textContent = "The Imps round your Heart are slacking, Keeper. Slap them before they slip away. Three escapes and it's over."; $('#sgStart').textContent = 'Start slapping'; $('#sgMsg').hidden = false; $('#sgForm').hidden = true; this.board10(); },
   start() {
-    this.stop(); this.score = 0; $('#sgScore').textContent = '0'; $('#sgMsg').hidden = true; this.board.classList.add('on');
-    this.t0 = performance.now(); this.busy = new Set(); this.next = 0;
-    this.timer = setInterval(() => this.tick(), 100); this.tick(); this.board.focus({ preventScroll: true });
+    this.stop(); this.score = 0; this.lives = this.LIVES; $('#sgScore').textContent = '0'; $('#sgTime').textContent = this.LIVES; $('#sgMsg').hidden = true; this.board.classList.add('on');
+    this.t0 = performance.now(); this.busy = new Set(); this.next = 0; this.over = false;
+    this.timer = setInterval(() => this.tick(), 60); this.tick(); this.board.focus({ preventScroll: true });
   },
-  stop() { clearInterval(this.timer); this.timer = null; for (const i of $$('.sgimp', this.board)) i.remove(); this.board?.classList.remove('on'); },
+  stop() { clearInterval(this.timer); this.timer = null; for (const i of $$('.sgimp', this.board)) { clearTimeout(i._t); i.remove(); } this.board?.classList.remove('on'); },
+  // difficulty follows the score: Imps come faster, stay shorter and more of them at once
+  gap() { return Math.max(0.26, 0.95 * Math.pow(0.972, this.score)); },
+  stayMs() { return Math.max(430, 1600 * Math.pow(0.976, this.score)); },
+  maxLive() { return Math.min(6, 2 + Math.floor(this.score / 10)); },
   tick() {
-    const t = (performance.now() - this.t0) / 1000, left = Math.max(0, this.LEN - t);
-    $('#sgTime').textContent = Math.ceil(left);
-    if (left <= 0) return this.end();
-    const live = $$('.sgimp:not(.hit)', this.board).length, gap = 0.9 - 0.4 * (t / this.LEN);   // faster as time runs out
-    if (t >= this.next && live < 3) { this.pop(t); this.next = t + gap * (0.7 + 0.6 * Math.random()); }
+    if (this.over) return; const t = (performance.now() - this.t0) / 1000;
+    const live = $$('.sgimp:not(.hit):not(.duck)', this.board).length;
+    if (t >= this.next && live < this.maxLive()) { this.pop(); this.next = t + this.gap() * (0.7 + 0.6 * Math.random()); }
   },
-  pop(t) {
+  pop() {
     const free = this.SPOTS.map((_, i) => i).filter((i) => !this.busy.has(i)); if (!free.length) return;
     const i = free[Math.floor(Math.random() * free.length)], [x, y] = this.SPOTS[i]; this.busy.add(i);
-    const b = document.createElement('button'); b.type = 'button'; b.className = 'sgimp'; b.setAttribute('aria-label', 'Slap this Imp');
+    const gold = this.score >= 5 && Math.random() < 0.08;
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'sgimp' + (gold ? ' gold' : ''); b.setAttribute('aria-label', gold ? 'Slap this golden Imp (5 points)' : 'Slap this Imp');
     b.style.left = x + '%'; b.style.top = y + '%'; b.style.zIndex = Math.round(y); b.innerHTML = '<i></i>';
-    const stay = 1400 - 600 * (t / this.LEN), gone = () => { this.busy.delete(i); b.remove(); };
-    b.addEventListener('pointerdown', (e) => { e.preventDefault(); this.hit(b, gone); });
-    b.addEventListener('click', (e) => { if (e.detail === 0) this.hit(b, gone); });   // keyboard (Enter / Space)
+    const stay = this.stayMs() * (gold ? 0.7 : 1), gone = () => { this.busy.delete(i); b.remove(); };
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); this.hit(b, gone, gold); });
+    b.addEventListener('click', (e) => { if (e.detail === 0) this.hit(b, gone, gold); });   // keyboard (Enter / Space)
     this.board.appendChild(b);
-    b._t = setTimeout(() => { if (!b.classList.contains('hit')) { b.classList.add('duck'); setTimeout(gone, REDUCED ? 0 : 160); } }, stay);
+    b._t = setTimeout(() => { if (b.classList.contains('hit') || !this.timer) return; b.classList.add('duck'); setTimeout(gone, REDUCED ? 0 : 160);
+      if (!gold) { this.lives--; $('#sgTime').textContent = Math.max(0, this.lives); this.board.classList.remove('ouch'); void this.board.offsetWidth; this.board.classList.add('ouch'); if (this.lives <= 0) this.end(); } }, stay);
   },
-  hit(b, gone) {
+  hit(b, gone, gold) {
     if (b.classList.contains('hit') || !this.timer) return;
-    clearTimeout(b._t); b.classList.add('hit'); this.score++; $('#sgScore').textContent = this.score;
+    clearTimeout(b._t); b.classList.add('hit'); this.score += gold ? 5 : 1; $('#sgScore').textContent = this.score;
     const h = document.createElement('span'); h.className = 'sghand'; b.appendChild(h);
     setTimeout(gone, REDUCED ? 450 : 700);
   },
@@ -2069,12 +2078,13 @@ const Slap = {
     f.hidden = true; f.querySelector('button').disabled = false; this.last = 0; this.board10();
   },
   end() {
-    this.stop(); const s = this.score, rec = s > this.best && s > 0;
+    this.over = true; this.stop(); const s = this.score, rec = s > this.best && s > 0;
     if (rec) { this.best = s; this.save(s); $('#sgBest').textContent = s; }
     $('#sgLine').textContent = (s === 0 ? 'Not a single slap. The Imps are laughing at you, Keeper.'
-      : s < 10 ? 'A few gentle taps. Your Imps barely noticed.'
-      : s < 20 ? 'Your Imps have been suitably motivated.'
-      : 'Ruthless! Your Imps are digging twice as fast.') + (rec ? ' A new record for your dungeon!' : '');
+      : s < 15 ? 'A few gentle taps. Your Imps barely noticed.'
+      : s < 40 ? 'Your Imps have been suitably motivated.'
+      : s < 80 ? 'Ruthless! Your Imps are digging twice as fast.'
+      : 'A true Keeper. Your Imps will never slack again.') + (rec ? ' A new record for your dungeon!' : '');
     $('#sgStart').textContent = 'Slap again'; $('#sgMsg').hidden = false; this.last = s;
     if (LB.url && s > 0) { const f = $('#sgForm'); f.hidden = false; try { $('#sgName').value = localStorage.getItem('scm.slapName') || ''; } catch (e) {} $('#sgName').focus({ preventScroll: true }); }
     else $('#sgStart').focus({ preventScroll: true });
