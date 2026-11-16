@@ -592,7 +592,7 @@ footer { margin-top: var(--s5); padding: 0 0 var(--s2); }
 const STILL_SPOTS = {"creatures": [20.99, 43.66], "slap": [50.79, 46.7], "anims": [76.36, 45.17], "portraits": [43.92, 20.07], "portal": [71.95, 20.07], "trailer": [24.58, 20.07], "sounds": [28.1, 59.89], "balance": [89.39, 43.66], "sacrifice": [59.99, 77.06], "title": [80.39, 29.79], "textures": [27.16, 81.27], "traps": [17.16, 9.54], "heroes": [80.1, 9.54], "maps": [60.98, 96.77], "campaign": [12.54, 96.77], "more": [8.61, 42.9], "choose": [61.3, 18.13], "goal": [91.32, 99.26], "release": [53.3, 8.39]};
 // ===================================================================== content
 // Slap the Imp leaderboard (Supabase). Empty url = leaderboard hidden.
-const LB = { url: '', key: '' };
+const LB = { url: 'https://ldgyqqgbqryqdxpvlked.supabase.co', key: 'sb_publishable_DLLPr_3fEh2ePVp0zTYv5g_h9yrK1yu' };
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const CREATURES = {
   molynx: { name: 'Molynx', line: 'Living stone, sworn to guard the Reaper.', img: 'p_molynx', hero: 'molynx', moves: [['Idle', 'molynx_idle1'], ['Walk', 'molynx_walk'], ['Roar', 'molynx_angry'], ['Arrive', 'molynx_entrance']] },
@@ -2057,7 +2057,7 @@ const Slap = {
   },
   async board10() {
     if (!LB.url) return; const box = $('#sgTop'), ol = $('#sgList');
-    try { const r = await fetch(LB.url + '/rest/v1/slap_scores?select=name,score&order=score.desc,created_at.asc&limit=10', { headers: { apikey: LB.key, Authorization: 'Bearer ' + LB.key } });
+    try { const r = await fetch(LB.url + '/rest/v1/slap_scores?select=name,score&order=score.desc,created_at.asc&limit=10', { headers: { apikey: LB.key } });
       const rows = r.ok ? await r.json() : []; ol.innerHTML = rows.length ? rows.map((x) => `<li><span>${esc(x.name)}</span><b>${+x.score}</b></li>`).join('') : '<li>No scores yet. Be the first!</li>'; box.hidden = false;
     } catch (e) { box.hidden = true; }
   },
@@ -2065,7 +2065,7 @@ const Slap = {
     ev.preventDefault(); const n = $('#sgName').value.trim().slice(0, 16), f = $('#sgForm'); if (!n || !this.last) return;
     try { localStorage.setItem('scm.slapName', n); } catch (e) {}
     f.querySelector('button').disabled = true;
-    try { await fetch(LB.url + '/rest/v1/slap_scores', { method: 'POST', headers: { apikey: LB.key, Authorization: 'Bearer ' + LB.key, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ name: n, score: this.last }) }); } catch (e) {}
+    try { await fetch(LB.url + '/rest/v1/slap_scores', { method: 'POST', headers: { apikey: LB.key, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ name: n, score: this.last }) }); } catch (e) {}
     f.hidden = true; f.querySelector('button').disabled = false; this.last = 0; this.board10();
   },
   end() {
