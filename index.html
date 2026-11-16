@@ -1326,7 +1326,6 @@ class Dungeon {
     // Casino
     P('obj_roultable', 7.6, 6.3, 0); this.wheel = P('obj_roulwheel', 7.6, 6.3, 0);
     P('obj_fruitmach', 5.6, 4.4, 30); P('obj_fruitmach', 6.4, 4.3, 0); P('obj_bartable', 9.7, 4.6, 0); P('obj_bartable', 9.6, 8.4, 0); P('barrel1', 5.4, 8.5, 0);
-    this.stay('krefft_gamble_machine', 8.7, 7.4, 200, S('krefft', { who: 'krefft' }));
     // Hatchery
     P('rv_obj_coop', 5.7, 22.6, 0); P('rv_obj_coop', 8.6, 22.6, 0);
     // Treasury: the game's gold
@@ -1369,6 +1368,7 @@ class Dungeon {
     this.stay('orc_idle1', 21.5, 19.9, 0, S('orc', { who: 'orc' }));
     this.stay('reaper_roar', 23.5, 19.8, -10, S('reaper', { who: 'reaper' }), { rate: 0.5 });
     this.stay('garg_idle1', 25.4, 17.9, -35, S('gargoyle', { who: 'gargoyle' }));
+    this.stay('krefft_gamble_machine', 8.7, 7.4, 200, S('krefft', { who: 'krefft' }));
     this.stay('dragon_idle1', 25.3, 14.0, -70, S('dragon', { who: 'dragon' }));
     // Lair: the new creatures asleep in their beds
     this.stay('rv_garg_sleep', 6.2, 14.4, 150, S('gargoyle', { who: 'gargoyle' }));
