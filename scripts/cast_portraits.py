@@ -1,4 +1,4 @@
-"""Creature-panel pictures of the Orc, Quuz's Horned Reaper and the Dragon, made from their own
+"""Creature-panel pictures of the Orc, the Classic Reaper and the Dragon, made from their own
 game files the molynx_portrait way.
 
 Each creature gets the two pictures DK2 gives a keeper creature in GUI\\Creatures\\Evil:

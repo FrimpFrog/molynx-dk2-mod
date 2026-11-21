@@ -1,4 +1,4 @@
-"""Quuz's Horned Reaper (creature 50) as game files: every file DK2's Horny plays, re-encoded onto
+"""The Classic Reaper (creature 50) as game files: every file DK2's Horny plays, re-encoded onto
 the Reaper's body (Soles, 13 Nov 2026: "he goes in the game with vanilla Horny's animations, no
 custom set").
 

@@ -1,4 +1,4 @@
-"""Install the cast (the Orc 49, Quuz's Horned Reaper 50, the Dragon 51, Sejanus 52, the Gargoyle 53) into the MoreCreatures
+"""Install the cast (the Orc 49, the Classic Reaper 50, the Dragon 51, Sejanus 52, the Gargoyle 53) into the MoreCreatures
 folder as it is on Soles' PC, and put the whole cast by Keeper 1's Dungeon Heart on the test map
 "Dead Walking" and the skirmish map "Furnace". Like necro_install, it reads the folder and writes
 only the files that change or are new, in the same layout, into out_dir; nothing is modified in
@@ -592,7 +592,7 @@ def write_lists(report: dict, out_dir: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="Install the Orc, Quuz's Horned Reaper, the Dragon and Sejanus (49-52) "
+    p = argparse.ArgumentParser(description="Install the Orc, the Classic Reaper, the Dragon and Sejanus (49-52) "
                                             "into a MoreCreatures folder, writing only changed and new files.")
     p.add_argument("--base", type=Path, required=True, help="the MoreCreatures folder as installed")
     p.add_argument("--furnace", type=Path, required=True,

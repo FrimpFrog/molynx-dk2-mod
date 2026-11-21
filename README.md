@@ -14,7 +14,7 @@ and written into a Flame resource folder called `MoreCreatures`.
 | 47 | **Molynx**, the rock golem | MegaGlest's Golem/Behemoth, rebuilt for DK2 | Portal: a 5x5 Hatchery and a 5x5 Combat Pit |
 | 48 | **Necromancer** | DK2's Black Knight, reworked | Portal: a Graveyard of 5x5 or more |
 | 49 | **Orc** | DK1's Orc, on DK2's Troll | Test maps for now |
-| 50 | **Classic Reaper** | Quuz's DK1-style Horned Reaper design | Placed only, never through the Portal (in game he is still named "Quuz's Horned Reaper" for now) |
+| 50 | **Classic Reaper** | Quuz's DK1-style Horned Reaper design | Placed only, never through the Portal |
 | 51 | **Dragon** | DK1's Dragon, rebuilt for DK2 | Test maps for now |
 | 52 | **Sejanus**, the demon horse hunter | Original design | Test maps for now |
 | 53 | **Gargoyle** | Original design | Test maps for now |

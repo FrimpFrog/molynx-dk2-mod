@@ -1,4 +1,4 @@
-"""Checks of the cast install (the Orc 49, Quuz's Horned Reaper 50, the Dragon 51; 52 and 53 reserved):
+"""Checks of the cast install (the Orc 49, the Classic Reaper 50, the Dragon 51; 52 and 53 reserved):
 records, Variables, placements by the heart, the checker, and the Reaper's files. Most tests read the
 staged MoreCreatures folder and the built files; they skip when those are not on this machine."""
 import json

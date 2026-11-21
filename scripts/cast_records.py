@@ -131,7 +131,7 @@ ORC = Member(
 )
 
 
-# ------------------------------------------------------------------------------ Quuz's Horned Reaper (50)
+# ------------------------------------------------------------------------------ the Classic Reaper (50)
 
 def _reaper_slots() -> dict:
     from scripts.hreaper_files import HORNY_SLOTS, PREFIX, reaper_stem
@@ -183,7 +183,7 @@ HREAPER_FILL = {
 }
 
 HREAPER = Member(
-    50, "Quuz Horned Reaper", HORNY_ID, "Horny", "HReaper-", _reaper_slots(), True,
+    50, "Classic Reaper", HORNY_ID, "Horny", "HReaper-", _reaper_slots(), True,
     stats={                                  # Horny's in the comments
         "hp": 5400,                          # 6000
         "meleeDamage": 630,                  # 700
@@ -200,8 +200,8 @@ HREAPER = Member(
         "entranceEffectId": 184,             # 0: the Black Knight's portal entrance effect (unused now)
     },
     texts={
-        "name": "Quuz's Horned Reaper",
-        "general": "Quuz's Horned Reaper.  The Reaper of an older age, risen again with a silver scythe.  "
+        "name": "Classic Reaper",
+        "general": "The Classic Reaper.  The Reaper of an older age, risen again with a silver scythe.  "
                    "{26}.  Fighting Style: {27}.",
         "strength": "A storm of horns and steel who never tires: he needs no food and no sleep.",
         "weakness": "Not quite Horny's equal, and the most expensive creature in your dungeon.",
