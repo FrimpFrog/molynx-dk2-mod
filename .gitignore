@@ -1,0 +1,12 @@
+/*
+!/scripts/
+!/tests/
+!/docs/
+!/data/
+!/cinematic/
+!/.gitignore
+__pycache__/
+*.pyc
+!/.github/
+!/flame_patch/
+!/README.md
